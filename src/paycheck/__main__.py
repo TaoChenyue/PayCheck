@@ -130,9 +130,13 @@ def cli():
     log.info("开始聚合统计...")
     data = aggregate(all_transactions)
     s = data["summary"]
-    log.info("  总支出: %,.2f (%d 笔)", s["total_expense"], s["total_count"])
-    log.info("  微信: %,.2f | 支付宝: %,.2f | 银行: %,.2f",
-             s["wechat_total"], s["alipay_total"], s.get("bank_total", 0))
+    total_expense = f"{s['total_expense']:,.2f}"
+    wechat_total = f"{s['wechat_total']:,.2f}"
+    alipay_total = f"{s['alipay_total']:,.2f}"
+    bank_total = f"{s.get('bank_total', 0):,.2f}"
+    log.info("  总支出: %s (%d 笔)", total_expense, s["total_count"])
+    log.info("  微信: %s | 支付宝: %s | 银行: %s",
+             wechat_total, alipay_total, bank_total)
 
     # ── 报表 ──
     log.info("生成报表...")

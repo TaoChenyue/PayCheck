@@ -87,6 +87,7 @@ def setup_logging(
     # 压制 Python 警告
     warnings.filterwarnings("ignore", category=UserWarning, module="paddle")
     warnings.filterwarnings("ignore", category=UserWarning, module="ppocr")
+    warnings.filterwarnings("ignore", message=".*urllib3.*or.*chardet.*doesn't match")
 
     # 压制 PaddlePaddle C++ GLOG（INFO/WARNING 级）
     os.environ.setdefault("GLOG_minloglevel", "2")
