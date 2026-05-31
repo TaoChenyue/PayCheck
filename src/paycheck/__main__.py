@@ -137,6 +137,9 @@ def cli():
     # ── 报表 ──
     log.info("生成报表...")
     html = generate_html(data)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
     log.info("报表已生成: %s", output_path)
