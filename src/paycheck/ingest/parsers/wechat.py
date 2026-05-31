@@ -1,11 +1,14 @@
 """微信 XLSX 账单解析"""
 
+import logging
 import os
 from typing import List
 
 import openpyxl
 
 from paycheck.core.models import Transaction
+
+log = logging.getLogger("paycheck.parser.wechat")
 
 
 HEADER_KEYWORDS = {
@@ -53,14 +56,14 @@ def parse_wechat_xlsx(filepath: str) -> List[Transaction]:
 
     header_idx = _find_header_row(data)
     if header_idx == -1:
-        print(f"  ⚠ 未找到微信账单表头: {os.path.basename(filepath)}")
+        log.warning("未找到微信账单表头: %s", os.path.basename(filepath))
         return []
 
     headers = data[header_idx]
     col_map = _map_columns(headers)
 
     if "time" not in col_map or "amount" not in col_map:
-        print(f"  ⚠ 微信账单关键列缺失: {os.path.basename(filepath)}")
+        log.warning("微信账单关键列缺失: %s", os.path.basename(filepath))
         return []
 
     transactions = []

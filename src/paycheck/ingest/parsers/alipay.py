@@ -1,10 +1,13 @@
 """支付宝 CSV 账单解析（GBK 编码）"""
 
+import logging
 import os
 from typing import List
 
 from paycheck.core.models import Transaction
 from paycheck.ingest.csv_utils import parse_csv_line
+
+log = logging.getLogger("paycheck.parser.alipay")
 
 
 ALIPAY_ENCODINGS = ["gbk", "gb2312", "utf-8", "utf-16-le"]
@@ -59,14 +62,14 @@ def parse_alipay_csv(filepath: str) -> List[Transaction]:
             break
 
     if header_idx == -1:
-        print(f"  ⚠ 未找到支付宝表头行: {os.path.basename(filepath)}")
+        log.warning("未找到支付宝表头行: %s", os.path.basename(filepath))
         return []
 
     headers = parse_csv_line(lines[header_idx])
     col_map = _map_columns(headers)
 
     if "time" not in col_map or "amount" not in col_map:
-        print(f"  ⚠ 支付宝关键列缺失: {os.path.basename(filepath)}")
+        log.warning("支付宝关键列缺失: %s", os.path.basename(filepath))
         return []
 
     transactions = []

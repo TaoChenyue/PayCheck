@@ -1,10 +1,13 @@
 """BOC 银行 CSV 账单解析（OCR 管线产出物）"""
 
+import logging
 import os
 from typing import List
 
 from paycheck.core.models import Transaction
 from paycheck.ingest.csv_utils import parse_csv_line
+
+log = logging.getLogger("paycheck.parser.boc")
 
 
 BANK_CSV_HEADER = ["date", "time", "tx_type", "amount", "counterparty", "channel", "balance", "memo", "tx_name"]
@@ -40,7 +43,7 @@ def parse_boc_csv(filepath: str) -> List[Transaction]:
             col_map[h_lower] = i
 
     if "date" not in col_map and "amount" not in col_map:
-        print(f"  ⚠ BOC CSV 缺少关键列: {os.path.basename(filepath)}")
+        log.warning("BOC CSV 缺少关键列: %s", os.path.basename(filepath))
         return []
 
     transactions = []
