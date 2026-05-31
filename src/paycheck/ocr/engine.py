@@ -6,12 +6,16 @@
 
 import logging
 import time
+import warnings
 from typing import List, Union
 
 import cv2
 import numpy as np
 
 from paycheck.ocr.layouts.base import OCRItem
+
+# 在子进程中提前压制 requests 的版本警告（paddleocr 会触发）
+warnings.filterwarnings("ignore", message=".*urllib3.*or.*chardet.*doesn't match")
 
 log = logging.getLogger("paycheck.ocr")
 
