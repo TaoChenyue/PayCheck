@@ -32,6 +32,11 @@ def _page_worker(args: Tuple[int, str, str, float]) -> Tuple[int, List[Dict[str,
     """
     page_num, pdf_path, layout_name, scale = args
 
+    # 在子进程中提前禁用 MKLDNN（OneDNN），绕过 PaddlePaddle PIR 未实现的 bug
+    import os
+    os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
+    os.environ.setdefault("GLOG_minloglevel", "2")
+
     import cv2
     import fitz
     import numpy as np
