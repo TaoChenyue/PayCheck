@@ -29,13 +29,16 @@ def _get_engine():
     if _ocr is None:
         from paddleocr import PaddleOCR
         log.info("加载 PaddleOCR 模型...")
-        _ocr = PaddleOCR(
-            lang='ch',
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
-            show_log=False,
-        )
+        try:
+            _ocr = PaddleOCR(
+                lang='ch',
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_textline_orientation=False,
+                show_log=False,
+            )
+        except (TypeError, ValueError):
+            _ocr = PaddleOCR(lang='ch')
     return _ocr
 
 
