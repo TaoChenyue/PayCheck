@@ -12,5 +12,8 @@ wheels/
 # Bill data (contains personal financial info)
 resource/
 
+# Runtime logs
+log/
+
 # OpenCode session & workspace state
 .omo/
