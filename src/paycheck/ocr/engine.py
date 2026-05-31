@@ -4,7 +4,7 @@
 输出: list[OCRItem]  — 识别到的文字块及其坐标
 """
 
-import sys
+import logging
 import time
 from typing import List, Union
 
@@ -13,20 +13,24 @@ import numpy as np
 
 from paycheck.ocr.layouts.base import OCRItem
 
+log = logging.getLogger("paycheck.ocr")
+
 
 _ocr = None
 
 
 def _get_engine():
+    """获取 PaddleOCR 引擎（惰性初始化，全局单例）"""
     global _ocr
     if _ocr is None:
         from paddleocr import PaddleOCR
-        print("🔍 加载 PaddleOCR 模型...", file=sys.stderr)
+        log.info("加载 PaddleOCR 模型...")
         _ocr = PaddleOCR(
             lang='ch',
             use_doc_orientation_classify=False,
             use_doc_unwarping=False,
             use_textline_orientation=False,
+            show_log=False,
         )
     return _ocr
 
@@ -49,7 +53,7 @@ def process_image(
     if isinstance(image_input, str):
         img = cv2.imread(image_input)
         if img is None:
-            print(f"  ⚠ 无法读取图像: {image_input}", file=sys.stderr)
+            log.warning("无法读取图像: %s", image_input)
             return []
     else:
         img = image_input
