@@ -48,7 +48,7 @@ class BocLayout(BankLayout):
                 continue
 
             try:
-                raw_amount = float(r.amount)
+                raw_amount = float(r.amount.replace(",", ""))
             except (ValueError, TypeError):
                 continue
 
