@@ -51,7 +51,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ocr.add_argument("--layout", default=None, help="银行布局名称（默认从目录名推断）")
     p_ocr.add_argument("--scale", type=float, default=3.0, help="渲染倍率，需与 pdf2image 一致 (默认 3.0)")
     p_ocr.add_argument("--timeout", type=int, default=120, help="超时分钟数 (默认 120)")
-    p_ocr.add_argument("--preview", action="store_true", help="预览模式: 只处理第一张图，输出 CSV 内容到终端，不写文件")
+    p_ocr.add_argument("--preview", type=str, default=None, metavar="IMAGE",
+                        help="预览模式: 指定图片路径，只处理该张图并输出 CSV 到终端")
     p_ocr.add_argument("--force", action="store_true", help="强制重新 OCR，覆盖已有 CSV")
     p_ocr.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
 
@@ -142,10 +143,14 @@ def _run_image2csv(args) -> None:
         log.error("未找到页面图片 (p*.png) in %s", input_dir)
         sys.exit(1)
 
-    # ── preview 模式：只处理第一张图，输出 CSV 到终端 ──
+    # ── preview 模式：指定图片路径，输出 CSV 到终端，不写文件 ──
     if args.preview:
-        log.info("预览模式: 仅处理第一张图")
-        all_images = all_images[:1]
+        target = os.path.abspath(args.preview)
+        all_images = [img for img in all_images if os.path.abspath(img) == target]
+        if not all_images:
+            log.error("未找到指定图片: %s", args.preview)
+            sys.exit(1)
+        log.info("预览模式: 仅处理指定图片 %s", os.path.basename(target))
 
     # 按父目录名（PDF stem）分组
     groups = {}
