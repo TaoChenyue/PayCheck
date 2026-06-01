@@ -29,6 +29,9 @@ name = "pytorch"
 url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
+[tool.setuptools.package-data]
+paycheck = ["report/template.html"]
+
 [tool.uv.sources]
 paddlepaddle-gpu = { index = "paddle" }
 torch = { index = "pytorch" }
