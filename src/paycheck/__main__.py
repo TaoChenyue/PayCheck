@@ -52,6 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ocr.add_argument("--scale", type=float, default=3.0, help="渲染倍率，需与 pdf2image 一致 (默认 3.0)")
     p_ocr.add_argument("--timeout", type=int, default=120, help="超时分钟数 (默认 120)")
     p_ocr.add_argument("--preview", action="store_true", help="预览模式: 只处理第一张图，输出 CSV 内容到终端，不写文件")
+    p_ocr.add_argument("--force", action="store_true", help="强制重新 OCR，覆盖已有 CSV")
     p_ocr.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
 
     # ── analyse ──
@@ -170,7 +171,7 @@ def _run_image2csv(args) -> None:
         image_paths = [p[1] for p in pages]
         expected_csv = os.path.join(input_dir, f"{base_name}.csv")
 
-        if not args.preview and os.path.isfile(expected_csv):
+        if not args.preview and not args.force and os.path.isfile(expected_csv):
             log.info("  CSV 已存在: %s", os.path.basename(expected_csv))
             ok_count += 1
             continue
@@ -255,7 +256,7 @@ def _run_analyse(args) -> None:
                 log.warning("  [%s] 解析失败: %s — %s", layout_name, os.path.basename(f), e)
 
     if not all_transactions:
-        log.error("未能解析到任何交易记录（PDF 未预处理？先运行 paycheck pdf2csv）")
+        log.error("未能解析到任何交易记录（PDF 未预处理？先运行 paycheck pdf2image + paycheck image2csv）")
         sys.exit(1)
 
     platform_counts = {}
