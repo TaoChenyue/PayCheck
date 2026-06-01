@@ -9,11 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# Bill data (contains personal financial info)
-resource/
-
 # Runtime logs
 log/
+
+# Temp files
+tmp/
 
 # OpenCode session & workspace state
 .omo/

@@ -2,14 +2,15 @@
 name = "paycheck"
 version = "0.2.0"
 description = "个人账单统计工具"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.10, <3.12"
 dependencies = [
-    "opencv-python>=4.13.0.92",
-    "openpyxl>=3.1",
+    "opencv-python",
+    "openpyxl",
     "paddleocr>=3.6.0",
-    "paddlepaddle>=3.3.1",
-    "Pillow>=10",
-    "PyMuPDF>=1.24",
+    "paddlepaddle-gpu",
+    "Pillow",
+    "PyMuPDF",
+    "torch",
 ]
 
 [project.scripts]
@@ -17,3 +18,17 @@ paycheck = "paycheck.__main__:cli"
 
 [tool.uv]
 package = true
+
+[[tool.uv.index]]
+name = "paddle"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle-gpu = { index = "paddle" }
+torch = { index = "pytorch" }
