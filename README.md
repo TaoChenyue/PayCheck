@@ -25,7 +25,6 @@
   - [银行流水 OCR](#银行流水-ocr)
   - [内部转账过滤](#内部转账过滤)
   - [分析维度](#分析维度)
-- [扩展：新增银行](#扩展新增银行)
 - [故障排查](#故障排查)
 - [依赖](#依赖)
 - [许可](#许可)
@@ -42,7 +41,6 @@
 - **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，支持表格自动检测与裁剪
 - **智能过滤** — 自动剔除"充值/提现/零钱"等内部转账，还原真实消费
 - **可视化报表** — ECharts 5 交互式 HTML，含月度趋势、平台对比、类别分布
-- **可扩展** — 新增银行只需实现布局接口 + 注册，无需改动现有代码
 
 ---
 
@@ -90,15 +88,9 @@ uv run paycheck --help
 ## 快速开始
 
 ```bash
-# ---------- 三阶段工作流（推荐，可任意重跑某一步） ----------
-uv run paycheck pdf2image <input_dir>          # ① PDF → 页面图片
-uv run paycheck image2csv <input_dir>/boc/     # ② 图片 → CSV
-uv run paycheck analyse <input_dir>            # ③ 分析 → 报表
-
-# 快捷方式（合并前两步）
-uv run paycheck pdf2image <input_dir>          # ① PDF → 图片
-uv run paycheck image2csv <input_dir>/boc/     # ② 图片 → CSV
-uv run paycheck analyse <input_dir> -o report.html
+uv run paycheck pdf2image <input_dir>          # ① PDF → 裁剪后 PNG
+uv run paycheck image2csv <input_dir>/boc/     # ② OCR → CSV
+uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 ```
 
 **输入目录结构约定**：
