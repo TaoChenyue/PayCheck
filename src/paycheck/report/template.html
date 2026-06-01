@@ -88,6 +88,24 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
 .tag-dropdown-item:last-child{border-bottom:none}
 .tag-dropdown-item:hover{background:#f0f5ff}
 .multi-tag-select{display:inline-flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px}
+.rules-section-header{cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:16px 24px;user-select:none}
+.rules-section-header:hover{background:#fafafa;border-radius:12px}
+.rules-section-header .rules-toggle{font-size:14px;font-weight:600;color:#1a1a2e}
+.rules-section-header .rules-toggle .arrow{display:inline-block;transition:transform 0.2s;margin-right:6px;font-size:12px}
+.rules-section-header .rules-toggle .arrow.open{transform:rotate(90deg)}
+.rules-chip{display:inline-flex;align-items:center;gap:6px;background:#fff7e6;border:1px solid #ffd591;border-radius:12px;padding:2px 12px;font-size:12px;color:#ad4e00}
+.rules-chip .dot{width:6px;height:6px;border-radius:50%;background:#fa8c16}
+.rules-body{padding:16px 24px;border-top:1px solid #f0f0f0}
+.rules-tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8}
+.rules-tab{padding:8px 20px;border:none;background:none;cursor:pointer;font-size:13px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s}
+.rules-tab:hover{color:#333}
+.rules-tab.active{color:#1a1a2e;font-weight:600;border-bottom-color:#1a1a2e}
+.rules-tab .tab-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;vertical-align:middle}
+.rules-tab .tab-dot.warn{background:#fa8c16}
+.rules-tab .tab-dot.empty{background:#d9d9d9}
+.internal-note{background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:10px 16px;margin:12px 0;font-size:13px;color:#ad4e00;display:none}
+.internal-note.show{display:block}
+.internal-note strong{color:#d46b08}
 </style>
 </head>
 <body>
@@ -95,13 +113,53 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
 <header>
   <h1>PayCheck 账单分析报告</h1>
   <p class="period">${PERIOD_START} ~ ${PERIOD_END} · 总账户（微信 + 支付宝 + 银行）</p>
-  <p class="generated">生成于 ${GENERATED_AT}${INTERNAL_HEADER_NOTE}</p>
+  <p class="generated">生成于 ${GENERATED_AT}</p>
 </header>
 
 <div class="cards">
   <div class="card"><div class="card-label">总支出</div><div class="card-value">¥${TOTAL_EXPENSE}</div><div class="card-sub">${TOTAL_COUNT} 笔 · 已剔除内部转账</div></div>
   <div class="card"><div class="card-label">月均支出</div><div class="card-value">¥${MONTHLY_AVG}</div><div class="card-sub">共 ${MONTH_COUNT} 个月</div></div>
   <div class="card clickable" data-target="incomeDetails"><div class="card-label">总收入（参考）</div><div class="card-value">¥${TOTAL_INCOME}</div><div class="card-sub">外部收入 · 不含转账 · 点击展开</div></div>
+</div>
+
+<div class="section" id="rulesSection">
+  <div class="rules-section-header" id="rulesHeader">
+    <span class="rules-toggle"><span class="arrow">▶</span> 内部转账过滤规则</span>
+    <span class="rules-chip" id="rulesChip" style="display:none"><span class="dot"></span><span id="rulesChipText"></span></span>
+  </div>
+  <div class="rules-body" id="rulesBody" style="display:none">
+    <div class="rules-tabs" id="rulesTabs"></div>
+    <div class="f-row">
+      <div class="f-group">
+        <label>字段：</label>
+        <select id="rulesField" class="rules-field-select"></select>
+      </div>
+      <div class="f-group">
+        <label>运算符：</label>
+        <select id="rulesOperator" class="rules-operator-select"></select>
+      </div>
+    </div>
+    <div class="f-row">
+      <div class="f-group" style="flex:1;align-items:flex-start">
+        <label style="padding-top:5px">值：</label>
+        <div class="multi-tag-select" style="flex:1">
+          <div class="tag-input-wrap">
+            <input type="text" id="rulesAddInput" placeholder="输入或选择值…" style="max-width:200px">
+            <div class="tag-dropdown" id="rulesDropdown"></div>
+          </div>
+          <div class="tag-list" id="rulesTags"></div>
+        </div>
+      </div>
+    </div>
+    <div class="f-row">
+      <button class="reset-btn" id="rulesReset">重置为默认规则</button>
+      <button class="page-btn" id="rulesClear">清空全部规则</button>
+    </div>
+    <div class="internal-note" id="internalNote">
+      <strong>⚡ 内部转账已剔除</strong> — 共剔除 <strong id="internalNoteCount">0</strong> 笔，
+      金额合计 <strong id="internalNoteAmount">¥0.00</strong>
+    </div>
+  </div>
 </div>
 
 <div id="incomeDetails" class="section" style="display:none">
@@ -225,7 +283,6 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
   </div>
 </div>
 
-${INTERNAL_NOTE}
 <div class="platform-cards">
   <div class="platform-card wechat"><div class="platform-name">微信支付（真实消费）</div><div class="platform-value">¥${WECHAT_TOTAL}</div><div class="platform-count">${WECHAT_COUNT} 笔</div></div>
   <div class="platform-card alipay"><div class="platform-name">支付宝（真实消费）</div><div class="platform-value">¥${ALIPAY_TOTAL}</div><div class="platform-count">${ALIPAY_COUNT} 笔</div></div>
@@ -270,7 +327,7 @@ ${INTERNAL_NOTE}
 </div>
 
 <footer>
-  <p>PayCheck · 总账户（微信 + 支付宝 + 银行）${FOOTER_NOTE} · ${GENERATED_AT}</p>
+  <p>PayCheck · 总账户（微信 + 支付宝 + 银行） · ${GENERATED_AT}</p>
 </footer>
 </div>
 
@@ -280,9 +337,147 @@ var COLORS = ["#5470c6","#91cc75","#fac858","#ee6666","#73c0de","#3ba272","#fc84
 function fmtNum(n) { return Number(n).toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtYuan(n) { return "¥" + fmtNum(n); }
 
+// ── Rule Engine ──
+var RULES_KEY = 'paycheck_internal_rules';
+var PLATFORM_FIELDS = {
+  wechat: ['category','counterparty','description','payment_method','tx_type'],
+  alipay: ['category','counterparty','description','payment_method','tx_type'],
+  bank: ['category','counterparty','description','payment_method','tx_type','balance','currency','branch','cp_account','cp_bank']
+};
+var PLATFORM_NAMES = { wechat: '微信支付', alipay: '支付宝', bank: '银行账户' };
+var DEFAULT_RULES = {
+  wechat:   { field: 'category', operator: 'contains', values: ['充值','提现','零钱'] },
+  alipay:   { field: 'tx_type', operator: 'equals', values: ['不计收支'] },
+  bank:     { field: 'counterparty', operator: 'contains', values: [] }
+};
+var FIELD_LABELS = {
+  category: '类别', counterparty: '对方账户', description: '备注',
+  payment_method: '支付方式', tx_type: '收/支',
+  balance: '余额', currency: '币别', branch: '网点名称',
+  cp_account: '对方卡号', cp_bank: '对方开户行'
+};
+var OPERATORS = [
+  { value: 'contains', label: '包含' },
+  { value: 'equals', label: '等于' },
+  { value: 'not_contains', label: '不含' },
+  { value: 'not_equals', label: '不等于' },
+  { value: 'starts_with', label: '以…开头' },
+  { value: 'ends_with', label: '以…结尾' },
+  { value: 'is_empty', label: '为空' },
+  { value: 'is_not_empty', label: '非空' }
+];
+
+function loadRules() {
+  try {
+    var saved = localStorage.getItem(RULES_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return { wechat: { field: 'category', operator: 'contains', values: [] },
+           alipay: { field: 'tx_type', operator: 'equals', values: [] },
+           bank: { field: 'counterparty', operator: 'contains', values: [] } };
+}
+
+function saveRules(r) { localStorage.setItem(RULES_KEY, JSON.stringify(r)); }
+
+function applyRule(tx, channelRule) {
+  if (!channelRule || !channelRule.values || channelRule.values.length === 0) return false;
+  var val = tx[channelRule.field];
+  if (channelRule.operator === 'is_empty') return val === undefined || val === null || String(val).trim() === '';
+  if (channelRule.operator === 'is_not_empty') return val !== undefined && val !== null && String(val).trim() !== '';
+  if (val === undefined || val === null) val = '';
+  val = String(val).toLowerCase();
+  var op = channelRule.operator;
+  return channelRule.values.some(function(v) {
+    var mv = String(v).toLowerCase();
+    switch(op) {
+      case 'contains': return val.indexOf(mv) !== -1;
+      case 'equals': return val === mv;
+      case 'not_contains': return val.indexOf(mv) === -1;
+      case 'not_equals': return val !== mv;
+      case 'starts_with': return val.indexOf(mv) === 0;
+      case 'ends_with': return val.slice(-mv.length) === mv;
+    }
+    return false;
+  });
+}
+
+function classify(allTxs, rules) {
+  var internal = [], external = [];
+  (allTxs || []).forEach(function(tx) {
+    var cr = rules[tx.platform];
+    if (applyRule(tx, cr)) internal.push(tx);
+    else external.push(tx);
+  });
+  return { internal: internal, external: external };
+}
+
+// ── Aggregation Engine ──
+function aggregate(txs) {
+  var expenses = txs.filter(function(t){ return t.tx_type === '支出' || t.tx_type === 'pay' || t.tx_type === 'Pay'; });
+  var incomes = txs.filter(function(t){ return t.tx_type === '收入' || t.tx_type === '收款'; });
+  var total_expense = expenses.reduce(function(s,t){ return s + t.amount; }, 0);
+  var total_income = incomes.reduce(function(s,t){ return s + t.amount; }, 0);
+  var total_count = expenses.length;
+
+  // Monthly
+  var monthMap = {};
+  expenses.forEach(function(t){
+    var m = t.time.substring(0,7);
+    if (!monthMap[m]) monthMap[m] = { month: m, expense: 0, count: 0, wechat: 0, alipay: 0, bank: 0 };
+    monthMap[m].expense += t.amount;
+    monthMap[m].count += 1;
+    if (t.platform === 'wechat') monthMap[m].wechat += t.amount;
+    else if (t.platform === 'alipay') monthMap[m].alipay += t.amount;
+    else if (t.platform === 'bank') monthMap[m].bank += t.amount;
+  });
+  var months = Object.keys(monthMap).sort();
+  var monthly = months.map(function(m){ var d = monthMap[m]; return { month: d.month, expense: Math.round(d.expense*100)/100, count: d.count, wechat: Math.round(d.wechat*100)/100, alipay: Math.round(d.alipay*100)/100, bank: Math.round(d.bank*100)/100 }; });
+  var months_count = months.length;
+  var monthly_avg = months_count > 0 ? Math.round(total_expense / months_count * 100) / 100 : 0;
+
+  // Platform
+  var we = expenses.filter(function(t){ return t.platform === 'wechat'; });
+  var ae = expenses.filter(function(t){ return t.platform === 'alipay'; });
+  var be = expenses.filter(function(t){ return t.platform === 'bank'; });
+
+  // Categories
+  var catMap = {};
+  expenses.forEach(function(t){
+    var c = t.category || '未分类';
+    if (!catMap[c]) catMap[c] = { name: c, amount: 0, count: 0 };
+    catMap[c].amount += t.amount;
+    catMap[c].count += 1;
+  });
+  var categories = Object.values(catMap).sort(function(a,b){ return b.amount - a.amount; }).map(function(c){ return { name: c.name, amount: Math.round(c.amount*100)/100, count: c.count, pct: total_expense > 0 ? Math.round(c.amount/total_expense*1000)/10 : 0 }; });
+
+  // Platform monthly
+  var platform_monthly = monthly.map(function(m){ return { month: m.month, wechat: m.wechat, alipay: m.alipay, bank: m.bank }; });
+
+  return {
+    summary: {
+      total_expense: Math.round(total_expense*100)/100,
+      total_income: Math.round(total_income*100)/100,
+      total_count: total_count,
+      monthly_avg: monthly_avg,
+      wechat_total: Math.round(we.reduce(function(s,t){ return s+t.amount; },0)*100)/100,
+      alipay_total: Math.round(ae.reduce(function(s,t){ return s+t.amount; },0)*100)/100,
+      bank_total: Math.round(be.reduce(function(s,t){ return s+t.amount; },0)*100)/100,
+      wechat_count: we.length,
+      alipay_count: ae.length,
+      bank_count: be.length
+    },
+    monthly: monthly,
+    categories: categories,
+    platform_monthly: platform_monthly
+  };
+}
+
+var chartInstances = {};
+
 // Monthly chart
 (function(){
 var chart = echarts.init(document.getElementById("monthlyChart"));
+chartInstances.monthly = chart;
 var mode = "all";
 function update() {
   var vals = DATA.monthly.map(function(m) { return mode === "all" ? m.expense : (mode === "wechat" ? m.wechat : (mode === "alipay" ? m.alipay : m.bank)); });
@@ -301,7 +496,7 @@ document.querySelectorAll("#monthlyFilter button").forEach(function(b) {
     document.querySelectorAll("#monthlyFilter button").forEach(function(x) { x.classList.remove("active"); });
     this.classList.add("active");
     mode = this.dataset.mode;
-    update();
+    refreshAll(mode);
   });
 });
 update();
@@ -325,6 +520,7 @@ cats.forEach(function(c) {
   listEl.appendChild(div);
 });
 var pie = echarts.init(document.getElementById("categoryPie"));
+chartInstances.categoryPie = pie;
 pie.setOption({
   tooltip: { formatter: function(p) { return "<strong>" + p.name + "</strong><br/>金额: " + fmtYuan(p.value) + "<br/>占比: " + p.percent + "%"; } },
   series: [{ type: "pie", radius: ["35%", "65%"], center: ["50%", "50%"],
@@ -335,6 +531,7 @@ pie.setOption({
   }]
 }, true);
 var bar = echarts.init(document.getElementById("categoryBar"));
+chartInstances.categoryBar = bar;
 bar.setOption({
   tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, formatter: function(p) { return "<strong>" + p[0].name + "</strong><br/>" + p[0].marker + " " + fmtYuan(p[0].value) + " (" + (cats.find(function(c) { return c.name === p[0].name; })?.pct || 0) + "%)"; } },
   grid: { left: 10, right: 80, top: 10, bottom: 10 },
@@ -726,6 +923,7 @@ init();
 (function(){
 if (!DATA.platform_monthly || DATA.platform_monthly.length === 0) return;
 var chart = echarts.init(document.getElementById("platformChart"));
+chartInstances.platform = chart;
 chart.setOption({
   tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, formatter: function(p) {
     var h = "<strong>" + p[0].axisValue + "</strong><br/>";
@@ -744,6 +942,285 @@ chart.setOption({
 }, true);
 window.addEventListener("resize", function() { chart.resize(); });
 })();
+
+// ── Dynamic refresh system ──
+var rules = loadRules();
+
+function getStats() {
+  var classified = classify(DATA.all_transactions || [], rules);
+  var stats = aggregate(classified.external);
+  stats.internal_count = classified.internal.length;
+  stats.internal_total = Math.round(classified.internal.reduce(function(s,t){ return s + t.amount; },0)*100)/100;
+  return stats;
+}
+
+function refreshAllCards(stats) {
+  var s = stats.summary;
+  var cards = document.querySelectorAll('.cards .card');
+  if (cards.length >= 3) {
+    cards[0].querySelector('.card-value').textContent = fmtYuan(s.total_expense);
+    cards[0].querySelector('.card-sub').textContent = s.total_count + ' 笔 · 已剔除内部转账';
+    cards[1].querySelector('.card-value').textContent = fmtYuan(s.monthly_avg);
+    cards[2].querySelector('.card-value').textContent = fmtYuan(s.total_income);
+  }
+  var pcards = document.querySelectorAll('.platform-card');
+  if (pcards.length >= 3) {
+    pcards[0].querySelector('.platform-value').textContent = fmtYuan(s.wechat_total);
+    pcards[0].querySelector('.platform-count').textContent = s.wechat_count + ' 笔';
+    pcards[1].querySelector('.platform-value').textContent = fmtYuan(s.alipay_total);
+    pcards[1].querySelector('.platform-count').textContent = s.alipay_count + ' 笔';
+    pcards[2].querySelector('.platform-value').textContent = fmtYuan(s.bank_total);
+    pcards[2].querySelector('.platform-count').textContent = s.bank_count + ' 笔';
+  }
+  var noteEl = document.getElementById('internalNote');
+  if (noteEl) {
+    if (stats.internal_count > 0) {
+      noteEl.classList.add('show');
+      document.getElementById('internalNoteCount').textContent = stats.internal_count;
+      document.getElementById('internalNoteAmount').textContent = fmtYuan(stats.internal_total);
+    } else {
+      noteEl.classList.remove('show');
+    }
+  }
+  var mtbody = document.querySelector('.section .table-wrap tbody');
+  if (mtbody) {
+    var mhtml = '';
+    stats.monthly.forEach(function(m) {
+      var wc = m.wechat > 0 ? fmtYuan(m.wechat) : '-';
+      var ac = m.alipay > 0 ? fmtYuan(m.alipay) : '-';
+      var bc = m.bank > 0 ? fmtYuan(m.bank) : '-';
+      mhtml += '<tr><td>' + m.month + '</td><td>' + m.count + '</td><td>' + fmtYuan(m.expense) + '</td><td>' + wc + '</td><td>' + ac + '</td><td>' + bc + '</td></tr>';
+    });
+    mtbody.innerHTML = mhtml;
+  }
+}
+
+function refreshCharts(stats, mode) {
+  mode = mode || 'all';
+  var mc = chartInstances.monthly;
+  if (mc) {
+    var vals = stats.monthly.map(function(m) {
+      return mode === 'all' ? m.expense : (mode === 'wechat' ? m.wechat : (mode === 'alipay' ? m.alipay : m.bank));
+    });
+    mc.setOption({
+      xAxis: { data: stats.monthly.map(function(m){ return m.month; }) },
+      series: [{ data: vals }]
+    });
+  }
+  if (chartInstances.categoryPie && stats.categories.length > 0) {
+    chartInstances.categoryPie.setOption({
+      series: [{ data: stats.categories.map(function(c){ return { name: c.name, value: c.amount }; }) }]
+    });
+  }
+  if (chartInstances.categoryBar && stats.categories.length > 0) {
+    chartInstances.categoryBar.setOption({
+      yAxis: { data: stats.categories.map(function(c){ return c.name; }).reverse() },
+      series: [{ data: stats.categories.map(function(c){ return c.amount; }).reverse() }]
+    });
+    var listEl = document.getElementById('categoryList');
+    if (listEl && stats.categories.length > 0) {
+      var h = '';
+      stats.categories.forEach(function(c,i) {
+        var color = COLORS[i % COLORS.length];
+        h += '<div class="category-item"><span class="cat-dot" style="background:' + color + '"></span><span class="cat-name">' + c.name + '</span><span class="cat-amount">' + fmtYuan(c.amount) + '</span><span class="cat-pct">' + c.pct + '%</span></div>';
+      });
+      listEl.innerHTML = h;
+    }
+  }
+  if (chartInstances.platform) {
+    chartInstances.platform.setOption({
+      series: [
+        { data: stats.platform_monthly.map(function(d){ return d.wechat; }) },
+        { data: stats.platform_monthly.map(function(d){ return d.alipay; }) },
+        { data: stats.platform_monthly.map(function(d){ return d.bank; }) }
+      ]
+    });
+  }
+}
+
+function refreshAll(mode) {
+  var stats = getStats();
+  refreshAllCards(stats);
+  refreshCharts(stats, mode);
+  updateRulesUI();
+}
+
+// ── Rules UI ──
+var rulesBody = document.getElementById('rulesBody');
+var rulesHeader = document.getElementById('rulesHeader');
+var rulesTabs = document.getElementById('rulesTabs');
+var rulesField = document.getElementById('rulesField');
+var rulesOperator = document.getElementById('rulesOperator');
+var rulesTags = document.getElementById('rulesTags');
+var rulesAddInput = document.getElementById('rulesAddInput');
+var rulesDropdown = document.getElementById('rulesDropdown');
+var rulesChip = document.getElementById('rulesChip');
+var rulesChipText = document.getElementById('rulesChipText');
+var curRulesTab = 'wechat';
+
+function getFieldValues(platform, field) {
+  var set = {};
+  (DATA.all_transactions || []).forEach(function(t) {
+    if (t.platform === platform && t[field]) set[t[field]] = true;
+  });
+  return Object.keys(set).sort();
+}
+
+function updateRulesChip() {
+  var totalVals = 0;
+  ['wechat','alipay','bank'].forEach(function(p){ totalVals += (rules[p] && rules[p].values ? rules[p].values.length : 0); });
+  if (totalVals > 0) {
+    rulesChip.style.display = 'inline-flex';
+    rulesChipText.textContent = totalVals + ' 个值生效中';
+  } else {
+    rulesChip.style.display = 'none';
+  }
+}
+
+function updateRulesUI() {
+  updateRulesChip();
+  var tabsHtml = '';
+  ['wechat','alipay','bank'].forEach(function(p){
+    var r = rules[p] || {};
+    var count = r.values ? r.values.length : 0;
+    var active = p === curRulesTab ? ' active' : '';
+    var dotClass = count > 0 ? 'warn' : 'empty';
+    tabsHtml += '<button class="rules-tab' + active + '" data-platform="' + p + '"><span class="tab-dot ' + dotClass + '"></span>' + PLATFORM_NAMES[p] + '</button>';
+  });
+  rulesTabs.innerHTML = tabsHtml;
+  rulesTabs.querySelectorAll('.rules-tab').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      curRulesTab = this.dataset.platform;
+      updateRulesUI();
+    });
+  });
+
+  var fields = PLATFORM_FIELDS[curRulesTab] || [];
+  var curRule = rules[curRulesTab] || {};
+  rulesField.innerHTML = fields.map(function(f){
+    return '<option value="' + f + '"' + (f === curRule.field ? ' selected' : '') + '>' + (FIELD_LABELS[f] || f) + '</option>';
+  }).join('');
+
+  rulesOperator.innerHTML = OPERATORS.map(function(o){
+    return '<option value="' + o.value + '"' + (o.value === curRule.operator ? ' selected' : '') + '>' + o.label + '</option>';
+  }).join('');
+
+  var vals = curRule.values || [];
+  rulesTags.innerHTML = vals.map(function(v){
+    return '<span class="tag">' + v + '<span class="tag-remove" data-value="' + v.replace(/"/g,'&quot;') + '">×</span></span>';
+  }).join('');
+  rulesTags.querySelectorAll('.tag-remove').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var idx = (rules[curRulesTab].values || []).indexOf(this.dataset.value);
+      if (idx > -1) { rules[curRulesTab].values.splice(idx, 1); }
+      saveRules(rules);
+      updateRulesUI();
+      refreshAll();
+    });
+  });
+
+  rulesAddInput.value = '';
+  rulesDropdown.style.display = 'none';
+}
+
+rulesField.addEventListener('change', function() {
+  if (!rules[curRulesTab]) return;
+  rules[curRulesTab].field = this.value;
+  rules[curRulesTab].values = [];
+  saveRules(rules);
+  refreshAll();
+  updateRulesUI();
+});
+
+rulesOperator.addEventListener('change', function() {
+  if (!rules[curRulesTab]) return;
+  rules[curRulesTab].operator = this.value;
+  saveRules(rules);
+  refreshAll();
+  updateRulesUI();
+});
+
+function renderRulesTagDropdown() {
+  var inputEl = document.getElementById('rulesAddInput');
+  var dropdownEl = document.getElementById('rulesDropdown');
+  var cr = rules[curRulesTab] || {};
+  var field = cr.field || 'category';
+  var selectedArr = cr.values || [];
+  var val = inputEl.value.trim();
+  var allVals = [];
+  var set = {};
+  (DATA.all_transactions || []).forEach(function(t) {
+    if (t.platform === curRulesTab && t[field]) set[t[field]] = true;
+  });
+  allVals = Object.keys(set).sort();
+  var filtered = val
+    ? allVals.filter(function(v) { return v.indexOf(val) !== -1 && selectedArr.indexOf(v) === -1; })
+    : allVals.filter(function(v) { return selectedArr.indexOf(v) === -1; });
+  if (filtered.length === 0) { dropdownEl.style.display = 'none'; return; }
+  var html = '';
+  filtered.slice(0, 20).forEach(function(v) {
+    html += '<div class="tag-dropdown-item">' + v + '</div>';
+  });
+  dropdownEl.innerHTML = html;
+  dropdownEl.style.display = 'block';
+  dropdownEl.querySelectorAll('.tag-dropdown-item').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var v = this.textContent;
+      if (selectedArr.indexOf(v) === -1) selectedArr.push(v);
+      inputEl.value = '';
+      dropdownEl.style.display = 'none';
+      saveRules(rules);
+      updateRulesUI();
+      refreshAll();
+    });
+  });
+}
+
+rulesAddInput.addEventListener('input', function() {
+  renderRulesTagDropdown();
+});
+rulesAddInput.addEventListener('focus', function() {
+  renderRulesTagDropdown();
+});
+rulesAddInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') document.getElementById('rulesDropdown').style.display = 'none';
+});
+
+rulesHeader.addEventListener('click', function() {
+  var body = rulesBody;
+  var arrow = this.querySelector('.arrow');
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    arrow.classList.add('open');
+  } else {
+    body.style.display = 'none';
+    arrow.classList.remove('open');
+  }
+});
+
+document.getElementById('rulesReset').addEventListener('click', function() {
+  rules = JSON.parse(JSON.stringify(DEFAULT_RULES));
+  saveRules(rules);
+  refreshAll();
+  updateRulesUI();
+});
+
+document.getElementById('rulesClear').addEventListener('click', function() {
+  ['wechat','alipay','bank'].forEach(function(p){
+    rules[p] = { field: rules[p] ? rules[p].field : 'category', operator: rules[p] ? rules[p].operator : 'contains', values: [] };
+  });
+  saveRules(rules);
+  refreshAll();
+  updateRulesUI();
+});
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.tag-input-wrap')) {
+    document.getElementById('rulesDropdown').style.display = 'none';
+  }
+});
+
+updateRulesUI();
 </script>
 </body>
 </html>

@@ -5,13 +5,12 @@ from collections import defaultdict
 from typing import List, Dict
 
 from paycheck.core.models import Transaction
-from paycheck.analysis.filters import separate_internal
 
 
-def compute_stats(external_txs: List[Dict]) -> Dict:
-    """对一组外部交易计算通用统计量"""
-    expenses = [t for t in external_txs if t["tx_type_norm"] == "支出"]
-    incomes = [t for t in external_txs if t["tx_type_norm"] == "收入"]
+def compute_stats(txs: List[Dict]) -> Dict:
+    """对一组交易计算通用统计量"""
+    expenses = [t for t in txs if t["tx_type_norm"] == "支出"]
+    incomes = [t for t in txs if t["tx_type_norm"] == "收入"]
 
     total_expense = sum(t["amount"] for t in expenses)
     total_income = sum(t["amount"] for t in incomes)
@@ -104,10 +103,9 @@ def aggregate(transactions: List[Transaction]) -> Dict:
                 "total_expense": 0, "total_income": 0, "total_count": 0, "monthly_avg": 0,
                 "wechat_total": 0, "alipay_total": 0, "bank_total": 0,
                 "wechat_count": 0, "alipay_count": 0, "bank_count": 0,
-                "internal_total": 0, "internal_count": 0,
-                "internal_wechat": 0, "internal_alipay": 0,
             },
             "monthly": [], "categories": [], "platform_monthly": [], "income_details": [],
+            "all_transactions": [],
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -147,16 +145,29 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "tx_type_norm": tx_type_map.get(t.tx_type, "支出"),
         })
 
-    # 分离内部转账
-    internal_txs, external_txs = separate_internal(parsed)
+    # 前端可用的全量交易列表（不含内部字段 dt/month/tx_type_norm）
+    all_transactions = [
+        {
+            "platform": t["platform"],
+            "time": t["time"],
+            "category": t["category"],
+            "counterparty": t["counterparty"],
+            "description": t["description"],
+            "amount": t["amount"],
+            "tx_type": t["tx_type"],
+            "payment_method": t["payment_method"],
+            "balance": t["balance"],
+            "currency": t["currency"],
+            "branch": t["branch"],
+            "cp_account": t["cp_account"],
+            "cp_bank": t["cp_bank"],
+        }
+        for t in parsed
+    ]
 
-    ext = compute_stats(external_txs)
-
-    # 内部转账统计
-    internal_exp = [t for t in internal_txs if t["tx_type_norm"] == "支出"]
-    internal_total = sum(t["amount"] for t in internal_exp)
-    internal_wechat = sum(t["amount"] for t in internal_exp if t["platform"] == "wechat")
-    internal_alipay = sum(t["amount"] for t in internal_exp if t["platform"] == "alipay")
+    # 统计计算
+    stats_input = parsed
+    ext = compute_stats(stats_input)
 
     # 收入明细
     income_details = [
@@ -174,7 +185,7 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "cp_account": t["cp_account"],
             "cp_bank": t["cp_bank"],
         }
-        for t in external_txs
+        for t in stats_input
         if t["tx_type_norm"] == "收入"
     ]
     # 按时间排序
@@ -196,14 +207,11 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "wechat_count": ext["wechatCount"],
             "alipay_count": ext["alipayCount"],
             "bank_count": ext["bankCount"],
-            "internal_total": round(internal_total, 2),
-            "internal_count": len(internal_exp),
-            "internal_wechat": round(internal_wechat, 2),
-            "internal_alipay": round(internal_alipay, 2),
         },
         "monthly": ext["monthlyData"],
         "categories": ext["categories"],
         "platform_monthly": ext["platformMonthly"],
         "income_details": income_details,
+        "all_transactions": all_transactions,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
