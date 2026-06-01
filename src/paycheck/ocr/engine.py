@@ -32,6 +32,16 @@ def _get_engine():
         os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
 
         from paddleocr import PaddleOCR
+
+        # PaddleX 内部有自己的一套日志（"paddlex" logger），
+        # 默认自建彩色 stderr handler、propagate=False。
+        # 这里接管：清掉 PaddleX 自己的 handler，让它往根日志器走，
+        # 这样 PaddleX 的 Creating model / WARNING 等日志就受
+        # paycheck 的日志系统控制（文件日志始终记录，控制台仅 --verbose）。
+        _paddlex_log = logging.getLogger("paddlex")
+        _paddlex_log.handlers.clear()
+        _paddlex_log.propagate = True
+
         log.info("加载 PaddleOCR 模型...")
 
         # 禁用 MKLDNN 绕过 PaddlePaddle PIR bug
@@ -44,11 +54,15 @@ def _get_engine():
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=False,
-                show_log=False,
             )
         except (TypeError, ValueError):
             _ocr = PaddleOCR(lang='ch')
     return _ocr
+
+
+def warmup_engine():
+    """预加载 OCR 模型，避免在进度条出现后才开始加载"""
+    _get_engine()
 
 
 def process_image(
