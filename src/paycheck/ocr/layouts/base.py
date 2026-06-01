@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+import numpy as np
 from PIL import Image
 
 
@@ -37,7 +38,7 @@ class BankLayout(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
-        """布局名称，与 resource/ 下的子目录名一致"""
+        """布局名称，与输入目录下的子目录名一致"""
 
     @property
     @abstractmethod
@@ -78,31 +79,31 @@ class BankLayout(ABC):
 # =========================================================================
 
 def find_table_bounds(pil_image: Image.Image) -> BBox:
-    """检测图像中最大的连续深色内容块（表格区域）"""
+    """检测图像中最大的连续深色内容块（表格区域）
+
+    使用 numpy 向量化计算，比纯 Python 逐像素循环快 ~10x。
+    """
     width, height = pil_image.size
-    pixels = pil_image.load()
 
-    DARK_BRIGHTNESS = 220
-    MIN_CONTENT = max(10, width * 0.02)
+    # 转灰度亮度矩阵 [H, W]
+    arr = np.array(pil_image, dtype=np.uint8)
+    brightness = arr.astype(np.float32).mean(axis=2)
+
+    DARK = 220
     MAX_GAP = 5
+    MIN_CONTENT = max(10, width * 0.02)
+    MIN_COL = max(5, height * 0.005)
 
-    # 逐行统计深色像素
-    is_content = [0] * height
-    for y in range(height):
-        dark_count = 0
-        for x in range(width):
-            r, g, b = pixels[x, y][:3]
-            brightness = (r + g + b) / 3
-            if brightness < DARK_BRIGHTNESS:
-                dark_count += 1
-        is_content[y] = 1 if dark_count > MIN_CONTENT else 0
+    # 逐行扫描：统计每行深色像素数
+    dark_per_row = (brightness < DARK).sum(axis=1)
+    content_rows = dark_per_row > MIN_CONTENT
 
-    # 合并相邻行形成块
+    # 合并相邻内容行形成块
     blocks = []
     start = -1
     empty_run = 0
     for y in range(height):
-        if is_content[y]:
+        if content_rows[y]:
             if start == -1:
                 start = y
                 empty_run = 0
@@ -121,37 +122,19 @@ def find_table_bounds(pil_image: Image.Image) -> BBox:
     if not blocks:
         return (0, height, 0, width)
 
-    # 取最大块
+    # 取最大块作为表格区域
     table = max(blocks, key=lambda b: b[1] - b[0])
+    t, b = table
 
-    # 水平边界
-    MIN_COL = max(5, height * 0.005)
-    left, right = 0, width - 1
-    for x in range(width):
-        dark_count = 0
-        for y in range(table[0], table[1] + 1):
-            r, g, b = pixels[x, y][:3]
-            brightness = (r + g + b) / 3
-            if brightness < DARK_BRIGHTNESS:
-                dark_count += 1
-        if dark_count > MIN_COL:
-            left = x
-            break
-    for x in range(width - 1, -1, -1):
-        dark_count = 0
-        for y in range(table[0], table[1] + 1):
-            r, g, b = pixels[x, y][:3]
-            brightness = (r + g + b) / 3
-            if brightness < DARK_BRIGHTNESS:
-                dark_count += 1
-        if dark_count > MIN_COL:
-            right = x
-            break
+    # 水平边界：在表格行范围内逐列统计深色像素
+    col_dark = (brightness[t : b + 1, :] < DARK).sum(axis=0)
+    left = int((col_dark > MIN_COL).argmax())
+    right = int(width - 1 - (col_dark[::-1] > MIN_COL).argmax())
 
     pad = 4
     return (
-        max(0, table[0] - pad),
-        min(height, table[1] + pad),
+        max(0, t - pad),
+        min(height, b + pad),
         max(0, left - pad),
         min(width, right + pad),
     )
