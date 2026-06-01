@@ -116,15 +116,16 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 .page-info{{font-size:13px;color:#666;min-width:60px;text-align:center}}
 .page-size-select{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;cursor:pointer;background:#fff}}
 .page-size-select:focus{{outline:none;border-color:#1a1a2e}}
-.income-date-filter{{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}}
-.income-date-filter label{{font-size:13px;color:#666}}
-.income-date-filter input[type=date]{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;font-family:inherit}}
-.income-date-filter input[type=date]:focus{{outline:none;border-color:#1a1a2e}}
-.income-date-filter .reset-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s}}
-.income-date-filter .reset-btn:hover{{border-color:#1a1a2e;color:#1a1a2e}}
-.income-filter-row th{{padding:4px 6px!important;border-bottom:1px solid #e8e8e8!important}}
-.income-filter-input{{width:100%;padding:4px 6px;border:1px solid #e8e8e8;border-radius:3px;font-size:12px;box-sizing:border-box;font-family:inherit}}
-.income-filter-input:focus{{outline:none;border-color:#1a1a2e}}
+.income-filters{{background:#fafafa;border-radius:8px;padding:12px;margin-bottom:12px}}
+.income-filters .f-row{{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px}}
+.income-filters .f-row:last-child{{margin-bottom:0}}
+.income-filters .f-group{{display:flex;align-items:center;gap:6px}}
+.income-filters label{{font-size:13px;color:#666;white-space:nowrap}}
+.income-filters input[type=date],.income-filters input[type=number],.income-filters input[type=text]{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;font-family:inherit;max-width:160px}}
+.income-filters input[type=number]{{max-width:110px}}
+.income-filters input:focus{{outline:none;border-color:#1a1a2e}}
+.income-filters .reset-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s;margin-left:auto}}
+.income-filters .reset-btn:hover{{border-color:#1a1a2e;color:#1a1a2e}}
 </style>
 </head>
 <body>
@@ -147,12 +148,40 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 <div id="incomeDetails" class="section" style="display:none">
   <h2>💰 收入详情</h2>
   <div class="income-tabs" id="incomeTabs"></div>
-  <div class="income-date-filter">
-    <label>时间筛选：</label>
-    <input type="date" id="filterDateStart">
-    <span>—</span>
-    <input type="date" id="filterDateEnd">
-    <button class="reset-btn" id="filterReset">重置</button>
+  <div class="income-filters" id="incomeFilters">
+    <div class="f-row">
+      <div class="f-group">
+        <label>时间：</label>
+        <input type="date" id="filterDateStart">
+        <span>—</span>
+        <input type="date" id="filterDateEnd">
+      </div>
+      <div class="f-group">
+        <label>金额：</label>
+        <input type="number" id="filterAmountMin" placeholder="最小值" min="0" step="0.01">
+        <span>—</span>
+        <input type="number" id="filterAmountMax" placeholder="最大值" min="0" step="0.01">
+      </div>
+      <button class="reset-btn" id="filterReset">重置</button>
+    </div>
+    <div class="f-row">
+      <div class="f-group">
+        <label>类别：</label>
+        <input type="text" id="filterCategory" placeholder="筛选类别..." style="max-width:120px">
+      </div>
+      <div class="f-group">
+        <label>对方账户：</label>
+        <input type="text" id="filterCounterparty" placeholder="筛选对方..." style="max-width:140px">
+      </div>
+      <div class="f-group">
+        <label>备注：</label>
+        <input type="text" id="filterDescription" placeholder="筛选备注..." style="max-width:140px">
+      </div>
+      <div class="f-group">
+        <label>支付方式：</label>
+        <input type="text" id="filterPaymentMethod" placeholder="筛选方式..." style="max-width:120px">
+      </div>
+    </div>
   </div>
   <div id="incomeContent"></div>
   <div class="income-pagination" id="incomePagination">
@@ -307,15 +336,24 @@ var pageNextEl = document.getElementById("pageNext");
 var pageSizeEl = document.getElementById("pageSizeSelect");
 var dateStartEl = document.getElementById("filterDateStart");
 var dateEndEl = document.getElementById("filterDateEnd");
+var amountMinEl = document.getElementById("filterAmountMin");
+var amountMaxEl = document.getElementById("filterAmountMax");
+var filterCategoryEl = document.getElementById("filterCategory");
+var filterCounterpartyEl = document.getElementById("filterCounterparty");
+var filterDescriptionEl = document.getElementById("filterDescription");
+var filterPaymentMethodEl = document.getElementById("filterPaymentMethod");
 var resetBtn = document.getElementById("filterReset");
 var curPlatform = null;
 var curPage = 1;
 var pageSize = 10;
 var dateStart = null;
 var dateEnd = null;
-var colFilters = {{ time: "", amount: "", category: "", counterparty: "", description: "", payment_method: "" }};
-
-function esc(v) {{ return String(v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }}
+var amountMin = null;
+var amountMax = null;
+var fCategory = "";
+var fCounterparty = "";
+var fDescription = "";
+var fPaymentMethod = "";
 
 function getActivePlatforms() {{
   return PLATFORM_ORDER.filter(function(p) {{ return allItems.some(function(t) {{ return t.platform === p; }}); }});
@@ -324,16 +362,14 @@ function getActivePlatforms() {{
 function getFiltered() {{
   return allItems.filter(function(t) {{
     if (t.platform !== curPlatform) return false;
-    // 日期范围
     if (dateStart && t.time < dateStart) return false;
     if (dateEnd && t.time > dateEnd + " 23:59:59") return false;
-    // 列过滤
-    if (colFilters.time && !t.time.includes(colFilters.time)) return false;
-    if (colFilters.amount && !String(t.amount).includes(colFilters.amount)) return false;
-    if (colFilters.category && !(t.category || "").includes(colFilters.category)) return false;
-    if (colFilters.counterparty && !(t.counterparty || "").includes(colFilters.counterparty)) return false;
-    if (colFilters.description && !(t.description || "").includes(colFilters.description)) return false;
-    if (colFilters.payment_method && !(t.payment_method || "").includes(colFilters.payment_method)) return false;
+    if (amountMin !== null && t.amount < amountMin) return false;
+    if (amountMax !== null && t.amount > amountMax) return false;
+    if (fCategory && !(t.category || "").includes(fCategory)) return false;
+    if (fCounterparty && !(t.counterparty || "").includes(fCounterparty)) return false;
+    if (fDescription && !(t.description || "").includes(fDescription)) return false;
+    if (fPaymentMethod && !(t.payment_method || "").includes(fPaymentMethod)) return false;
     return true;
   }});
 }}
@@ -351,13 +387,9 @@ function renderTable() {{
   }} else {{
     var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
       '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
-    h += '<div class="table-wrap"><table><thead>';
-    h += '<tr><th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th></tr>';
-    h += '<tr class="income-filter-row">';
-    ["time","amount","category","counterparty","description","payment_method"].forEach(function(k) {{
-      h += '<th><input class="income-filter-input" data-col="' + k + '" placeholder="筛选..." value="' + esc(colFilters[k]) + '"></th>';
-    }});
-    h += '</tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead><tr>' +
+      '<th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th>' +
+      '</tr></thead><tbody>';
     pageItems.forEach(function(t) {{
       h += '<tr><td>' + t.time + '</td><td style="color:#389e0d;font-weight:600">' + fmtYuan(t.amount) +
         '</td><td>' + (t.category || "-") + '</td><td>' + (t.counterparty || "-") +
@@ -365,14 +397,6 @@ function renderTable() {{
     }});
     h += '</tbody></table></div>';
     contentEl.innerHTML = h;
-    // 绑定列过滤输入
-    contentEl.querySelectorAll(".income-filter-input").forEach(function(inp) {{
-      inp.addEventListener("input", function() {{
-        colFilters[this.dataset.col] = this.value;
-        curPage = 1;
-        renderTable();
-      }});
-    }});
   }}
 
   pageInfoEl.textContent = curPage + " / " + totalPages;
@@ -409,11 +433,14 @@ function renderTabs() {{
 }}
 
 function resetFilters() {{
-  dateStart = null;
-  dateEnd = null;
-  dateStartEl.value = "";
-  dateEndEl.value = "";
-  colFilters = {{ time: "", amount: "", category: "", counterparty: "", description: "", payment_method: "" }};
+  dateStart = null; dateStartEl.value = "";
+  dateEnd = null; dateEndEl.value = "";
+  amountMin = null; amountMinEl.value = "";
+  amountMax = null; amountMaxEl.value = "";
+  fCategory = ""; filterCategoryEl.value = "";
+  fCounterparty = ""; filterCounterpartyEl.value = "";
+  fDescription = ""; filterDescriptionEl.value = "";
+  fPaymentMethod = ""; filterPaymentMethodEl.value = "";
 }}
 
 function init() {{
@@ -451,22 +478,16 @@ function init() {{
     renderTable();
   }});
 
-  // 日期筛选
-  dateStartEl.addEventListener("change", function() {{
-    dateStart = this.value || null;
-    curPage = 1;
-    renderTable();
-  }});
-  dateEndEl.addEventListener("change", function() {{
-    dateEnd = this.value || null;
-    curPage = 1;
-    renderTable();
-  }});
-  resetBtn.addEventListener("click", function() {{
-    resetFilters();
-    curPage = 1;
-    renderTable();
-  }});
+  // 筛选事件
+  dateStartEl.addEventListener("change", function() {{ dateStart = this.value || null; curPage = 1; renderTable(); }});
+  dateEndEl.addEventListener("change", function() {{ dateEnd = this.value || null; curPage = 1; renderTable(); }});
+  amountMinEl.addEventListener("input", function() {{ amountMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); }});
+  amountMaxEl.addEventListener("input", function() {{ amountMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); }});
+  filterCategoryEl.addEventListener("input", function() {{ fCategory = this.value; curPage = 1; renderTable(); }});
+  filterCounterpartyEl.addEventListener("input", function() {{ fCounterparty = this.value; curPage = 1; renderTable(); }});
+  filterDescriptionEl.addEventListener("input", function() {{ fDescription = this.value; curPage = 1; renderTable(); }});
+  filterPaymentMethodEl.addEventListener("input", function() {{ fPaymentMethod = this.value; curPage = 1; renderTable(); }});
+  resetBtn.addEventListener("click", function() {{ resetFilters(); curPage = 1; renderTable(); }});
 }}
 
 init();
