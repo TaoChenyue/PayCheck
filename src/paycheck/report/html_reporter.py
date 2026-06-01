@@ -66,6 +66,9 @@ header .generated{{font-size:13px;color:#999;margin-top:2px}}
 .card .card-label{{font-size:14px;color:#888}}
 .card .card-value{{font-size:28px;font-weight:700;color:#1a1a2e;margin-top:4px}}
 .card .card-sub{{font-size:13px;color:#999;margin-top:2px}}
+.card.clickable{{cursor:pointer;transition:transform 0.15s,box-shadow 0.15s}}
+.card.clickable:hover{{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}}
+.card.clickable:active{{transform:translateY(0)}}
 .platform-cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}}
 .platform-card{{border-radius:12px;padding:24px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);color:#fff}}
 .platform-card.wechat{{background:linear-gradient(135deg,#07c160,#06ad56)}}
@@ -100,6 +103,19 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 .category-item .cat-amount{{font-size:14px;font-weight:600}}
 .category-item .cat-pct{{font-size:13px;color:#999;margin-left:8px}}
 .chart-inline{{display:inline-block;vertical-align:top}}
+.income-tabs{{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8}}
+.income-tab{{padding:10px 24px;border:none;background:none;cursor:pointer;font-size:14px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s}}
+.income-tab:hover{{color:#333}}
+.income-tab.active{{color:#1a1a2e;font-weight:600;border-bottom-color:#1a1a2e}}
+.income-tab .tab-count{{font-weight:400;font-size:12px;color:#999;margin-left:4px}}
+.income-pagination{{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #f0f0f0}}
+.income-page-controls{{display:flex;align-items:center;gap:8px}}
+.page-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:14px;transition:all 0.2s}}
+.page-btn:hover:not(:disabled){{border-color:#1a1a2e;color:#1a1a2e}}
+.page-btn:disabled{{opacity:0.4;cursor:not-allowed}}
+.page-info{{font-size:13px;color:#666;min-width:60px;text-align:center}}
+.page-size-select{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;cursor:pointer;background:#fff}}
+.page-size-select:focus{{outline:none;border-color:#1a1a2e}}
 </style>
 </head>
 <body>
@@ -116,8 +132,27 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 <div class="cards">
   <div class="card"><div class="card-label">总支出</div><div class="card-value">¥""" + _fmt_num(s["total_expense"]) + f"""</div><div class="card-sub">{s["total_count"]} 笔 · 已剔除内部转账</div></div>
   <div class="card"><div class="card-label">月均支出</div><div class="card-value">¥""" + _fmt_num(s["monthly_avg"]) + f"""</div><div class="card-sub">共 {len(data["monthly"])} 个月</div></div>
-  <div class="card"><div class="card-label">总收入（参考）</div><div class="card-value">¥""" + _fmt_num(s["total_income"]) + """</div><div class="card-sub">外部收入 · 不含转账</div></div>
+  <div class="card clickable" data-target="incomeDetails"><div class="card-label">总收入（参考）</div><div class="card-value">¥""" + _fmt_num(s["total_income"]) + """</div><div class="card-sub">外部收入 · 不含转账 · 点击展开</div></div>
 </div>
+
+<div id="incomeDetails" class="section" style="display:none">
+  <h2>💰 收入详情</h2>
+  <div class="income-tabs" id="incomeTabs"></div>
+  <div id="incomeContent"></div>
+  <div class="income-pagination" id="incomePagination">
+    <div class="income-page-controls">
+      <button class="page-btn" id="pagePrev" disabled>‹ 上一页</button>
+      <span class="page-info" id="pageInfo">0 / 0</span>
+      <button class="page-btn" id="pageNext" disabled>下一页 ›</button>
+    </div>
+    <select class="page-size-select" id="pageSizeSelect">
+      <option value="10" selected>10 条/页</option>
+      <option value="20">20 条/页</option>
+      <option value="100">100 条/页</option>
+    </select>
+  </div>
+</div>
+
 """ + internal_note + """
 <div class="platform-cards">
   <div class="platform-card wechat"><div class="platform-name">微信支付（真实消费）</div><div class="platform-value">¥""" + _fmt_num(s["wechat_total"]) + f"""</div><div class="platform-count">{s["wechat_count"]} 笔</div></div>
@@ -237,6 +272,135 @@ bar.setOption({{
 }}, true);
 pie.on("click", function(p) {{ bar.dispatchAction({{ type: "highlight", name: p.name }}); }});
 window.addEventListener("resize", function() {{ pie.resize(); bar.resize(); }});
+}})();
+
+// Income details — tab + pagination
+(function(){{
+var allItems = DATA.income_details || [];
+var PLATFORM_META = {{
+  wechat: {{ name: "微信支付", color: "#07c160" }},
+  alipay: {{ name: "支付宝", color: "#1677ff" }},
+  bank: {{ name: "银行账户", color: "#722ed1" }},
+}};
+var PLATFORM_ORDER = ["wechat", "alipay", "bank"];
+var tabEl = document.getElementById("incomeTabs");
+var contentEl = document.getElementById("incomeContent");
+var pageInfoEl = document.getElementById("pageInfo");
+var pagePrevEl = document.getElementById("pagePrev");
+var pageNextEl = document.getElementById("pageNext");
+var pageSizeEl = document.getElementById("pageSizeSelect");
+var curPlatform = null;
+var curPage = 1;
+var pageSize = 10;
+
+function getActivePlatforms() {{
+  return PLATFORM_ORDER.filter(function(p) {{ return allItems.some(function(t) {{ return t.platform === p; }}); }});
+}}
+
+function getFiltered() {{
+  return allItems.filter(function(t) {{ return t.platform === curPlatform; }});
+}}
+
+function renderTable() {{
+  var items = getFiltered();
+  var totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  if (curPage > totalPages) curPage = totalPages;
+  var start = (curPage - 1) * pageSize;
+  var pageItems = items.slice(start, start + pageSize);
+  var total = items.reduce(function(s, t) {{ return s + t.amount; }}, 0);
+  var meta = PLATFORM_META[curPlatform] || {{ name: curPlatform, color: "#888" }};
+
+  if (items.length === 0) {{
+    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无收入记录</p>';
+  }} else {{
+    var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
+      '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
+    h += '<div class="table-wrap"><table><thead><tr>' +
+      '<th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th>' +
+      '</tr></thead><tbody>';
+    pageItems.forEach(function(t) {{
+      h += '<tr><td>' + t.time + '</td><td style="color:#389e0d;font-weight:600">' + fmtYuan(t.amount) +
+        '</td><td>' + (t.category || "-") + '</td><td>' + (t.counterparty || "-") +
+        '</td><td>' + (t.description || "-") + '</td><td>' + (t.payment_method || "-") + '</td></tr>';
+    }});
+    h += '</tbody></table></div>';
+    contentEl.innerHTML = h;
+  }}
+
+  // 更新分页
+  pageInfoEl.textContent = curPage + " / " + totalPages;
+  pagePrevEl.disabled = curPage <= 1;
+  pageNextEl.disabled = curPage >= totalPages;
+}}
+
+function renderTabs() {{
+  var platforms = getActivePlatforms();
+  if (platforms.length === 0) {{
+    tabEl.innerHTML = "";
+    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无收入记录</p>';
+    return;
+  }}
+  var h = "";
+  platforms.forEach(function(p, i) {{
+    var meta = PLATFORM_META[p] || {{ name: p, color: "#888" }};
+    var count = allItems.filter(function(t) {{ return t.platform === p; }}).length;
+    var active = p === curPlatform ? ' active' : '';
+    h += '<button class="income-tab' + active + '" data-platform="' + p + '">' +
+      meta.name + '<span class="tab-count">' + count + ' 笔</span></button>';
+  }});
+  tabEl.innerHTML = h;
+
+  // 绑定 tab 点击
+  tabEl.querySelectorAll(".income-tab").forEach(function(btn) {{
+    btn.addEventListener("click", function() {{
+      tabEl.querySelectorAll(".income-tab").forEach(function(b) {{ b.classList.remove("active"); }});
+      this.classList.add("active");
+      curPlatform = this.dataset.platform;
+      curPage = 1;
+      renderTable();
+    }});
+  }});
+}}
+
+function init() {{
+  // 卡片点击展开/收起
+  document.querySelectorAll(".card.clickable").forEach(function(el) {{
+    el.addEventListener("click", function() {{
+      var target = document.getElementById(this.dataset.target);
+      if (!target) return;
+      if (target.style.display === "none") {{
+        target.style.display = "block";
+        target.scrollIntoView({{ behavior: "smooth", block: "start" }});
+        if (!curPlatform) {{
+          var platforms = getActivePlatforms();
+          curPlatform = platforms.length > 0 ? platforms[0] : null;
+          renderTabs();
+          renderTable();
+        }}
+        this.querySelector(".card-sub").textContent = "外部收入 · 不含转账 · 点击收起";
+      }} else {{
+        target.style.display = "none";
+        this.querySelector(".card-sub").textContent = "外部收入 · 不含转账 · 点击展开";
+      }}
+    }});
+  }});
+
+  // 分页事件
+  pagePrevEl.addEventListener("click", function() {{
+    if (curPage > 1) {{ curPage--; renderTable(); }}
+  }});
+  pageNextEl.addEventListener("click", function() {{
+    var total = Math.max(1, Math.ceil(getFiltered().length / pageSize));
+    if (curPage < total) {{ curPage++; renderTable(); }}
+  }});
+  pageSizeEl.addEventListener("change", function() {{
+    pageSize = parseInt(this.value);
+    curPage = 1;
+    renderTable();
+  }});
+}}
+
+init();
 }})();
 
 // Platform comparison

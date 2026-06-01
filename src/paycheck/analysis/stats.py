@@ -107,7 +107,7 @@ def aggregate(transactions: List[Transaction]) -> Dict:
                 "internal_total": 0, "internal_count": 0,
                 "internal_wechat": 0, "internal_alipay": 0,
             },
-            "monthly": [], "categories": [], "platform_monthly": [],
+            "monthly": [], "categories": [], "platform_monthly": [], "income_details": [],
             "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -153,6 +153,23 @@ def aggregate(transactions: List[Transaction]) -> Dict:
     internal_wechat = sum(t["amount"] for t in internal_exp if t["platform"] == "wechat")
     internal_alipay = sum(t["amount"] for t in internal_exp if t["platform"] == "alipay")
 
+    # 收入明细
+    income_details = [
+        {
+            "platform": t["platform"],
+            "time": t["time"],
+            "category": t["category"],
+            "counterparty": t["counterparty"],
+            "description": t["description"],
+            "amount": t["amount"],
+            "payment_method": t["payment_method"],
+        }
+        for t in external_txs
+        if t["tx_type_norm"] == "收入"
+    ]
+    # 按时间排序
+    income_details.sort(key=lambda x: x["time"])
+
     return {
         "period": {
             "start": ext["months"][0] if ext["months"] else "",
@@ -177,5 +194,6 @@ def aggregate(transactions: List[Transaction]) -> Dict:
         "monthly": ext["monthlyData"],
         "categories": ext["categories"],
         "platform_monthly": ext["platformMonthly"],
+        "income_details": income_details,
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
