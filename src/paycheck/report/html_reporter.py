@@ -2,6 +2,8 @@
 
 import json
 from datetime import datetime
+from string import Template
+from importlib.resources import files as _pkg_files
 from typing import Dict
 
 
@@ -13,6 +15,11 @@ def _fmt_num(n):
 
 def _fmt_yuan(n):
     return f"¥{_fmt_num(n)}"
+
+
+def _load_template() -> str:
+    """从包中加载 HTML 模板文件"""
+    return _pkg_files("paycheck.report").joinpath("template.html").read_text("utf-8")
 
 
 def generate_html(data: Dict) -> str:
@@ -30,8 +37,7 @@ def generate_html(data: Dict) -> str:
             f"<td>¥{_fmt_num(m['expense'])}</td><td>{wc}</td><td>{ac}</td><td>{bc}</td></tr>"
         )
 
-    json_data = json.dumps(data, ensure_ascii=False)
-
+    # 内部转账提示区块
     internal_note = ""
     if s["internal_count"] > 0:
         internal_note = (
@@ -46,476 +52,34 @@ def generate_html(data: Dict) -> str:
 
     generated_at = data.get("generated_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    html = f"""<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PayCheck 账单分析报告</title>
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:#f0f2f5;color:#333;line-height:1.6}}
-.container{{max-width:1200px;margin:0 auto;padding:20px}}
-header{{text-align:center;padding:40px 0 20px}}
-header h1{{font-size:28px;color:#1a1a2e}}
-header .period{{font-size:16px;color:#666;margin-top:4px}}
-header .generated{{font-size:13px;color:#999;margin-top:2px}}
-.cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}}
-.card{{background:#fff;border-radius:12px;padding:24px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06)}}
-.card .card-label{{font-size:14px;color:#888}}
-.card .card-value{{font-size:28px;font-weight:700;color:#1a1a2e;margin-top:4px}}
-.card .card-sub{{font-size:13px;color:#999;margin-top:2px}}
-.card.clickable{{cursor:pointer;transition:transform 0.15s,box-shadow 0.15s}}
-.card.clickable:hover{{transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,0.1)}}
-.card.clickable:active{{transform:translateY(0)}}
-.platform-cards{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:20px 0}}
-.platform-card{{border-radius:12px;padding:24px;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.06);color:#fff}}
-.platform-card.wechat{{background:linear-gradient(135deg,#07c160,#06ad56)}}
-.platform-card.alipay{{background:linear-gradient(135deg,#1677ff,#096dd9)}}
-.platform-card.bank{{background:linear-gradient(135deg,#722ed1,#531dab)}}
-.platform-card .platform-name{{font-size:14px;opacity:0.9}}
-.platform-card .platform-value{{font-size:26px;font-weight:700;margin-top:4px}}
-.platform-card .platform-count{{font-size:13px;opacity:0.85;margin-top:2px}}
-.section{{background:#fff;border-radius:12px;padding:24px;margin:20px 0;box-shadow:0 2px 8px rgba(0,0,0,0.06)}}
-.section h2{{font-size:18px;color:#1a1a2e;margin-bottom:16px}}
-.chart{{width:100%;height:400px}}
-.filter{{margin-bottom:12px}}
-.filter button{{padding:6px 18px;border:1px solid #d9d9d9;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;transition:all 0.2s}}
-.filter button.active{{background:#1a1a2e;color:#fff;border-color:#1a1a2e}}
-.filter button:hover:not(.active){{border-color:#1a1a2e;color:#1a1a2e}}
-.chart-row{{display:flex;gap:16px}}
-.chart-row .chart{{height:380px}}
-.table-wrap{{overflow-x:auto}}
-table{{width:100%;border-collapse:collapse;font-size:14px}}
-thead{{background:#fafafa}}
-th{{padding:12px 16px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #e8e8e8}}
-td{{padding:10px 16px;border-bottom:1px solid #f0f0f0}}
-tr:hover td{{background:#fafafa}}
-td:last-child,th:last-child{{text-align:right}}
-td:nth-child(3),td:nth-child(4),td:nth-child(5),td:nth-child(6){{text-align:right;font-variant-numeric:tabular-nums}}
-footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
-@media(max-width:768px){{.cards{{grid-template-columns:1fr}}.platform-cards{{grid-template-columns:1fr}}.chart-row{{flex-direction:column}}}}
-.category-list{{margin-top:16px}}
-.category-item{{display:flex;align-items:center;padding:6px 0}}
-.category-item .cat-dot{{width:10px;height:10px;border-radius:50%;margin-right:10px;flex-shrink:0}}
-.category-item .cat-name{{flex:1;font-size:14px}}
-.category-item .cat-amount{{font-size:14px;font-weight:600}}
-.category-item .cat-pct{{font-size:13px;color:#999;margin-left:8px}}
-.chart-inline{{display:inline-block;vertical-align:top}}
-.income-tabs{{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8}}
-.income-tab{{padding:10px 24px;border:none;background:none;cursor:pointer;font-size:14px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s}}
-.income-tab:hover{{color:#333}}
-.income-tab.active{{color:#1a1a2e;font-weight:600;border-bottom-color:#1a1a2e}}
-.income-tab .tab-count{{font-weight:400;font-size:12px;color:#999;margin-left:4px}}
-.income-pagination{{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #f0f0f0}}
-.income-page-controls{{display:flex;align-items:center;gap:8px}}
-.page-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:14px;transition:all 0.2s}}
-.page-btn:hover:not(:disabled){{border-color:#1a1a2e;color:#1a1a2e}}
-.page-btn:disabled{{opacity:0.4;cursor:not-allowed}}
-.page-info{{font-size:13px;color:#666;min-width:60px;text-align:center}}
-.page-size-select{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;cursor:pointer;background:#fff}}
-.page-size-select:focus{{outline:none;border-color:#1a1a2e}}
-.income-filters{{background:#fafafa;border-radius:8px;padding:12px;margin-bottom:12px}}
-.income-filters .f-row{{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px}}
-.income-filters .f-row:last-child{{margin-bottom:0}}
-.income-filters .f-group{{display:flex;align-items:center;gap:6px}}
-.income-filters label{{font-size:13px;color:#666;white-space:nowrap}}
-.income-filters input[type=date],.income-filters input[type=number],.income-filters input[type=text]{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;font-family:inherit;max-width:160px}}
-.income-filters input[type=number]{{max-width:110px}}
-.income-filters input:focus{{outline:none;border-color:#1a1a2e}}
-.income-filters .reset-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s;margin-left:auto}}
-.income-filters .reset-btn:hover{{border-color:#1a1a2e;color:#1a1a2e}}
-</style>
-</head>
-<body>
-<div class="container">
-<header>
-  <h1>PayCheck 账单分析报告</h1>
-  <p class="period">{data["period"]["start"]} ~ {data["period"]["end"]} · 总账户（微信 + 支付宝 + 银行）</p>
-  <p class="generated">生成于 {generated_at}"""
-    if s["internal_count"] > 0:
-        html += f' · 已排除 {s["internal_count"]} 笔内部转账（¥{_fmt_num(s["internal_total"])}）'
-    html += """</p>
-</header>
+    # header / footer 中可选的内转备注
+    internal_header_note = (
+        f' · 已排除 {s["internal_count"]} 笔内部转账（¥{_fmt_num(s["internal_total"])}）'
+    ) if s["internal_count"] > 0 else ""
+    footer_note = (
+        f' · 已排除 {s["internal_count"]} 笔内部转账'
+    ) if s["internal_count"] > 0 else ""
 
-<div class="cards">
-  <div class="card"><div class="card-label">总支出</div><div class="card-value">¥""" + _fmt_num(s["total_expense"]) + f"""</div><div class="card-sub">{s["total_count"]} 笔 · 已剔除内部转账</div></div>
-  <div class="card"><div class="card-label">月均支出</div><div class="card-value">¥""" + _fmt_num(s["monthly_avg"]) + f"""</div><div class="card-sub">共 {len(data["monthly"])} 个月</div></div>
-  <div class="card clickable" data-target="incomeDetails"><div class="card-label">总收入（参考）</div><div class="card-value">¥""" + _fmt_num(s["total_income"]) + """</div><div class="card-sub">外部收入 · 不含转账 · 点击展开</div></div>
-</div>
-
-<div id="incomeDetails" class="section" style="display:none">
-  <h2>💰 收入详情</h2>
-  <div class="income-tabs" id="incomeTabs"></div>
-  <div class="income-filters" id="incomeFilters">
-    <div class="f-row">
-      <div class="f-group">
-        <label>时间：</label>
-        <input type="date" id="filterDateStart">
-        <span>—</span>
-        <input type="date" id="filterDateEnd">
-      </div>
-      <div class="f-group">
-        <label>金额：</label>
-        <input type="number" id="filterAmountMin" placeholder="最小值" min="0" step="0.01">
-        <span>—</span>
-        <input type="number" id="filterAmountMax" placeholder="最大值" min="0" step="0.01">
-      </div>
-      <button class="reset-btn" id="filterReset">重置</button>
-    </div>
-    <div class="f-row">
-      <div class="f-group">
-        <label>类别：</label>
-        <input type="text" id="filterCategory" placeholder="筛选类别..." style="max-width:120px">
-      </div>
-      <div class="f-group">
-        <label>对方账户：</label>
-        <input type="text" id="filterCounterparty" placeholder="筛选对方..." style="max-width:140px">
-      </div>
-      <div class="f-group">
-        <label>备注：</label>
-        <input type="text" id="filterDescription" placeholder="筛选备注..." style="max-width:140px">
-      </div>
-      <div class="f-group">
-        <label>支付方式：</label>
-        <input type="text" id="filterPaymentMethod" placeholder="筛选方式..." style="max-width:120px">
-      </div>
-    </div>
-  </div>
-  <div id="incomeContent"></div>
-  <div class="income-pagination" id="incomePagination">
-    <div class="income-page-controls">
-      <button class="page-btn" id="pagePrev" disabled>‹ 上一页</button>
-      <span class="page-info" id="pageInfo">0 / 0</span>
-      <button class="page-btn" id="pageNext" disabled>下一页 ›</button>
-    </div>
-    <select class="page-size-select" id="pageSizeSelect">
-      <option value="10" selected>10 条/页</option>
-      <option value="20">20 条/页</option>
-      <option value="100">100 条/页</option>
-    </select>
-  </div>
-</div>
-
-""" + internal_note + """
-<div class="platform-cards">
-  <div class="platform-card wechat"><div class="platform-name">微信支付（真实消费）</div><div class="platform-value">¥""" + _fmt_num(s["wechat_total"]) + f"""</div><div class="platform-count">{s["wechat_count"]} 笔</div></div>
-  <div class="platform-card alipay"><div class="platform-name">支付宝（真实消费）</div><div class="platform-value">¥""" + _fmt_num(s["alipay_total"]) + f"""</div><div class="platform-count">{s["alipay_count"]} 笔</div></div>
-  <div class="platform-card bank"><div class="platform-name">银行账户（银行卡）</div><div class="platform-value">¥""" + _fmt_num(s.get("bank_total", 0)) + f"""</div><div class="platform-count">{s.get("bank_count", 0)} 笔</div></div>
-</div>
-
-<div class="section">
-  <h2>月度开销</h2>
-  <div class="filter" id="monthlyFilter">
-    <button class="active" data-mode="all">全部</button>
-    <button data-mode="wechat">微信</button>
-    <button data-mode="alipay">支付宝</button>
-    <button data-mode="bank">银行</button>
-  </div>
-  <div id="monthlyChart" class="chart"></div>
-</div>
-
-<div class="section">
-  <h2>消费类别分布</h2>
-  <div class="chart-row">
-    <div id="categoryPie" class="chart chart-inline" style="width:55%;height:380px"></div>
-    <div id="categoryBar" class="chart chart-inline" style="width:45%;height:380px"></div>
-  </div>
-  <div class="category-list" id="categoryList"></div>
-</div>
-
-<div class="section">
-  <h2>平台对比（真实消费）</h2>
-  <div id="platformChart" class="chart" style="height:380px"></div>
-</div>
-
-<div class="section">
-  <h2>月度明细（总账户）</h2>
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>月份</th><th>笔数</th><th>总金额</th><th>微信</th><th>支付宝</th><th>银行</th></tr></thead>
-      <tbody>
-        """ + table_rows + """
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<footer>
-  <p>PayCheck · 总账户（微信 + 支付宝 + 银行）""" + (f' · 已排除 {s["internal_count"]} 笔内部转账' if s["internal_count"] > 0 else "") + f""" · {generated_at}</p>
-</footer>
-</div>
-
-<script>
-var DATA = {json_data};
-var COLORS = ["#5470c6","#91cc75","#fac858","#ee6666","#73c0de","#3ba272","#fc8452","#9a60b4","#ea7ccc","#2f4554","#61a0a8","#d48265","#749f83","#ca8622","#bda29a"];
-function fmtNum(n) {{ return Number(n).toLocaleString("zh-CN", {{minimumFractionDigits:2, maximumFractionDigits:2}}); }}
-function fmtYuan(n) {{ return "¥" + fmtNum(n); }}
-
-// Monthly chart
-(function(){{
-var chart = echarts.init(document.getElementById("monthlyChart"));
-var mode = "all";
-function update() {{
-  var vals = DATA.monthly.map(function(m) {{ return mode === "all" ? m.expense : (mode === "wechat" ? m.wechat : (mode === "alipay" ? m.alipay : m.bank)); }});
-  var months = DATA.monthly.map(function(m) {{ return m.month; }});
-  chart.setOption({{
-    tooltip: {{ trigger: "axis", formatter: function(p) {{ return "<strong>" + p[0].axisValue + "</strong><br/>" + p[0].marker + " 支出: " + fmtYuan(p[0].value); }} }},
-    grid: {{ left: 80, right: 30, top: 20, bottom: 30 }},
-    xAxis: {{ type: "category", data: months, axisLabel: {{ rotate: 45, fontSize: 11 }} }},
-    yAxis: {{ type: "value", axisLabel: {{ formatter: "¥{{value}}" }} }},
-    series: [{{ type: "bar", data: vals, itemStyle: {{ color: mode === "all" ? "#5470c6" : (mode === "wechat" ? "#07c160" : (mode === "alipay" ? "#1677ff" : "#722ed1")), borderRadius: [4,4,0,0] }} }}]
-  }}, true);
-  chart.resize();
-}}
-document.querySelectorAll("#monthlyFilter button").forEach(function(b) {{
-  b.addEventListener("click", function() {{
-    document.querySelectorAll("#monthlyFilter button").forEach(function(x) {{ x.classList.remove("active"); }});
-    this.classList.add("active");
-    mode = this.dataset.mode;
-    update();
-  }});
-}});
-update();
-window.addEventListener("resize", function() {{ chart.resize(); }});
-}})();
-
-// Category charts
-(function(){{
-if (!DATA.categories || DATA.categories.length === 0) {{
-  document.getElementById("categoryList").innerHTML = '<p style="color:#999;padding:10px">暂无分类数据</p>';
-  return;
-}}
-var cats = DATA.categories;
-var colorMap = {{}};
-cats.forEach(function(c,i) {{ colorMap[c.name] = COLORS[i % COLORS.length]; }});
-var listEl = document.getElementById("categoryList");
-cats.forEach(function(c) {{
-  var div = document.createElement("div");
-  div.className = "category-item";
-  div.innerHTML = '<span class="cat-dot" style="background:' + colorMap[c.name] + '"></span><span class="cat-name">' + c.name + '</span><span class="cat-amount">' + fmtYuan(c.amount) + '</span><span class="cat-pct">' + c.pct + '%</span>';
-  listEl.appendChild(div);
-}});
-var pie = echarts.init(document.getElementById("categoryPie"));
-pie.setOption({{
-  tooltip: {{ formatter: function(p) {{ return "<strong>" + p.name + "</strong><br/>金额: " + fmtYuan(p.value) + "<br/>占比: " + p.percent + "%"; }} }},
-  series: [{{ type: "pie", radius: ["35%", "65%"], center: ["50%", "50%"],
-    data: cats.map(function(c) {{ return {{ name: c.name, value: c.amount }}; }}),
-    itemStyle: {{ color: function(p) {{ return colorMap[p.name]; }}, borderRadius: 4, borderColor: "#fff", borderWidth: 2 }},
-    label: {{ show: false }},
-    emphasis: {{ label: {{ show: true, fontSize: 14, fontWeight: "bold" }}, itemStyle: {{ shadowBlur: 10, shadowColor: "rgba(0,0,0,0.2)" }} }}
-  }}]
-}}, true);
-var bar = echarts.init(document.getElementById("categoryBar"));
-bar.setOption({{
-  tooltip: {{ trigger: "axis", axisPointer: {{ type: "shadow" }}, formatter: function(p) {{ return "<strong>" + p[0].name + "</strong><br/>" + p[0].marker + " " + fmtYuan(p[0].value) + " (" + (cats.find(function(c) {{ return c.name === p[0].name; }})?.pct || 0) + "%)"; }} }},
-  grid: {{ left: 10, right: 80, top: 10, bottom: 10 }},
-  xAxis: {{ type: "value", axisLabel: {{ formatter: "¥{{value}}" }} }},
-  yAxis: {{ type: "category", data: cats.map(function(c) {{ return c.name; }}).reverse(), axisLabel: {{ fontSize: 11 }} }},
-  series: [{{ type: "bar", data: cats.map(function(c) {{ return {{value: c.amount, itemStyle: {{color: colorMap[c.name], borderRadius: [0,4,4,0]}}}}; }}).reverse() }}]
-}}, true);
-pie.on("click", function(p) {{ bar.dispatchAction({{ type: "highlight", name: p.name }}); }});
-window.addEventListener("resize", function() {{ pie.resize(); bar.resize(); }});
-}})();
-
-// Income details — tab + pagination + filters
-(function(){{
-var allItems = DATA.income_details || [];
-var PLATFORM_META = {{
-  wechat: {{ name: "微信支付", color: "#07c160" }},
-  alipay: {{ name: "支付宝", color: "#1677ff" }},
-  bank: {{ name: "银行账户", color: "#722ed1" }},
-}};
-var PLATFORM_ORDER = ["wechat", "alipay", "bank"];
-var tabEl = document.getElementById("incomeTabs");
-var contentEl = document.getElementById("incomeContent");
-var pageInfoEl = document.getElementById("pageInfo");
-var pagePrevEl = document.getElementById("pagePrev");
-var pageNextEl = document.getElementById("pageNext");
-var pageSizeEl = document.getElementById("pageSizeSelect");
-var dateStartEl = document.getElementById("filterDateStart");
-var dateEndEl = document.getElementById("filterDateEnd");
-var amountMinEl = document.getElementById("filterAmountMin");
-var amountMaxEl = document.getElementById("filterAmountMax");
-var filterCategoryEl = document.getElementById("filterCategory");
-var filterCounterpartyEl = document.getElementById("filterCounterparty");
-var filterDescriptionEl = document.getElementById("filterDescription");
-var filterPaymentMethodEl = document.getElementById("filterPaymentMethod");
-var resetBtn = document.getElementById("filterReset");
-var curPlatform = null;
-var curPage = 1;
-var pageSize = 10;
-var dateStart = null;
-var dateEnd = null;
-var amountMin = null;
-var amountMax = null;
-var fCategory = "";
-var fCounterparty = "";
-var fDescription = "";
-var fPaymentMethod = "";
-
-function getActivePlatforms() {{
-  return PLATFORM_ORDER.filter(function(p) {{ return allItems.some(function(t) {{ return t.platform === p; }}); }});
-}}
-
-function getFiltered() {{
-  return allItems.filter(function(t) {{
-    if (t.platform !== curPlatform) return false;
-    if (dateStart && t.time < dateStart) return false;
-    if (dateEnd && t.time > dateEnd + " 23:59:59") return false;
-    if (amountMin !== null && t.amount < amountMin) return false;
-    if (amountMax !== null && t.amount > amountMax) return false;
-    if (fCategory && !(t.category || "").includes(fCategory)) return false;
-    if (fCounterparty && !(t.counterparty || "").includes(fCounterparty)) return false;
-    if (fDescription && !(t.description || "").includes(fDescription)) return false;
-    if (fPaymentMethod && !(t.payment_method || "").includes(fPaymentMethod)) return false;
-    return true;
-  }});
-}}
-
-function renderTable() {{
-  var items = getFiltered();
-  var totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-  if (curPage > totalPages) curPage = totalPages;
-  var start = (curPage - 1) * pageSize;
-  var pageItems = items.slice(start, start + pageSize);
-  var total = items.reduce(function(s, t) {{ return s + t.amount; }}, 0);
-
-  if (items.length === 0) {{
-    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无匹配记录</p>';
-  }} else {{
-    var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
-      '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
-    h += '<div class="table-wrap"><table><thead><tr>' +
-      '<th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th>' +
-      '</tr></thead><tbody>';
-    pageItems.forEach(function(t) {{
-      h += '<tr><td>' + t.time + '</td><td style="color:#389e0d;font-weight:600">' + fmtYuan(t.amount) +
-        '</td><td>' + (t.category || "-") + '</td><td>' + (t.counterparty || "-") +
-        '</td><td>' + (t.description || "-") + '</td><td>' + (t.payment_method || "-") + '</td></tr>';
-    }});
-    h += '</tbody></table></div>';
-    contentEl.innerHTML = h;
-  }}
-
-  pageInfoEl.textContent = curPage + " / " + totalPages;
-  pagePrevEl.disabled = curPage <= 1;
-  pageNextEl.disabled = curPage >= totalPages;
-}}
-
-function renderTabs() {{
-  var platforms = getActivePlatforms();
-  if (platforms.length === 0) {{
-    tabEl.innerHTML = "";
-    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无收入记录</p>';
-    return;
-  }}
-  var h = "";
-  platforms.forEach(function(p) {{
-    var meta = PLATFORM_META[p] || {{ name: p, color: "#888" }};
-    var count = allItems.filter(function(t) {{ return t.platform === p; }}).length;
-    var active = p === curPlatform ? " active" : "";
-    h += '<button class="income-tab' + active + '" data-platform="' + p + '">' +
-      meta.name + '<span class="tab-count">' + count + ' 笔</span></button>';
-  }});
-  tabEl.innerHTML = h;
-  tabEl.querySelectorAll(".income-tab").forEach(function(btn) {{
-    btn.addEventListener("click", function() {{
-      tabEl.querySelectorAll(".income-tab").forEach(function(b) {{ b.classList.remove("active"); }});
-      this.classList.add("active");
-      curPlatform = this.dataset.platform;
-      curPage = 1;
-      resetFilters();
-      renderTable();
-    }});
-  }});
-}}
-
-function resetFilters() {{
-  dateStart = null; dateStartEl.value = "";
-  dateEnd = null; dateEndEl.value = "";
-  amountMin = null; amountMinEl.value = "";
-  amountMax = null; amountMaxEl.value = "";
-  fCategory = ""; filterCategoryEl.value = "";
-  fCounterparty = ""; filterCounterpartyEl.value = "";
-  fDescription = ""; filterDescriptionEl.value = "";
-  fPaymentMethod = ""; filterPaymentMethodEl.value = "";
-}}
-
-function init() {{
-  document.querySelectorAll(".card.clickable").forEach(function(el) {{
-    el.addEventListener("click", function() {{
-      var target = document.getElementById(this.dataset.target);
-      if (!target) return;
-      if (target.style.display === "none") {{
-        target.style.display = "block";
-        target.scrollIntoView({{ behavior: "smooth", block: "start" }});
-        if (!curPlatform) {{
-          var platforms = getActivePlatforms();
-          curPlatform = platforms.length > 0 ? platforms[0] : null;
-          renderTabs();
-          renderTable();
-        }}
-        this.querySelector(".card-sub").textContent = "外部收入 · 不含转账 · 点击收起";
-      }} else {{
-        target.style.display = "none";
-        this.querySelector(".card-sub").textContent = "外部收入 · 不含转账 · 点击展开";
-      }}
-    }});
-  }});
-
-  pagePrevEl.addEventListener("click", function() {{
-    if (curPage > 1) {{ curPage--; renderTable(); }}
-  }});
-  pageNextEl.addEventListener("click", function() {{
-    var total = Math.max(1, Math.ceil(getFiltered().length / pageSize));
-    if (curPage < total) {{ curPage++; renderTable(); }}
-  }});
-  pageSizeEl.addEventListener("change", function() {{
-    pageSize = parseInt(this.value);
-    curPage = 1;
-    renderTable();
-  }});
-
-  // 筛选事件
-  dateStartEl.addEventListener("change", function() {{ dateStart = this.value || null; curPage = 1; renderTable(); }});
-  dateEndEl.addEventListener("change", function() {{ dateEnd = this.value || null; curPage = 1; renderTable(); }});
-  amountMinEl.addEventListener("input", function() {{ amountMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); }});
-  amountMaxEl.addEventListener("input", function() {{ amountMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); }});
-  filterCategoryEl.addEventListener("input", function() {{ fCategory = this.value; curPage = 1; renderTable(); }});
-  filterCounterpartyEl.addEventListener("input", function() {{ fCounterparty = this.value; curPage = 1; renderTable(); }});
-  filterDescriptionEl.addEventListener("input", function() {{ fDescription = this.value; curPage = 1; renderTable(); }});
-  filterPaymentMethodEl.addEventListener("input", function() {{ fPaymentMethod = this.value; curPage = 1; renderTable(); }});
-  resetBtn.addEventListener("click", function() {{ resetFilters(); curPage = 1; renderTable(); }});
-}}
-
-init();
-}})();
-
-// Platform comparison
-(function(){{
-if (!DATA.platform_monthly || DATA.platform_monthly.length === 0) return;
-var chart = echarts.init(document.getElementById("platformChart"));
-chart.setOption({{
-  tooltip: {{ trigger: "axis", axisPointer: {{ type: "shadow" }}, formatter: function(p) {{
-    var h = "<strong>" + p[0].axisValue + "</strong><br/>";
-    p.forEach(function(x) {{ h += x.marker + " " + x.seriesName + ": " + fmtYuan(x.value) + "<br/>"; }});
-    return h;
-  }}}},
-  legend: {{ data: ["微信", "支付宝", "银行"], top: 0 }},
-  grid: {{ left: 80, right: 30, top: 40, bottom: 30 }},
-  xAxis: {{ type: "category", data: DATA.platform_monthly.map(function(d) {{ return d.month; }}), axisLabel: {{ rotate: 45, fontSize: 11 }} }},
-  yAxis: {{ type: "value", axisLabel: {{ formatter: "¥{{value}}" }} }},
-  series: [
-    {{ name: "微信", type: "bar", data: DATA.platform_monthly.map(function(d) {{ return d.wechat; }}), itemStyle: {{ color: "#07c160", borderRadius: [4,4,0,0] }} }},
-    {{ name: "支付宝", type: "bar", data: DATA.platform_monthly.map(function(d) {{ return d.alipay; }}), itemStyle: {{ color: "#1677ff", borderRadius: [4,4,0,0] }} }},
-    {{ name: "银行", type: "bar", data: DATA.platform_monthly.map(function(d) {{ return d.bank; }}), itemStyle: {{ color: "#722ed1", borderRadius: [4,4,0,0] }} }},
-  ]
-}}, true);
-window.addEventListener("resize", function() {{ chart.resize(); }});
-}})();
-</script>
-</body>
-</html>"""
+    tmpl = Template(_load_template())
+    html = tmpl.substitute(
+        PERIOD_START=data["period"]["start"],
+        PERIOD_END=data["period"]["end"],
+        GENERATED_AT=generated_at,
+        INTERNAL_HEADER_NOTE=internal_header_note,
+        TOTAL_EXPENSE=_fmt_num(s["total_expense"]),
+        TOTAL_COUNT=str(s["total_count"]),
+        MONTHLY_AVG=_fmt_num(s["monthly_avg"]),
+        MONTH_COUNT=str(len(data["monthly"])),
+        TOTAL_INCOME=_fmt_num(s["total_income"]),
+        INTERNAL_NOTE=internal_note,
+        WECHAT_TOTAL=_fmt_num(s["wechat_total"]),
+        WECHAT_COUNT=str(s["wechat_count"]),
+        ALIPAY_TOTAL=_fmt_num(s["alipay_total"]),
+        ALIPAY_COUNT=str(s["alipay_count"]),
+        BANK_TOTAL=_fmt_num(s.get("bank_total", 0)),
+        BANK_COUNT=str(s.get("bank_count", 0)),
+        TABLE_ROWS=table_rows,
+        FOOTER_NOTE=footer_note,
+        JSON_DATA=json.dumps(data, ensure_ascii=False),
+    )
     return html
