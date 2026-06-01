@@ -2,65 +2,205 @@
 """
 PayCheck - 个人账单统计工具
 
-用法:
-    uv run paycheck --dir resource/
-    uv run paycheck --dir resource/ -o my_report.html --verbose
+三阶段工作流:
+    uv run paycheck pdf2image <input_dir>           # ① PDF → 图片
+    uv run paycheck image2csv <bank_dir>            # ② 图片 → CSV
+    uv run paycheck analyse <input_dir>              # ③ 分析 → 报表
 """
 
 import argparse
+import glob
 import logging
 import os
+import re
 import sys
 import time
 
 from paycheck.core.log import setup_logging
 
 
-def cli():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="PayCheck - 个人账单统计工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例:
-  uv run paycheck --dir resource/
-  uv run paycheck --dir resource/ --verbose
-  uv run paycheck --dir resource/ -o my_report.html
+  uv run paycheck pdf2image <input_dir>          # PDF → 图片
+  uv run paycheck image2csv <bank_dir>           # 图片 → CSV
+  uv run paycheck analyse <input_dir>            # 分析 → 报表
 """,
     )
-    parser.add_argument("--dir", default=None, help="输入目录（含 wechat/ant/boc 等子目录）")
-    parser.add_argument("-o", "--output", default=None, help="输出 HTML 报表路径")
-    parser.add_argument("--scale", type=float, default=3.0, help="PDF 渲染倍率 (默认 3.0)")
-    parser.add_argument("--timeout", type=int, default=120, help="超时分钟数 (默认 120)")
-    parser.add_argument("-v", "--verbose", action="store_true", help="在控制台显示详细日志")
+    sub = parser.add_subparsers(dest="command", help="可用命令")
 
-    args = parser.parse_args()
-    input_dir = args.dir
+    # ── pdf2image ──
+    p_render = sub.add_parser(
+        "pdf2image",
+        help="PDF → 图片: 渲染 PDF 页面为裁剪后 PNG",
+        description="扫描目录下的银行 PDF，逐页渲染 + 表格裁剪为 PNG 图片。",
+    )
+    p_render.add_argument("dir", help="输入目录（含银行子目录, 如 boc/）")
+    p_render.add_argument("--scale", type=float, default=3.0, help="渲染倍率 (默认 3.0)")
+    p_render.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
 
-    # ── 初始化日志（先于其他 import，以压制第三方库噪声）──
-    setup_logging(verbose=args.verbose)
+    # ── image2csv ──
+    p_ocr = sub.add_parser(
+        "image2csv",
+        help="图片 → CSV: OCR 识别页面图片为结构化 CSV",
+        description="扫描目录下的页面图片 (p*.png)，通过 OCR 识别为银行流水 CSV。",
+    )
+    p_ocr.add_argument("dir", help="图片目录（含 *_p*.png 文件）")
+    p_ocr.add_argument("--layout", default=None, help="银行布局名称（默认从目录名推断）")
+    p_ocr.add_argument("--scale", type=float, default=3.0, help="渲染倍率，需与 pdf2image 一致 (默认 3.0)")
+    p_ocr.add_argument("--timeout", type=int, default=120, help="超时分钟数 (默认 120)")
+    p_ocr.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
+
+    # ── analyse ──
+    p_ana = sub.add_parser(
+        "analyse",
+        help="分析账单: 解析 → 聚合统计 → HTML 报表",
+        description="解析已有 CSV/XLSX 账单文件，生成多维度 ECharts 分析报告。",
+    )
+    p_ana.add_argument("dir", help="输入目录（含 wechat/ ant/ 及银行子目录）")
+    p_ana.add_argument("-o", "--output", default=None, help="输出 HTML 报表路径 (默认 report.html)")
+    p_ana.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
+
+    return parser
+
+
+# =========================================================================
+# 子命令处理
+# =========================================================================
+
+
+def _scan_bank_dirs(input_dir: str) -> dict:
+    """扫描目录，返回 {layout_name: {"pdfs": [...], "csvs": [...]}}"""
+    from paycheck.ingest.scanner import scan_directory
+
+    result = scan_directory(input_dir)
+    bank_groups = {}
+    for name, group in result.bank_groups.items():
+        bank_groups[name] = {"pdfs": group.pdf_files, "csvs": group.csv_files}
+    return bank_groups
+
+
+def _run_pdf2image(args) -> None:
+    """pdf2image：PDF → 图片"""
     log = logging.getLogger("paycheck")
+    from tqdm import tqdm
+    from paycheck.ocr.pdf_render import pdf_to_images
 
-    if not input_dir:
-        log.error("未指定输入目录 (--dir)")
-        parser.print_help()
+    bank_groups = _scan_bank_dirs(args.dir)
+    if not bank_groups:
+        log.error("未找到银行 PDF 目录（需要子目录如 boc/）")
         sys.exit(1)
 
-    if not os.path.exists(input_dir):
+    log.info("银行子目录: %s", list(bank_groups.keys()))
+
+    # 收集所有 PDF 路径
+    pdfs_to_process = []
+    for layout_name, group in bank_groups.items():
+        pdfs_to_process.extend(group["pdfs"])
+
+    total_all = len(pdfs_to_process)
+    total_ok = 0
+
+    with tqdm(total=total_all, desc="渲染 PDF", unit="PDF") as outer_pbar:
+        for pdf_path in pdfs_to_process:
+            out_dir = os.path.dirname(pdf_path)
+            images = pdf_to_images(pdf_path, scale=args.scale, output_dir=out_dir)
+            if images:
+                total_ok += 1
+            outer_pbar.update(1)
+
+    if total_ok < total_all:
+        log.warning("完成: %d / %d 个 PDF 渲染成功", total_ok, total_all)
+    else:
+        log.info("完成: 所有 %d 个 PDF 渲染成功", total_ok)
+
+
+def _run_image2csv(args) -> None:
+    """image2csv：图片 → CSV"""
+    log = logging.getLogger("paycheck")
+    from paycheck.ocr.pipeline import images_to_csv
+
+    input_dir = args.dir
+    if not os.path.isdir(input_dir):
         log.error("目录不存在: %s", input_dir)
         sys.exit(1)
 
-    # ── 延迟 import（避免第三方库在日志配置前输出）──
+    # 推断 layout 名称（从目录名或 --layout 参数）
+    layout_name = args.layout
+    if not layout_name:
+        layout_name = os.path.basename(os.path.normpath(input_dir)).lower()
+        log.info("从目录名推断布局: %s", layout_name)
+
+    # 扫描子目录下 p*.png 图片（新结构: {stem}/p{N}.png）
+    pattern = os.path.join(input_dir, "**", "p*.png")
+    all_images = sorted(glob.glob(pattern, recursive=True))
+    if not all_images:
+        log.error("未找到页面图片 (p*.png) in %s", input_dir)
+        sys.exit(1)
+
+    # 按父目录名（PDF stem）分组
+    groups = {}
+    for img_path in all_images:
+        parent_dir = os.path.basename(os.path.dirname(img_path))
+        filename = os.path.basename(img_path)
+        m = re.match(r'p(\d+)\.png$', filename)
+        if not m:
+            continue
+        page = int(m.group(1))
+        groups.setdefault(parent_dir, []).append((page, img_path))
+
+    if not groups:
+        log.error("未找到符合命名规范的页面图片 (p*.png)")
+        sys.exit(1)
+
+    log.info("找到 %d 组图片: %s", len(groups), list(groups.keys()))
+    log.info("布局: %s | 倍率: %.1f", layout_name, args.scale)
+
+    ok_count = 0
+    for base_name, pages in sorted(groups.items()):
+        pages.sort(key=lambda x: x[0])
+        image_paths = [p[1] for p in pages]
+        expected_csv = os.path.join(input_dir, f"{base_name}.csv")
+
+        if os.path.isfile(expected_csv):
+            log.info("  CSV 已存在: %s", os.path.basename(expected_csv))
+            ok_count += 1
+            continue
+
+        log.info("  OCR: %s (%d 页)", base_name, len(image_paths))
+        exit_code = images_to_csv(
+            image_paths,
+            layout_name,
+            scale=args.scale,
+            output_path=expected_csv,
+            timeout_minutes=args.timeout,
+        )
+        if exit_code == 0:
+            log.info("  ✓ %s", os.path.basename(expected_csv))
+            ok_count += 1
+        else:
+            log.warning("  ⚠ OCR 失败: %s", base_name)
+
+    if ok_count < len(groups):
+        log.warning("完成: %d / %d 组合成功", ok_count, len(groups))
+    else:
+        log.info("完成: 所有 %d 组合成功", ok_count)
+
+
+def _run_analyse(args) -> None:
+    """analyse：解析 → 聚合 → 报表"""
+    log = logging.getLogger("paycheck")
     from paycheck.ingest.scanner import scan_directory
     from paycheck.ingest.parsers import parse_file
-    from paycheck.ocr.pipeline import pdf_to_csv
     from paycheck.analysis.stats import aggregate
     from paycheck.report.html_reporter import generate_html
 
     output_path = args.output or "report.html"
-    start_time = time.time()
 
-    # ── 扫描 ──
-    log.info("扫描目录: %s", input_dir)
-    result = scan_directory(input_dir)
+    log.info("扫描目录: %s", args.dir)
+    result = scan_directory(args.dir)
 
     bank_layouts = list(result.bank_groups.keys())
     log.info("微信: %d 个文件 | 支付宝: %d 个文件 | 银行: %s",
@@ -69,24 +209,6 @@ def cli():
     if not result.wechat_files and not result.ant_files and not result.bank_groups:
         log.error("未找到任何账单文件（需要 wechat/、ant/ 或银行子目录）")
         sys.exit(1)
-
-    # ── 银行 PDF → OCR → CSV ──
-    for layout_name, group in result.bank_groups.items():
-        for pdf_path in group.pdf_files:
-            expected_csv = os.path.splitext(pdf_path)[0] + ".csv"
-            if os.path.isfile(expected_csv):
-                log.info("  CSV 已存在: %s", os.path.basename(expected_csv))
-                if expected_csv not in group.csv_files:
-                    group.csv_files.append(expected_csv)
-                continue
-
-            log.info("  OCR [%s]: %s", layout_name, os.path.basename(pdf_path))
-            exit_code = pdf_to_csv(pdf_path, layout_name, args.scale, expected_csv, args.timeout)
-            if exit_code == 0 and os.path.isfile(expected_csv):
-                log.info("  ✓ OCR 完成: %s", os.path.basename(expected_csv))
-                group.csv_files.append(expected_csv)
-            else:
-                log.warning("  ⚠ OCR 失败，跳过: %s", os.path.basename(pdf_path))
 
     # ── 解析 ──
     all_transactions = []
@@ -117,7 +239,7 @@ def cli():
                 log.warning("  [%s] 解析失败: %s — %s", layout_name, os.path.basename(f), e)
 
     if not all_transactions:
-        log.error("未能解析到任何交易记录")
+        log.error("未能解析到任何交易记录（PDF 未预处理？先运行 paycheck pdf2csv）")
         sys.exit(1)
 
     platform_counts = {}
@@ -148,8 +270,40 @@ def cli():
         f.write(html)
     log.info("报表已生成: %s", output_path)
 
+
+def cli():
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+
+    if not os.path.exists(args.dir):
+        print(f"错误: 目录不存在: {args.dir}", file=sys.stderr)
+        sys.exit(1)
+
+    # ── 初始化日志（先于其他 import，以压制第三方库噪声）──
+    setup_logging(verbose=args.verbose)
+    log = logging.getLogger("paycheck")
+
+    start_time = time.time()
+
+    handlers = {
+        "pdf2image": _run_pdf2image,
+        "image2csv": _run_image2csv,
+        "analyse": _run_analyse,
+    }
+
+    handler = handlers.get(args.command)
+    if handler:
+        handler(args)
+    else:
+        log.error("未知命令: %s", args.command)
+        sys.exit(1)
+
     elapsed = time.time() - start_time
-    log.info("完成！耗时 %.1fs。打开 %s 查看报表", elapsed, output_path)
+    log.info("完成！耗时 %.1fs", elapsed)
 
 
 if __name__ == "__main__":
