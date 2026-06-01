@@ -125,7 +125,7 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
     </div>
     <div class="f-row">
       <div class="f-group">
-        <label>类别：</label>
+        <label id="filterLabelCategory">类别：</label>
         <div class="multi-tag-select">
           <div class="tag-input-wrap">
             <input type="text" id="filterCategory" placeholder="输入筛选..." style="max-width:120px">
@@ -135,7 +135,7 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
         </div>
       </div>
       <div class="f-group">
-        <label>对方账户：</label>
+        <label id="filterLabelCounterparty">对方账户：</label>
         <div class="multi-tag-select">
           <div class="tag-input-wrap">
             <input type="text" id="filterCounterparty" placeholder="输入筛选..." style="max-width:140px">
@@ -145,11 +145,17 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
         </div>
       </div>
       <div class="f-group">
-        <label>备注：</label>
-        <input type="text" id="filterDescription" placeholder="筛选备注..." style="max-width:140px">
+        <label id="filterLabelDescription">备注：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterDescription" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="descriptionDropdown"></div>
+          </div>
+          <div class="tag-list" id="descriptionTags"></div>
+        </div>
       </div>
       <div class="f-group">
-        <label>支付方式：</label>
+        <label id="filterLabelPaymentMethod">支付方式：</label>
         <div class="multi-tag-select">
           <div class="tag-input-wrap">
             <input type="text" id="filterPaymentMethod" placeholder="输入筛选..." style="max-width:120px">
@@ -157,6 +163,50 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
           </div>
           <div class="tag-list" id="paymentMethodTags"></div>
         </div>
+      </div>
+    </div>
+    <div class="f-row" id="bankFilterRow">
+      <div class="f-group">
+        <label>余额：</label>
+        <input type="number" id="filterBalanceMin" placeholder="最小值" min="0" step="0.01">
+        <span>—</span>
+        <input type="number" id="filterBalanceMax" placeholder="最大值" min="0" step="0.01">
+      </div>
+      <div class="f-group">
+        <label id="filterLabelCurrency">币别：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterCurrency" placeholder="筛选..." style="max-width:100px">
+            <div class="tag-dropdown" id="currencyDropdown"></div>
+          </div>
+          <div class="tag-list" id="currencyTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelCpBank">对方开户行：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterCpBank" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="cpBankDropdown"></div>
+          </div>
+          <div class="tag-list" id="cpBankTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelBranch">网点名称：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterBranch" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="branchDropdown"></div>
+          </div>
+          <div class="tag-list" id="branchTags"></div>
+        </div>
+      </div>
+    </div>
+    <div class="f-row" id="bankFilterRow2">
+      <div class="f-group">
+        <label id="filterLabelCpAccount">对方卡号：</label>
+        <input type="text" id="filterCpAccount" placeholder="筛选卡号..." style="max-width:200px">
       </div>
     </div>
   </div>
@@ -304,6 +354,43 @@ var PLATFORM_META = {
   alipay: { name: "支付宝", color: "#1677ff" },
   bank: { name: "银行账户", color: "#722ed1" },
 };
+var PLATFORM_COLUMNS = {
+  wechat: [
+    { field: "time", label: "交易时间" },
+    { field: "amount", label: "金额" },
+    { field: "category", label: "交易类型" },
+    { field: "counterparty", label: "交易对方" },
+    { field: "description", label: "商品" },
+    { field: "payment_method", label: "支付方式" },
+  ],
+  alipay: [
+    { field: "time", label: "交易时间" },
+    { field: "amount", label: "金额" },
+    { field: "category", label: "交易分类" },
+    { field: "counterparty", label: "交易对方" },
+    { field: "description", label: "商品说明" },
+    { field: "payment_method", label: "收/付款方式" },
+  ],
+  bank: [
+    { field: "time", label: "记账日期/时间" },
+    { field: "amount", label: "金额" },
+    { field: "balance", label: "余额" },
+    { field: "category", label: "交易名称" },
+    { field: "currency", label: "币别" },
+    { field: "counterparty", label: "对方账户名" },
+    { field: "cp_account", label: "对方卡号/账号" },
+    { field: "cp_bank", label: "对方开户行" },
+    { field: "branch", label: "网点名称" },
+    { field: "payment_method", label: "渠道" },
+    { field: "description", label: "附言" },
+  ],
+};
+var PLATFORM_FILTER_LABELS = {
+  wechat: { category: "交易类型", counterparty: "交易对方", description: "商品", payment_method: "支付方式" },
+  alipay: { category: "交易分类", counterparty: "交易对方", description: "商品说明", payment_method: "收/付款方式" },
+  bank:   { category: "交易名称", counterparty: "对方账户名", description: "附言", payment_method: "渠道",
+            balance: "余额", currency: "币别", branch: "网点名称", cp_bank: "对方开户行", cp_account: "对方卡号" },
+};
 var PLATFORM_ORDER = ["wechat", "alipay", "bank"];
 var tabEl = document.getElementById("incomeTabs");
 var contentEl = document.getElementById("incomeContent");
@@ -318,6 +405,8 @@ var amountMaxEl = document.getElementById("filterAmountMax");
 var filterCategoryEl = document.getElementById("filterCategory");
 var filterCounterpartyEl = document.getElementById("filterCounterparty");
 var filterDescriptionEl = document.getElementById("filterDescription");
+var descriptionTagsEl = document.getElementById("descriptionTags");
+var descriptionDropdownEl = document.getElementById("descriptionDropdown");
 var filterPaymentMethodEl = document.getElementById("filterPaymentMethod");
 var categoryTagsEl = document.getElementById("categoryTags");
 var categoryDropdownEl = document.getElementById("categoryDropdown");
@@ -325,6 +414,18 @@ var counterpartyTagsEl = document.getElementById("counterpartyTags");
 var counterpartyDropdownEl = document.getElementById("counterpartyDropdown");
 var paymentMethodTagsEl = document.getElementById("paymentMethodTags");
 var paymentMethodDropdownEl = document.getElementById("paymentMethodDropdown");
+var balanceMinEl = document.getElementById("filterBalanceMin");
+var balanceMaxEl = document.getElementById("filterBalanceMax");
+var filterCurrencyEl = document.getElementById("filterCurrency");
+var currencyTagsEl = document.getElementById("currencyTags");
+var currencyDropdownEl = document.getElementById("currencyDropdown");
+var filterCpAccountEl = document.getElementById("filterCpAccount");
+var filterCpBankEl = document.getElementById("filterCpBank");
+var cpBankTagsEl = document.getElementById("cpBankTags");
+var cpBankDropdownEl = document.getElementById("cpBankDropdown");
+var filterBranchEl = document.getElementById("filterBranch");
+var branchTagsEl = document.getElementById("branchTags");
+var branchDropdownEl = document.getElementById("branchDropdown");
 var resetBtn = document.getElementById("filterReset");
 var curPlatform = null;
 var curPage = 1;
@@ -335,8 +436,14 @@ var amountMin = null;
 var amountMax = null;
 var fCategory = [];
 var fCounterparty = [];
-var fDescription = "";
+var fDescription = [];
 var fPaymentMethod = [];
+var balanceMin = null;
+var balanceMax = null;
+var fCurrency = [];
+var fCpAccount = "";
+var fCpBank = [];
+var fBranch = [];
 
 function getActivePlatforms() {
   return PLATFORM_ORDER.filter(function(p) { return allItems.some(function(t) { return t.platform === p; }); });
@@ -351,8 +458,14 @@ function getFiltered() {
     if (amountMax !== null && t.amount > amountMax) return false;
     if (fCategory.length && !fCategory.includes(t.category || "")) return false;
     if (fCounterparty.length && !fCounterparty.includes(t.counterparty || "")) return false;
-    if (fDescription && !(t.description || "").includes(fDescription)) return false;
+    if (fDescription.length && !fDescription.includes(t.description || "")) return false;
     if (fPaymentMethod.length && !fPaymentMethod.includes(t.payment_method || "")) return false;
+    if (balanceMin !== null && (t.balance === undefined || t.balance < balanceMin)) return false;
+    if (balanceMax !== null && (t.balance === undefined || t.balance > balanceMax)) return false;
+    if (fCurrency.length && !fCurrency.includes(t.currency || "")) return false;
+    if (fCpAccount && !(t.cp_account || "").includes(fCpAccount)) return false;
+    if (fCpBank.length && !fCpBank.includes(t.cp_bank || "")) return false;
+    if (fBranch.length && !fBranch.includes(t.branch || "")) return false;
     return true;
   });
 }
@@ -396,10 +509,14 @@ function renderTags() {
   }
   tagsHtml(fCategory, "categoryTags");
   tagsHtml(fCounterparty, "counterpartyTags");
+  tagsHtml(fDescription, "descriptionTags");
   tagsHtml(fPaymentMethod, "paymentMethodTags");
+  tagsHtml(fCurrency, "currencyTags");
+  tagsHtml(fCpBank, "cpBankTags");
+  tagsHtml(fBranch, "branchTags");
   document.querySelectorAll(".tag-remove").forEach(function(el) {
     el.addEventListener("click", function() {
-      var arr = this.dataset.container === "categoryTags" ? fCategory : (this.dataset.container === "counterpartyTags" ? fCounterparty : fPaymentMethod);
+      var arr = this.dataset.container === "categoryTags" ? fCategory : (this.dataset.container === "counterpartyTags" ? fCounterparty : (this.dataset.container === "descriptionTags" ? fDescription : (this.dataset.container === "currencyTags" ? fCurrency : (this.dataset.container === "cpBankTags" ? fCpBank : (this.dataset.container === "branchTags" ? fBranch : fPaymentMethod)))));
       var idx = arr.indexOf(this.dataset.value);
       if (idx > -1) { arr.splice(idx, 1); }
       renderTags();
@@ -417,18 +534,31 @@ function renderTable() {
   var pageItems = items.slice(start, start + pageSize);
   var total = items.reduce(function(s, t) { return s + t.amount; }, 0);
 
+  var columns = PLATFORM_COLUMNS[curPlatform] || PLATFORM_COLUMNS.bank;
+
   if (items.length === 0) {
     contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无匹配记录</p>';
   } else {
     var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
       '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
-    h += '<div class="table-wrap"><table><thead><tr>' +
-      '<th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th>' +
-      '</tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead><tr>';
+    columns.forEach(function(col) { h += '<th>' + col.label + '</th>'; });
+    h += '</tr></thead><tbody>';
     pageItems.forEach(function(t) {
-      h += '<tr><td>' + t.time + '</td><td style="color:#389e0d;font-weight:600">' + fmtYuan(t.amount) +
-        '</td><td>' + (t.category || "-") + '</td><td>' + (t.counterparty || "-") +
-        '</td><td>' + (t.description || "-") + '</td><td>' + (t.payment_method || "-") + '</td></tr>';
+      h += '<tr>';
+      columns.forEach(function(col) {
+        var val = t[col.field];
+        if (col.field === "amount") {
+          h += '<td style="color:#389e0d;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+        } else if (col.field === "balance" && val) {
+          h += '<td style="text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+        } else if (col.field === "balance") {
+          h += '<td style="text-align:right">-</td>';
+        } else {
+          h += '<td>' + (val || "-") + '</td>';
+        }
+      });
+      h += '</tr>';
     });
     h += '</tbody></table></div>';
     contentEl.innerHTML = h;
@@ -462,9 +592,27 @@ function renderTabs() {
       curPlatform = this.dataset.platform;
       curPage = 1;
       resetFilters();
+      updateFilterLabels();
       renderTable();
     });
   });
+}
+
+function updateFilterLabels() {
+  var labels = PLATFORM_FILTER_LABELS[curPlatform] || PLATFORM_FILTER_LABELS.bank;
+  document.getElementById("filterLabelCategory").textContent = labels.category + "：";
+  document.getElementById("filterLabelCounterparty").textContent = labels.counterparty + "：";
+  document.getElementById("filterLabelDescription").textContent = labels.description + "：";
+  document.getElementById("filterLabelPaymentMethod").textContent = labels.payment_method + "：";
+  var isBank = curPlatform === "bank";
+  document.getElementById("bankFilterRow").style.display = isBank ? "flex" : "none";
+  document.getElementById("bankFilterRow2").style.display = isBank ? "flex" : "none";
+  if (isBank && labels.balance) {
+    document.getElementById("filterLabelCurrency").textContent = labels.currency + "：";
+    document.getElementById("filterLabelCpBank").textContent = labels.cp_bank + "：";
+    document.getElementById("filterLabelBranch").textContent = labels.branch + "：";
+    document.getElementById("filterLabelCpAccount").textContent = labels.cp_account + "：";
+  }
 }
 
 function resetFilters() {
@@ -474,12 +622,22 @@ function resetFilters() {
   amountMax = null; amountMaxEl.value = "";
   fCategory = []; filterCategoryEl.value = "";
   fCounterparty = []; filterCounterpartyEl.value = "";
-  fDescription = ""; filterDescriptionEl.value = "";
+  fDescription = []; filterDescriptionEl.value = "";
   fPaymentMethod = []; filterPaymentMethodEl.value = "";
+  balanceMin = null; balanceMinEl.value = "";
+  balanceMax = null; balanceMaxEl.value = "";
+  fCurrency = []; filterCurrencyEl.value = "";
+  fCpAccount = ""; filterCpAccountEl.value = "";
+  fCpBank = []; filterCpBankEl.value = "";
+  fBranch = []; filterBranchEl.value = "";
   renderTags();
   categoryDropdownEl.style.display = "none";
   counterpartyDropdownEl.style.display = "none";
+  descriptionDropdownEl.style.display = "none";
   paymentMethodDropdownEl.style.display = "none";
+  currencyDropdownEl.style.display = "none";
+  cpBankDropdownEl.style.display = "none";
+  branchDropdownEl.style.display = "none";
 }
 
 function init() {
@@ -494,6 +652,7 @@ function init() {
           var platforms = getActivePlatforms();
           curPlatform = platforms.length > 0 ? platforms[0] : null;
           renderTabs();
+          updateFilterLabels();
           renderTable();
         }
         this.querySelector(".card-sub").textContent = "外部收入 · 不含转账 · 点击收起";
@@ -525,18 +684,37 @@ function init() {
   filterCategoryEl.addEventListener("focus", function() { renderTagDropdown(filterCategoryEl, categoryDropdownEl, fCategory, "category"); });
   filterCounterpartyEl.addEventListener("input", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
   filterCounterpartyEl.addEventListener("focus", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
-  filterDescriptionEl.addEventListener("input", function() { fDescription = this.value; curPage = 1; renderTable(); });
+  filterDescriptionEl.addEventListener("input", function() { renderTagDropdown(filterDescriptionEl, descriptionDropdownEl, fDescription, "description"); });
+  filterDescriptionEl.addEventListener("focus", function() { renderTagDropdown(filterDescriptionEl, descriptionDropdownEl, fDescription, "description"); });
+  filterDescriptionEl.addEventListener("keydown", function(e) { if (e.key === "Escape") descriptionDropdownEl.style.display = "none"; });
   filterPaymentMethodEl.addEventListener("input", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
   filterPaymentMethodEl.addEventListener("focus", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
   filterCategoryEl.addEventListener("keydown", function(e) { if (e.key === "Escape") categoryDropdownEl.style.display = "none"; });
   filterCounterpartyEl.addEventListener("keydown", function(e) { if (e.key === "Escape") counterpartyDropdownEl.style.display = "none"; });
   filterPaymentMethodEl.addEventListener("keydown", function(e) { if (e.key === "Escape") paymentMethodDropdownEl.style.display = "none"; });
+  // Bank-specific filters
+  balanceMinEl.addEventListener("input", function() { balanceMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  balanceMaxEl.addEventListener("input", function() { balanceMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  filterCurrencyEl.addEventListener("input", function() { renderTagDropdown(filterCurrencyEl, currencyDropdownEl, fCurrency, "currency"); });
+  filterCurrencyEl.addEventListener("focus", function() { renderTagDropdown(filterCurrencyEl, currencyDropdownEl, fCurrency, "currency"); });
+  filterCurrencyEl.addEventListener("keydown", function(e) { if (e.key === "Escape") currencyDropdownEl.style.display = "none"; });
+  filterCpAccountEl.addEventListener("input", function() { fCpAccount = this.value; curPage = 1; renderTable(); });
+  filterCpBankEl.addEventListener("input", function() { renderTagDropdown(filterCpBankEl, cpBankDropdownEl, fCpBank, "cp_bank"); });
+  filterCpBankEl.addEventListener("focus", function() { renderTagDropdown(filterCpBankEl, cpBankDropdownEl, fCpBank, "cp_bank"); });
+  filterCpBankEl.addEventListener("keydown", function(e) { if (e.key === "Escape") cpBankDropdownEl.style.display = "none"; });
+  filterBranchEl.addEventListener("input", function() { renderTagDropdown(filterBranchEl, branchDropdownEl, fBranch, "branch"); });
+  filterBranchEl.addEventListener("focus", function() { renderTagDropdown(filterBranchEl, branchDropdownEl, fBranch, "branch"); });
+  filterBranchEl.addEventListener("keydown", function(e) { if (e.key === "Escape") branchDropdownEl.style.display = "none"; });
   resetBtn.addEventListener("click", function() { resetFilters(); curPage = 1; renderTable(); });
   document.addEventListener("click", function(e) {
     if (!e.target.closest(".tag-input-wrap")) {
       categoryDropdownEl.style.display = "none";
       counterpartyDropdownEl.style.display = "none";
+      descriptionDropdownEl.style.display = "none";
       paymentMethodDropdownEl.style.display = "none";
+      currencyDropdownEl.style.display = "none";
+      cpBankDropdownEl.style.display = "none";
+      branchDropdownEl.style.display = "none";
     }
   });
 }

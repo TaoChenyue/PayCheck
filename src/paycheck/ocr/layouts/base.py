@@ -21,12 +21,16 @@ class Row:
     """一行交易记录的各字段原始值"""
     date: str = ""
     time: str = ""
+    currency: str = ""
     amount: str = ""
     balance: str = ""
     tx_name: str = ""
     channel: str = ""
+    branch: str = ""
     counterparty: str = ""
     memo: str = ""
+    cp_account: str = ""
+    cp_bank: str = ""
 
 
 BBox = Tuple[int, int, int, int]  # top, bottom, left, right

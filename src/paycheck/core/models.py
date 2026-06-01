@@ -15,6 +15,11 @@ class Transaction:
     amount: float = 0.0
     tx_type: str = "支出"
     payment_method: str = ""
+    balance: float = 0.0
+    currency: str = ""
+    branch: str = ""
+    cp_account: str = ""
+    cp_bank: str = ""
 
     def __repr__(self):
         return f"[{self.platform}] {self.time} {self.tx_type} ¥{self.amount}"

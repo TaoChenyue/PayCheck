@@ -68,7 +68,7 @@ def _write_csv(
 ) -> str:
     """将按页分组的交易记录写出为 CSV 字符串，可选写文件"""
     csv_buf = io.StringIO()
-    csv_buf.write("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name\n")
+    csv_buf.write("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name,currency,branch,cp_account,cp_bank\n")
     for p in range(total_pages):
         for t in page_results.get(p, []):
             row = [
@@ -78,9 +78,13 @@ def _write_csv(
                 f"{t['amount']:.2f}" if isinstance(t.get("amount"), (int, float)) else "",
                 _esc_csv(t.get("counterparty", "")),
                 _esc_csv(t.get("channel", "")),
-                f"{t['balance']:.2f}" if isinstance(t.get("balance"), (int, float)) else "",
+                f"{float(t['balance']):.2f}" if isinstance(t.get("balance"), (int, float)) else "0.00",
                 _esc_csv(t.get("memo", "")),
                 _esc_csv(t.get("tx_name", "")),
+                _esc_csv(t.get("currency", "")),
+                _esc_csv(t.get("branch", "")),
+                _esc_csv(t.get("cp_account", "")),
+                _esc_csv(t.get("cp_bank", "")),
             ]
             csv_buf.write(",".join(row) + "\n")
 

@@ -137,6 +137,11 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "amount": t.amount,
             "tx_type": t.tx_type,
             "payment_method": t.payment_method,
+            "balance": t.balance,
+            "currency": t.currency,
+            "branch": t.branch,
+            "cp_account": t.cp_account,
+            "cp_bank": t.cp_bank,
             "dt": dt,
             "month": month,
             "tx_type_norm": tx_type_map.get(t.tx_type, "支出"),
@@ -163,6 +168,11 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "description": t["description"],
             "amount": t["amount"],
             "payment_method": t["payment_method"],
+            "balance": t["balance"],
+            "currency": t["currency"],
+            "branch": t["branch"],
+            "cp_account": t["cp_account"],
+            "cp_bank": t["cp_bank"],
         }
         for t in external_txs
         if t["tx_type_norm"] == "收入"
