@@ -78,6 +78,16 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
 .income-filters input:focus{outline:none;border-color:#1a1a2e}
 .income-filters .reset-btn{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s;margin-left:auto}
 .income-filters .reset-btn:hover{border-color:#1a1a2e;color:#1a1a2e}
+.tag-list{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px}
+.tag{display:inline-flex;align-items:center;gap:2px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;padding:1px 8px;font-size:12px;color:#1a1a2e;line-height:1.6}
+.tag .tag-remove{cursor:pointer;font-size:14px;line-height:1;margin-left:2px;color:#999;user-select:none}
+.tag .tag-remove:hover{color:#ff4d4f}
+.tag-input-wrap{position:relative;display:inline-block}
+.tag-dropdown{position:absolute;top:100%;left:0;z-index:1000;background:#fff;border:1px solid #d9d9d9;border-radius:4px;max-height:180px;overflow-y:auto;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,0.12);display:none}
+.tag-dropdown-item{padding:5px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f5}
+.tag-dropdown-item:last-child{border-bottom:none}
+.tag-dropdown-item:hover{background:#f0f5ff}
+.multi-tag-select{display:inline-flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px}
 </style>
 </head>
 <body>
@@ -116,11 +126,23 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
     <div class="f-row">
       <div class="f-group">
         <label>类别：</label>
-        <input type="text" id="filterCategory" placeholder="筛选类别..." style="max-width:120px">
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterCategory" placeholder="输入筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="categoryDropdown"></div>
+          </div>
+          <div class="tag-list" id="categoryTags"></div>
+        </div>
       </div>
       <div class="f-group">
         <label>对方账户：</label>
-        <input type="text" id="filterCounterparty" placeholder="筛选对方..." style="max-width:140px">
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterCounterparty" placeholder="输入筛选..." style="max-width:140px">
+            <div class="tag-dropdown" id="counterpartyDropdown"></div>
+          </div>
+          <div class="tag-list" id="counterpartyTags"></div>
+        </div>
       </div>
       <div class="f-group">
         <label>备注：</label>
@@ -128,7 +150,13 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
       </div>
       <div class="f-group">
         <label>支付方式：</label>
-        <input type="text" id="filterPaymentMethod" placeholder="筛选方式..." style="max-width:120px">
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterPaymentMethod" placeholder="输入筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="paymentMethodDropdown"></div>
+          </div>
+          <div class="tag-list" id="paymentMethodTags"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -291,6 +319,12 @@ var filterCategoryEl = document.getElementById("filterCategory");
 var filterCounterpartyEl = document.getElementById("filterCounterparty");
 var filterDescriptionEl = document.getElementById("filterDescription");
 var filterPaymentMethodEl = document.getElementById("filterPaymentMethod");
+var categoryTagsEl = document.getElementById("categoryTags");
+var categoryDropdownEl = document.getElementById("categoryDropdown");
+var counterpartyTagsEl = document.getElementById("counterpartyTags");
+var counterpartyDropdownEl = document.getElementById("counterpartyDropdown");
+var paymentMethodTagsEl = document.getElementById("paymentMethodTags");
+var paymentMethodDropdownEl = document.getElementById("paymentMethodDropdown");
 var resetBtn = document.getElementById("filterReset");
 var curPlatform = null;
 var curPage = 1;
@@ -299,10 +333,10 @@ var dateStart = null;
 var dateEnd = null;
 var amountMin = null;
 var amountMax = null;
-var fCategory = "";
-var fCounterparty = "";
+var fCategory = [];
+var fCounterparty = [];
 var fDescription = "";
-var fPaymentMethod = "";
+var fPaymentMethod = [];
 
 function getActivePlatforms() {
   return PLATFORM_ORDER.filter(function(p) { return allItems.some(function(t) { return t.platform === p; }); });
@@ -315,11 +349,63 @@ function getFiltered() {
     if (dateEnd && t.time > dateEnd + " 23:59:59") return false;
     if (amountMin !== null && t.amount < amountMin) return false;
     if (amountMax !== null && t.amount > amountMax) return false;
-    if (fCategory && !(t.category || "").includes(fCategory)) return false;
-    if (fCounterparty && !(t.counterparty || "").includes(fCounterparty)) return false;
+    if (fCategory.length && !fCategory.includes(t.category || "")) return false;
+    if (fCounterparty.length && !fCounterparty.includes(t.counterparty || "")) return false;
     if (fDescription && !(t.description || "").includes(fDescription)) return false;
-    if (fPaymentMethod && !(t.payment_method || "").includes(fPaymentMethod)) return false;
+    if (fPaymentMethod.length && !fPaymentMethod.includes(t.payment_method || "")) return false;
     return true;
+  });
+}
+
+function getUniqueValues(field) {
+  var set = {};
+  allItems.forEach(function(t) {
+    if (t.platform === curPlatform && t[field]) { set[t[field]] = true; }
+  });
+  return Object.keys(set).sort();
+}
+
+function renderTagDropdown(inputEl, dropdownEl, selectedArr, field) {
+  var val = inputEl.value.trim();
+  var allVals = getUniqueValues(field);
+  var filtered = val
+    ? allVals.filter(function(v) { return v.includes(val) && !selectedArr.includes(v); })
+    : allVals.filter(function(v) { return !selectedArr.includes(v); });
+  if (filtered.length === 0) { dropdownEl.style.display = "none"; return; }
+  var html = "";
+  filtered.forEach(function(v) { html += '<div class="tag-dropdown-item" data-value="' + v.replace(/"/g,'&quot;') + '">' + v + '</div>'; });
+  dropdownEl.innerHTML = html;
+  dropdownEl.style.display = "block";
+  dropdownEl.querySelectorAll(".tag-dropdown-item").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var v = this.dataset.value;
+      if (!selectedArr.includes(v)) { selectedArr.push(v); }
+      inputEl.value = "";
+      dropdownEl.style.display = "none";
+      renderTags();
+      curPage = 1;
+      renderTable();
+    });
+  });
+}
+
+function renderTags() {
+  function tagsHtml(arr, containerId) {
+    var html = arr.map(function(v) { return '<span class="tag">' + v + '<span class="tag-remove" data-container="' + containerId + '" data-value="' + v.replace(/"/g,'&quot;') + '">×</span></span>'; }).join("");
+    document.getElementById(containerId).innerHTML = html;
+  }
+  tagsHtml(fCategory, "categoryTags");
+  tagsHtml(fCounterparty, "counterpartyTags");
+  tagsHtml(fPaymentMethod, "paymentMethodTags");
+  document.querySelectorAll(".tag-remove").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var arr = this.dataset.container === "categoryTags" ? fCategory : (this.dataset.container === "counterpartyTags" ? fCounterparty : fPaymentMethod);
+      var idx = arr.indexOf(this.dataset.value);
+      if (idx > -1) { arr.splice(idx, 1); }
+      renderTags();
+      curPage = 1;
+      renderTable();
+    });
   });
 }
 
@@ -386,10 +472,14 @@ function resetFilters() {
   dateEnd = null; dateEndEl.value = "";
   amountMin = null; amountMinEl.value = "";
   amountMax = null; amountMaxEl.value = "";
-  fCategory = ""; filterCategoryEl.value = "";
-  fCounterparty = ""; filterCounterpartyEl.value = "";
+  fCategory = []; filterCategoryEl.value = "";
+  fCounterparty = []; filterCounterpartyEl.value = "";
   fDescription = ""; filterDescriptionEl.value = "";
-  fPaymentMethod = ""; filterPaymentMethodEl.value = "";
+  fPaymentMethod = []; filterPaymentMethodEl.value = "";
+  renderTags();
+  categoryDropdownEl.style.display = "none";
+  counterpartyDropdownEl.style.display = "none";
+  paymentMethodDropdownEl.style.display = "none";
 }
 
 function init() {
@@ -431,11 +521,24 @@ function init() {
   dateEndEl.addEventListener("change", function() { dateEnd = this.value || null; curPage = 1; renderTable(); });
   amountMinEl.addEventListener("input", function() { amountMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
   amountMaxEl.addEventListener("input", function() { amountMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
-  filterCategoryEl.addEventListener("input", function() { fCategory = this.value; curPage = 1; renderTable(); });
-  filterCounterpartyEl.addEventListener("input", function() { fCounterparty = this.value; curPage = 1; renderTable(); });
+  filterCategoryEl.addEventListener("input", function() { renderTagDropdown(filterCategoryEl, categoryDropdownEl, fCategory, "category"); });
+  filterCategoryEl.addEventListener("focus", function() { renderTagDropdown(filterCategoryEl, categoryDropdownEl, fCategory, "category"); });
+  filterCounterpartyEl.addEventListener("input", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
+  filterCounterpartyEl.addEventListener("focus", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
   filterDescriptionEl.addEventListener("input", function() { fDescription = this.value; curPage = 1; renderTable(); });
-  filterPaymentMethodEl.addEventListener("input", function() { fPaymentMethod = this.value; curPage = 1; renderTable(); });
+  filterPaymentMethodEl.addEventListener("input", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
+  filterPaymentMethodEl.addEventListener("focus", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
+  filterCategoryEl.addEventListener("keydown", function(e) { if (e.key === "Escape") categoryDropdownEl.style.display = "none"; });
+  filterCounterpartyEl.addEventListener("keydown", function(e) { if (e.key === "Escape") counterpartyDropdownEl.style.display = "none"; });
+  filterPaymentMethodEl.addEventListener("keydown", function(e) { if (e.key === "Escape") paymentMethodDropdownEl.style.display = "none"; });
   resetBtn.addEventListener("click", function() { resetFilters(); curPage = 1; renderTable(); });
+  document.addEventListener("click", function(e) {
+    if (!e.target.closest(".tag-input-wrap")) {
+      categoryDropdownEl.style.display = "none";
+      counterpartyDropdownEl.style.display = "none";
+      paymentMethodDropdownEl.style.display = "none";
+    }
+  });
 }
 
 init();
