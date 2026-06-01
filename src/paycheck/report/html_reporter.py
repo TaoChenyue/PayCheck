@@ -116,6 +116,15 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 .page-info{{font-size:13px;color:#666;min-width:60px;text-align:center}}
 .page-size-select{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;cursor:pointer;background:#fff}}
 .page-size-select:focus{{outline:none;border-color:#1a1a2e}}
+.income-date-filter{{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}}
+.income-date-filter label{{font-size:13px;color:#666}}
+.income-date-filter input[type=date]{{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;font-family:inherit}}
+.income-date-filter input[type=date]:focus{{outline:none;border-color:#1a1a2e}}
+.income-date-filter .reset-btn{{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s}}
+.income-date-filter .reset-btn:hover{{border-color:#1a1a2e;color:#1a1a2e}}
+.income-filter-row th{{padding:4px 6px!important;border-bottom:1px solid #e8e8e8!important}}
+.income-filter-input{{width:100%;padding:4px 6px;border:1px solid #e8e8e8;border-radius:3px;font-size:12px;box-sizing:border-box;font-family:inherit}}
+.income-filter-input:focus{{outline:none;border-color:#1a1a2e}}
 </style>
 </head>
 <body>
@@ -138,6 +147,13 @@ footer{{text-align:center;padding:20px;color:#aaa;font-size:13px}}
 <div id="incomeDetails" class="section" style="display:none">
   <h2>💰 收入详情</h2>
   <div class="income-tabs" id="incomeTabs"></div>
+  <div class="income-date-filter">
+    <label>时间筛选：</label>
+    <input type="date" id="filterDateStart">
+    <span>—</span>
+    <input type="date" id="filterDateEnd">
+    <button class="reset-btn" id="filterReset">重置</button>
+  </div>
   <div id="incomeContent"></div>
   <div class="income-pagination" id="incomePagination">
     <div class="income-page-controls">
@@ -274,7 +290,7 @@ pie.on("click", function(p) {{ bar.dispatchAction({{ type: "highlight", name: p.
 window.addEventListener("resize", function() {{ pie.resize(); bar.resize(); }});
 }})();
 
-// Income details — tab + pagination
+// Income details — tab + pagination + filters
 (function(){{
 var allItems = DATA.income_details || [];
 var PLATFORM_META = {{
@@ -289,16 +305,37 @@ var pageInfoEl = document.getElementById("pageInfo");
 var pagePrevEl = document.getElementById("pagePrev");
 var pageNextEl = document.getElementById("pageNext");
 var pageSizeEl = document.getElementById("pageSizeSelect");
+var dateStartEl = document.getElementById("filterDateStart");
+var dateEndEl = document.getElementById("filterDateEnd");
+var resetBtn = document.getElementById("filterReset");
 var curPlatform = null;
 var curPage = 1;
 var pageSize = 10;
+var dateStart = null;
+var dateEnd = null;
+var colFilters = {{ time: "", amount: "", category: "", counterparty: "", description: "", payment_method: "" }};
+
+function esc(v) {{ return String(v).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }}
 
 function getActivePlatforms() {{
   return PLATFORM_ORDER.filter(function(p) {{ return allItems.some(function(t) {{ return t.platform === p; }}); }});
 }}
 
 function getFiltered() {{
-  return allItems.filter(function(t) {{ return t.platform === curPlatform; }});
+  return allItems.filter(function(t) {{
+    if (t.platform !== curPlatform) return false;
+    // 日期范围
+    if (dateStart && t.time < dateStart) return false;
+    if (dateEnd && t.time > dateEnd + " 23:59:59") return false;
+    // 列过滤
+    if (colFilters.time && !t.time.includes(colFilters.time)) return false;
+    if (colFilters.amount && !String(t.amount).includes(colFilters.amount)) return false;
+    if (colFilters.category && !(t.category || "").includes(colFilters.category)) return false;
+    if (colFilters.counterparty && !(t.counterparty || "").includes(colFilters.counterparty)) return false;
+    if (colFilters.description && !(t.description || "").includes(colFilters.description)) return false;
+    if (colFilters.payment_method && !(t.payment_method || "").includes(colFilters.payment_method)) return false;
+    return true;
+  }});
 }}
 
 function renderTable() {{
@@ -308,16 +345,19 @@ function renderTable() {{
   var start = (curPage - 1) * pageSize;
   var pageItems = items.slice(start, start + pageSize);
   var total = items.reduce(function(s, t) {{ return s + t.amount; }}, 0);
-  var meta = PLATFORM_META[curPlatform] || {{ name: curPlatform, color: "#888" }};
 
   if (items.length === 0) {{
-    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无收入记录</p>';
+    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无匹配记录</p>';
   }} else {{
     var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
       '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
-    h += '<div class="table-wrap"><table><thead><tr>' +
-      '<th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th>' +
-      '</tr></thead><tbody>';
+    h += '<div class="table-wrap"><table><thead>';
+    h += '<tr><th>时间</th><th>金额</th><th>类别</th><th>对方账户</th><th>备注</th><th>支付方式</th></tr>';
+    h += '<tr class="income-filter-row">';
+    ["time","amount","category","counterparty","description","payment_method"].forEach(function(k) {{
+      h += '<th><input class="income-filter-input" data-col="' + k + '" placeholder="筛选..." value="' + esc(colFilters[k]) + '"></th>';
+    }});
+    h += '</tr></thead><tbody>';
     pageItems.forEach(function(t) {{
       h += '<tr><td>' + t.time + '</td><td style="color:#389e0d;font-weight:600">' + fmtYuan(t.amount) +
         '</td><td>' + (t.category || "-") + '</td><td>' + (t.counterparty || "-") +
@@ -325,9 +365,16 @@ function renderTable() {{
     }});
     h += '</tbody></table></div>';
     contentEl.innerHTML = h;
+    // 绑定列过滤输入
+    contentEl.querySelectorAll(".income-filter-input").forEach(function(inp) {{
+      inp.addEventListener("input", function() {{
+        colFilters[this.dataset.col] = this.value;
+        curPage = 1;
+        renderTable();
+      }});
+    }});
   }}
 
-  // 更新分页
   pageInfoEl.textContent = curPage + " / " + totalPages;
   pagePrevEl.disabled = curPage <= 1;
   pageNextEl.disabled = curPage >= totalPages;
@@ -341,29 +388,35 @@ function renderTabs() {{
     return;
   }}
   var h = "";
-  platforms.forEach(function(p, i) {{
+  platforms.forEach(function(p) {{
     var meta = PLATFORM_META[p] || {{ name: p, color: "#888" }};
     var count = allItems.filter(function(t) {{ return t.platform === p; }}).length;
-    var active = p === curPlatform ? ' active' : '';
+    var active = p === curPlatform ? " active" : "";
     h += '<button class="income-tab' + active + '" data-platform="' + p + '">' +
       meta.name + '<span class="tab-count">' + count + ' 笔</span></button>';
   }});
   tabEl.innerHTML = h;
-
-  // 绑定 tab 点击
   tabEl.querySelectorAll(".income-tab").forEach(function(btn) {{
     btn.addEventListener("click", function() {{
       tabEl.querySelectorAll(".income-tab").forEach(function(b) {{ b.classList.remove("active"); }});
       this.classList.add("active");
       curPlatform = this.dataset.platform;
       curPage = 1;
+      resetFilters();
       renderTable();
     }});
   }});
 }}
 
+function resetFilters() {{
+  dateStart = null;
+  dateEnd = null;
+  dateStartEl.value = "";
+  dateEndEl.value = "";
+  colFilters = {{ time: "", amount: "", category: "", counterparty: "", description: "", payment_method: "" }};
+}}
+
 function init() {{
-  // 卡片点击展开/收起
   document.querySelectorAll(".card.clickable").forEach(function(el) {{
     el.addEventListener("click", function() {{
       var target = document.getElementById(this.dataset.target);
@@ -385,7 +438,6 @@ function init() {{
     }});
   }});
 
-  // 分页事件
   pagePrevEl.addEventListener("click", function() {{
     if (curPage > 1) {{ curPage--; renderTable(); }}
   }});
@@ -395,6 +447,23 @@ function init() {{
   }});
   pageSizeEl.addEventListener("change", function() {{
     pageSize = parseInt(this.value);
+    curPage = 1;
+    renderTable();
+  }});
+
+  // 日期筛选
+  dateStartEl.addEventListener("change", function() {{
+    dateStart = this.value || null;
+    curPage = 1;
+    renderTable();
+  }});
+  dateEndEl.addEventListener("change", function() {{
+    dateEnd = this.value || null;
+    curPage = 1;
+    renderTable();
+  }});
+  resetBtn.addEventListener("click", function() {{
+    resetFilters();
     curPage = 1;
     renderTable();
   }});
