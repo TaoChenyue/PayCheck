@@ -1,15 +1,15 @@
-"""PDF → CSV 管线编排（全内存，零中间文件）
+"""PDF / 图片 → CSV 管线编排
 
-流程: PDF → 逐页渲染 → 表格裁剪 → PaddleOCR → layout 结构化 → CSV
-支持多进程并行处理，任意页出错即取消所有剩余任务。
+管线:
+  pdf_to_images() → images_to_csv()   # 两阶段
+  pdf_to_csv()    ← 两步组合（临时图片）  # 快捷方式
 """
 
-import concurrent.futures
 import io
 import logging
-import multiprocessing
 import os
-import sys
+import re
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,17 +20,21 @@ from paycheck.ocr.layouts import get_layout
 log = logging.getLogger("paycheck.pipeline")
 
 
-def _page_worker(args: Tuple[int, str, str, float]) -> Tuple[int, List[Dict[str, Any]]]:
-    """在子进程中处理单页 PDF。
+# =========================================================================
+# 阶段二：图片 → OCR → CSV
+# =========================================================================
+def _image_worker(args: Tuple[int, str, str, float]) -> Tuple[int, List[Dict[str, Any]]]:
+    """在子进程中处理单张页面图片（OCR + layout 结构化）。
+
     每个 worker 进程有自己独立的 PaddleOCR 实例（_get_engine 缓存）。
 
     Args:
-        args: (page_num, pdf_path, layout_name, scale)
+        args: (page_num, image_path, layout_name, scale)
 
     Returns:
         (page_num, list[交易字典])
     """
-    page_num, pdf_path, layout_name, scale = args
+    page_num, image_path, layout_name, scale = args
 
     # 在子进程中提前禁用 MKLDNN（OneDNN），绕过 PaddlePaddle PIR 未实现的 bug
     import os
@@ -38,22 +42,17 @@ def _page_worker(args: Tuple[int, str, str, float]) -> Tuple[int, List[Dict[str,
     os.environ.setdefault("GLOG_minloglevel", "2")
 
     import cv2
-    import fitz
     import numpy as np
-    from paycheck.ocr.pdf_render import render_page_cropped
     from paycheck.ocr.engine import process_image
 
-    # 渲染
-    doc = fitz.open(pdf_path)
-    try:
-        pil_img = render_page_cropped(doc, page_num, scale)
-    finally:
-        doc.close()
+    # 加载图片
+    img = cv2.imread(image_path)
+    if img is None:
+        log.warning("无法读取图片: %s", image_path)
+        return page_num, []
 
     # OCR
-    img_rgb = np.array(pil_img)
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    items = process_image(img_bgr)
+    items = process_image(img)
 
     if not items:
         return page_num, []
@@ -67,48 +66,80 @@ def _page_worker(args: Tuple[int, str, str, float]) -> Tuple[int, List[Dict[str,
     return page_num, txn_dicts
 
 
-def pdf_to_csv(
-    pdf_path: str,
+def _write_csv(
+    page_results: Dict[int, List[Dict[str, Any]]],
+    total_pages: int,
+    output_path: Optional[str] = None,
+) -> str:
+    """将按页分组的交易记录写出为 CSV 字符串，可选写文件"""
+    csv_buf = io.StringIO()
+    csv_buf.write("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name\n")
+    for p in range(total_pages):
+        for t in page_results.get(p, []):
+            row = [
+                _esc_csv(t.get("date", "")),
+                _esc_csv(t.get("time", "")),
+                _esc_csv(t.get("tx_type", "")),
+                f"{t['amount']:.2f}" if isinstance(t.get("amount"), (int, float)) else "",
+                _esc_csv(t.get("counterparty", "")),
+                _esc_csv(t.get("channel", "")),
+                f"{t['balance']:.2f}" if isinstance(t.get("balance"), (int, float)) else "",
+                _esc_csv(t.get("memo", "")),
+                _esc_csv(t.get("tx_name", "")),
+            ]
+            csv_buf.write(",".join(row) + "\n")
+
+    csv_content = csv_buf.getvalue()
+    csv_buf.close()
+
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(csv_content)
+        log.info("已写入: %s", output_path)
+
+    return csv_content
+
+
+def images_to_csv(
+    image_paths: List[str],
     layout_name: str,
     scale: float = 3.0,
     output_path: Optional[str] = None,
-    timeout_minutes: int = 60,
+    timeout_minutes: int = 120,
+    preview: bool = False,
 ) -> int:
-    """PDF → CSV 完整流水线
+    """图片文件列表 → OCR → CSV
 
     Args:
-        pdf_path: PDF 文件路径
-        layout_name: 银行布局名称（如 "boc"），用于匹配 layout
-        scale: 渲染缩放倍率
-        output_path: 输出 CSV 路径
+        image_paths: 页面图片路径列表（已排序）
+        layout_name: 银行布局名称（如 "boc"）
+        scale: 渲染倍率（需与 pdf2image 时一致）
+        output_path: 输出 CSV 路径（不指定则输出到 stdout）
         timeout_minutes: 超时分钟数
+        preview: 预览模式，不写文件，结果输出到终端
+
     Returns:
         0 成功, 1 失败
     """
     start_time = time.time()
 
-    if not os.path.exists(pdf_path):
-        log.error("文件不存在: %s", pdf_path)
+    if not image_paths:
+        log.error("图片列表为空")
         return 1
 
     if get_layout(layout_name) is None:
         log.error("不支持的银行布局: %s", layout_name)
         return 1
 
-    # 读取 PDF 确定总页数
-    import fitz
-    doc = fitz.open(pdf_path)
-    total_pages = len(doc)
-    doc.close()
+    total_pages = len(image_paths)
+    desc = os.path.basename(os.path.dirname(image_paths[0])) if len(image_paths) > 1 else os.path.basename(image_paths[0])
 
-    if total_pages == 0:
-        log.warning("PDF 为空: %s", pdf_path)
-        return 1
+    # 提取页码（从文件名 _p{N}.png）
+    def _page_key(p: str) -> int:
+        m = re.search(r'_p(\d+)\.png$', p)
+        return int(m.group(1)) if m else 0
 
-    desc = os.path.basename(pdf_path)
-    n_workers = min(multiprocessing.cpu_count(), 4)
-
-    page_args = [(i, pdf_path, layout_name, scale) for i in range(total_pages)]
+    sorted_paths = sorted(image_paths, key=_page_key)
 
     page_results: Dict[int, List[Dict[str, Any]]] = {}
     exit_code = 0
@@ -116,40 +147,30 @@ def pdf_to_csv(
     total_txns = 0
     max_timeout = timeout_minutes * 60
 
-    with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-        futures = {
-            executor.submit(_page_worker, arg): i
-            for i, arg in enumerate(page_args)
-        }
+    # 预加载 OCR 模型，避免进度条卡在 0%
+    from paycheck.ocr.engine import warmup_engine
+    warmup_engine()
 
-        try:
-            with tqdm(total=total_pages, desc=desc, unit="页") as pbar:
-                for future in concurrent.futures.as_completed(futures):
-                    # 检查总超时
-                    elapsed = time.time() - start_time
-                    if elapsed >= max_timeout:
-                        tqdm.write(f"⏰ 超时 {timeout_minutes} 分钟，已处理 {len(page_results)}/{total_pages} 页")
-                        error_info = (0, f"总处理时间超过 {timeout_minutes} 分钟")
-                        break
+    with tqdm(total=total_pages, desc=desc, unit="页") as pbar:
+        for page_num in range(total_pages):
+            # 检查总超时
+            elapsed = time.time() - start_time
+            if elapsed >= max_timeout:
+                tqdm.write(f"⏰ 超时 {timeout_minutes} 分钟，已处理 {len(page_results)}/{total_pages} 页")
+                error_info = (0, f"总处理时间超过 {timeout_minutes} 分钟")
+                break
 
-                    page_num = futures[future]
-                    try:
-                        result_page, txn_dicts = future.result()
-                        page_results[result_page] = txn_dicts
-                        total_txns += len(txn_dicts)
-                        pbar.update(1)
-                    except Exception as e:
-                        error_info = (page_num + 1, str(e))
-                        log.error("第 %d 页处理失败: %s", page_num + 1, e)
-                        break
-
-        except KeyboardInterrupt:
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise
-
-        # 出错或超时 → 取消所有剩余任务
-        if error_info is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+            try:
+                result_page, txn_dicts = _image_worker(
+                    (page_num, sorted_paths[page_num], layout_name, scale)
+                )
+                page_results[result_page] = txn_dicts
+                total_txns += len(txn_dicts)
+                pbar.update(1)
+            except Exception as e:
+                error_info = (page_num + 1, str(e))
+                log.error("第 %d 页处理失败: %s", page_num + 1, e)
+                break
 
     # --- 结果处理 ---
     if error_info is not None:
@@ -164,38 +185,68 @@ def pdf_to_csv(
         log.warning("OCR 未提取到任何内容")
         return 1
 
-    # 按页码顺序写出 CSV
+    # 写出 CSV（预览模式 → 终端输出）
     if exit_code == 0:
-        csv_buf = io.StringIO()
-        csv_buf.write("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name\n")
-        for p in range(total_pages):
-            for t in page_results.get(p, []):
-                row = [
-                    _esc_csv(t.get("date", "")),
-                    _esc_csv(t.get("time", "")),
-                    _esc_csv(t.get("tx_type", "")),
-                    f"{t['amount']:.2f}" if isinstance(t.get("amount"), (int, float)) else "",
-                    _esc_csv(t.get("counterparty", "")),
-                    _esc_csv(t.get("channel", "")),
-                    f"{t['balance']:.2f}" if isinstance(t.get("balance"), (int, float)) else "",
-                    _esc_csv(t.get("memo", "")),
-                    _esc_csv(t.get("tx_name", "")),
-                ]
-                csv_buf.write(",".join(row) + "\n")
-
-        csv_content = csv_buf.getvalue()
-        csv_buf.close()
-
-        if output_path:
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(csv_content)
-            log.info("已写入: %s", output_path)
+        if preview:
+            print(_write_csv(page_results, total_pages))
         else:
-            sys.stdout.write(csv_content)
+            _write_csv(page_results, total_pages, output_path)
 
     elapsed = time.time() - start_time
     log.info("总耗时 %ds, %d 条交易", elapsed, total_txns)
     return exit_code
+
+
+# =========================================================================
+# 阶段一 + 阶段二组合：PDF → CSV（两阶段，用临时图片中转）
+# =========================================================================
+
+
+def pdf_to_csv(
+    pdf_path: str,
+    layout_name: str,
+    scale: float = 3.0,
+    output_path: Optional[str] = None,
+    timeout_minutes: int = 60,
+) -> int:
+    """PDF → CSV 完整流水线（组合 pdf_to_images + images_to_csv）
+
+    内部使用临时目录存储中间图片，处理完后自动清理。
+
+    Args:
+        pdf_path: PDF 文件路径
+        layout_name: 银行布局名称（如 "boc"）
+        scale: 渲染缩放倍率
+        output_path: 输出 CSV 路径
+        timeout_minutes: 超时分钟数
+
+    Returns:
+        0 成功, 1 失败
+    """
+    if not os.path.exists(pdf_path):
+        log.error("文件不存在: %s", pdf_path)
+        return 1
+
+    from paycheck.ocr.pdf_render import pdf_to_images
+
+    with tempfile.TemporaryDirectory(prefix="paycheck_pdf_") as tmpdir:
+        # 阶段一：PDF → 图片
+        log.info("渲染 PDF → 图片...")
+        image_paths = pdf_to_images(pdf_path, scale=scale, output_dir=tmpdir)
+
+        if not image_paths:
+            log.error("PDF 渲染失败: %s", pdf_path)
+            return 1
+
+        # 阶段二：图片 → CSV
+        log.info("OCR %d 页...", len(image_paths))
+        return images_to_csv(
+            image_paths,
+            layout_name,
+            scale=scale,
+            output_path=output_path,
+            timeout_minutes=timeout_minutes,
+        )
 
 
 def _esc_csv(s) -> str:
