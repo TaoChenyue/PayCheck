@@ -106,6 +106,7 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
 .internal-note{background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:10px 16px;margin:12px 0;font-size:13px;color:#ad4e00;display:none}
 .internal-note.show{display:block}
 .internal-note strong{color:#d46b08}
+.internal-table-wrap{margin-top:12px}
 </style>
 </head>
 <body>
@@ -117,7 +118,7 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
 </header>
 
 <div class="cards">
-  <div class="card"><div class="card-label">总支出</div><div class="card-value">¥${TOTAL_EXPENSE}</div><div class="card-sub">${TOTAL_COUNT} 笔 · 已剔除内部转账</div></div>
+  <div class="card clickable" data-target="expenseDetails"><div class="card-label">总支出</div><div class="card-value">¥${TOTAL_EXPENSE}</div><div class="card-sub">${TOTAL_COUNT} 笔 · 已剔除内部转账 · 点击展开</div></div>
   <div class="card"><div class="card-label">月均支出</div><div class="card-value">¥${MONTHLY_AVG}</div><div class="card-sub">共 ${MONTH_COUNT} 个月</div></div>
   <div class="card clickable" data-target="incomeDetails"><div class="card-label">总收入（参考）</div><div class="card-value">¥${TOTAL_INCOME}</div><div class="card-sub">外部收入 · 不含转账 · 点击展开</div></div>
 </div>
@@ -129,35 +130,35 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
   </div>
   <div class="rules-body" id="rulesBody" style="display:none">
     <div class="rules-tabs" id="rulesTabs"></div>
+    <div id="rulesGroups"></div>
     <div class="f-row">
-      <div class="f-group">
-        <label>字段：</label>
-        <select id="rulesField" class="rules-field-select"></select>
-      </div>
-      <div class="f-group">
-        <label>运算符：</label>
-        <select id="rulesOperator" class="rules-operator-select"></select>
-      </div>
-    </div>
-    <div class="f-row">
-      <div class="f-group" style="flex:1;align-items:flex-start">
-        <label style="padding-top:5px">值：</label>
-        <div class="multi-tag-select" style="flex:1">
-          <div class="tag-input-wrap">
-            <input type="text" id="rulesAddInput" placeholder="输入或选择值…" style="max-width:200px">
-            <div class="tag-dropdown" id="rulesDropdown"></div>
-          </div>
-          <div class="tag-list" id="rulesTags"></div>
-        </div>
-      </div>
-    </div>
-    <div class="f-row">
+      <button class="reset-btn" id="rulesAddGroup">+ 添加规则</button>
       <button class="reset-btn" id="rulesReset">重置为默认规则</button>
       <button class="page-btn" id="rulesClear">清空全部规则</button>
     </div>
     <div class="internal-note" id="internalNote">
       <strong>⚡ 内部转账已剔除</strong> — 共剔除 <strong id="internalNoteCount">0</strong> 笔，
       金额合计 <strong id="internalNoteAmount">¥0.00</strong>
+    </div>
+    <div id="internalTableSection" style="display:none">
+      <div class="table-wrap internal-table-wrap">
+        <table>
+          <thead><tr id="internalTableHead"></tr></thead>
+          <tbody id="internalTableBody"></tbody>
+        </table>
+      </div>
+      <div class="income-pagination" id="internalPagination">
+        <div class="income-page-controls">
+          <button class="page-btn" id="intPagePrev" disabled>‹ 上一页</button>
+          <span class="page-info" id="intPageInfo">0 / 0</span>
+          <button class="page-btn" id="intPageNext" disabled>下一页 ›</button>
+        </div>
+        <select class="page-size-select" id="intPageSizeSelect">
+          <option value="10" selected>10 条/页</option>
+          <option value="20">20 条/页</option>
+          <option value="50">50 条/页</option>
+        </select>
+      </div>
     </div>
   </div>
 </div>
@@ -283,6 +284,127 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
   </div>
 </div>
 
+<div id="expenseDetails" class="section" style="display:none">
+  <h2>💸 支出详情</h2>
+  <div class="income-tabs" id="expenseTabs"></div>
+  <div class="income-filters" id="expenseFilters">
+    <div class="f-row">
+      <div class="f-group">
+        <label>时间：</label>
+        <input type="date" id="filterExpDateStart">
+        <span>—</span>
+        <input type="date" id="filterExpDateEnd">
+      </div>
+      <div class="f-group">
+        <label>金额：</label>
+        <input type="number" id="filterExpAmountMin" placeholder="最小值" min="0" step="0.01">
+        <span>—</span>
+        <input type="number" id="filterExpAmountMax" placeholder="最大值" min="0" step="0.01">
+      </div>
+      <button class="reset-btn" id="filterExpReset">重置</button>
+    </div>
+    <div class="f-row">
+      <div class="f-group">
+        <label id="filterLabelExpCategory">类别：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpCategory" placeholder="输入筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="expCategoryDropdown"></div>
+          </div>
+          <div class="tag-list" id="expCategoryTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpCounterparty">对方账户：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpCounterparty" placeholder="输入筛选..." style="max-width:140px">
+            <div class="tag-dropdown" id="expCounterpartyDropdown"></div>
+          </div>
+          <div class="tag-list" id="expCounterpartyTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpDescription">备注：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpDescription" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="expDescriptionDropdown"></div>
+          </div>
+          <div class="tag-list" id="expDescriptionTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpPaymentMethod">支付方式：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpPaymentMethod" placeholder="输入筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="expPaymentMethodDropdown"></div>
+          </div>
+          <div class="tag-list" id="expPaymentMethodTags"></div>
+        </div>
+      </div>
+    </div>
+    <div class="f-row" id="expBankFilterRow">
+      <div class="f-group">
+        <label>余额：</label>
+        <input type="number" id="filterExpBalanceMin" placeholder="最小值" min="0" step="0.01">
+        <span>—</span>
+        <input type="number" id="filterExpBalanceMax" placeholder="最大值" min="0" step="0.01">
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpCurrency">币别：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpCurrency" placeholder="筛选..." style="max-width:100px">
+            <div class="tag-dropdown" id="expCurrencyDropdown"></div>
+          </div>
+          <div class="tag-list" id="expCurrencyTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpCpBank">对方开户行：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpCpBank" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="expCpBankDropdown"></div>
+          </div>
+          <div class="tag-list" id="expCpBankTags"></div>
+        </div>
+      </div>
+      <div class="f-group">
+        <label id="filterLabelExpBranch">网点名称：</label>
+        <div class="multi-tag-select">
+          <div class="tag-input-wrap">
+            <input type="text" id="filterExpBranch" placeholder="筛选..." style="max-width:120px">
+            <div class="tag-dropdown" id="expBranchDropdown"></div>
+          </div>
+          <div class="tag-list" id="expBranchTags"></div>
+        </div>
+      </div>
+    </div>
+    <div class="f-row" id="expBankFilterRow2">
+      <div class="f-group">
+        <label id="filterLabelExpCpAccount">对方卡号：</label>
+        <input type="text" id="filterExpCpAccount" placeholder="筛选卡号..." style="max-width:200px">
+      </div>
+    </div>
+  </div>
+  <div id="expenseContent"></div>
+  <div class="income-pagination" id="expensePagination">
+    <div class="income-page-controls">
+      <button class="page-btn" id="expPagePrev" disabled>‹ 上一页</button>
+      <span class="page-info" id="expPageInfo">0 / 0</span>
+      <button class="page-btn" id="expPageNext" disabled>下一页 ›</button>
+    </div>
+    <select class="page-size-select" id="expPageSizeSelect">
+      <option value="10" selected>10 条/页</option>
+      <option value="20">20 条/页</option>
+      <option value="100">100 条/页</option>
+    </select>
+  </div>
+</div>
+
 <div class="platform-cards">
   <div class="platform-card wechat"><div class="platform-name">微信支付（真实消费）</div><div class="platform-value">¥${WECHAT_TOTAL}</div><div class="platform-count">${WECHAT_COUNT} 笔</div></div>
   <div class="platform-card alipay"><div class="platform-name">支付宝（真实消费）</div><div class="platform-value">¥${ALIPAY_TOTAL}</div><div class="platform-count">${ALIPAY_COUNT} 笔</div></div>
@@ -319,7 +441,7 @@ footer{text-align:center;padding:20px;color:#aaa;font-size:13px}
   <div class="table-wrap">
     <table>
       <thead><tr><th>月份</th><th>笔数</th><th>总金额</th><th>微信</th><th>支付宝</th><th>银行</th></tr></thead>
-      <tbody>
+      <tbody id="monthlyTableBody">
         ${TABLE_ROWS}
       </tbody>
     </table>
@@ -337,24 +459,46 @@ var COLORS = ["#5470c6","#91cc75","#fac858","#ee6666","#73c0de","#3ba272","#fc84
 function fmtNum(n) { return Number(n).toLocaleString("zh-CN", {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function fmtYuan(n) { return "¥" + fmtNum(n); }
 
+// ── Global column definitions for tabbed tables ──
+var PLATFORM_COLUMNS = {
+  wechat: [
+    { field: "time", label: "交易时间" },
+    { field: "amount", label: "金额" },
+    { field: "category", label: "交易类型" },
+    { field: "counterparty", label: "交易对方" },
+    { field: "description", label: "商品" },
+    { field: "payment_method", label: "支付方式" },
+  ],
+  alipay: [
+    { field: "time", label: "交易时间" },
+    { field: "amount", label: "金额" },
+    { field: "category", label: "交易分类" },
+    { field: "counterparty", label: "交易对方" },
+    { field: "description", label: "商品说明" },
+    { field: "payment_method", label: "收/付款方式" },
+  ],
+  bank: [
+    { field: "time", label: "记账日期/时间" },
+    { field: "amount", label: "金额" },
+    { field: "balance", label: "余额" },
+    { field: "category", label: "交易名称" },
+    { field: "currency", label: "币别" },
+    { field: "counterparty", label: "对方账户名" },
+    { field: "cp_account", label: "对方卡号/账号" },
+    { field: "cp_bank", label: "对方开户行" },
+    { field: "branch", label: "网点名称" },
+    { field: "payment_method", label: "渠道" },
+    { field: "description", label: "附言" },
+  ],
+};
+
 // ── Rule Engine ──
 var RULES_KEY = 'paycheck_internal_rules';
-var PLATFORM_FIELDS = {
-  wechat: ['category','counterparty','description','payment_method','tx_type'],
-  alipay: ['category','counterparty','description','payment_method','tx_type'],
-  bank: ['category','counterparty','description','payment_method','tx_type','balance','currency','branch','cp_account','cp_bank']
-};
 var PLATFORM_NAMES = { wechat: '微信支付', alipay: '支付宝', bank: '银行账户' };
 var DEFAULT_RULES = {
-  wechat:   { field: 'category', operator: 'contains', values: ['充值','提现','零钱'] },
-  alipay:   { field: 'tx_type', operator: 'equals', values: ['不计收支'] },
-  bank:     { field: 'counterparty', operator: 'contains', values: [] }
-};
-var FIELD_LABELS = {
-  category: '类别', counterparty: '对方账户', description: '备注',
-  payment_method: '支付方式', tx_type: '收/支',
-  balance: '余额', currency: '币别', branch: '网点名称',
-  cp_account: '对方卡号', cp_bank: '对方开户行'
+  wechat:   [ { id: 'd1', field: 'category', operator: 'contains', values: ['充值','提现','零钱'] } ],
+  alipay:   [ { id: 'd2', field: 'tx_type', operator: 'equals', values: ['不计收支'] } ],
+  bank:     [ ]
 };
 var OPERATORS = [
   { value: 'contains', label: '包含' },
@@ -370,20 +514,35 @@ var OPERATORS = [
 function loadRules() {
   try {
     var saved = localStorage.getItem(RULES_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      var parsed = JSON.parse(saved);
+      // Migrate old single-object format to array format
+      ['wechat','alipay','bank'].forEach(function(p) {
+        if (parsed[p] && !(parsed[p] instanceof Array)) {
+          var old = parsed[p];
+          parsed[p] = [{ id: 'm' + Date.now(), field: old.field || 'category', operator: old.operator || 'contains', values: old.values || [] }];
+        }
+      });
+      return parsed;
+    }
   } catch(e) {}
-  return { wechat: { field: 'category', operator: 'contains', values: [] },
-           alipay: { field: 'tx_type', operator: 'equals', values: [] },
-           bank: { field: 'counterparty', operator: 'contains', values: [] } };
+  return { wechat: [], alipay: [], bank: [] };
 }
 
 function saveRules(r) { localStorage.setItem(RULES_KEY, JSON.stringify(r)); }
 
 function applyRule(tx, channelRule) {
-  if (!channelRule || !channelRule.values || channelRule.values.length === 0) return false;
+  if (!channelRule) return false;
+  if (channelRule.operator === 'is_empty') {
+    var val = tx[channelRule.field];
+    return val === undefined || val === null || String(val).trim() === '';
+  }
+  if (channelRule.operator === 'is_not_empty') {
+    var val = tx[channelRule.field];
+    return val !== undefined && val !== null && String(val).trim() !== '';
+  }
+  if (!channelRule.values || channelRule.values.length === 0) return false;
   var val = tx[channelRule.field];
-  if (channelRule.operator === 'is_empty') return val === undefined || val === null || String(val).trim() === '';
-  if (channelRule.operator === 'is_not_empty') return val !== undefined && val !== null && String(val).trim() !== '';
   if (val === undefined || val === null) val = '';
   val = String(val).toLowerCase();
   var op = channelRule.operator;
@@ -404,8 +563,7 @@ function applyRule(tx, channelRule) {
 function classify(allTxs, rules) {
   var internal = [], external = [];
   (allTxs || []).forEach(function(tx) {
-    var cr = rules[tx.platform];
-    if (applyRule(tx, cr)) internal.push(tx);
+    if (isInternalTx(tx)) internal.push(tx);
     else external.push(tx);
   });
   return { internal: internal, external: external };
@@ -473,6 +631,13 @@ function aggregate(txs) {
 }
 
 var chartInstances = {};
+var rules = loadRules();
+
+function isInternalTx(tx) {
+  var groups = rules[tx.platform];
+  if (!groups || !(groups instanceof Array) || groups.length === 0) return false;
+  return groups.some(function(grp) { return applyRule(tx, grp); });
+}
 
 // Monthly chart
 (function(){
@@ -545,42 +710,11 @@ window.addEventListener("resize", function() { pie.resize(); bar.resize(); });
 
 // Income details — tab + pagination + filters
 (function(){
-var allItems = DATA.income_details || [];
+var allItems = (DATA.income_details || []).filter(function(t) { return !isInternalTx(t); });
 var PLATFORM_META = {
   wechat: { name: "微信支付", color: "#07c160" },
   alipay: { name: "支付宝", color: "#1677ff" },
   bank: { name: "银行账户", color: "#722ed1" },
-};
-var PLATFORM_COLUMNS = {
-  wechat: [
-    { field: "time", label: "交易时间" },
-    { field: "amount", label: "金额" },
-    { field: "category", label: "交易类型" },
-    { field: "counterparty", label: "交易对方" },
-    { field: "description", label: "商品" },
-    { field: "payment_method", label: "支付方式" },
-  ],
-  alipay: [
-    { field: "time", label: "交易时间" },
-    { field: "amount", label: "金额" },
-    { field: "category", label: "交易分类" },
-    { field: "counterparty", label: "交易对方" },
-    { field: "description", label: "商品说明" },
-    { field: "payment_method", label: "收/付款方式" },
-  ],
-  bank: [
-    { field: "time", label: "记账日期/时间" },
-    { field: "amount", label: "金额" },
-    { field: "balance", label: "余额" },
-    { field: "category", label: "交易名称" },
-    { field: "currency", label: "币别" },
-    { field: "counterparty", label: "对方账户名" },
-    { field: "cp_account", label: "对方卡号/账号" },
-    { field: "cp_bank", label: "对方开户行" },
-    { field: "branch", label: "网点名称" },
-    { field: "payment_method", label: "渠道" },
-    { field: "description", label: "附言" },
-  ],
 };
 var PLATFORM_FILTER_LABELS = {
   wechat: { category: "交易类型", counterparty: "交易对方", description: "商品", payment_method: "支付方式" },
@@ -838,7 +972,7 @@ function resetFilters() {
 }
 
 function init() {
-  document.querySelectorAll(".card.clickable").forEach(function(el) {
+  document.querySelectorAll(".card.clickable[data-target='incomeDetails']").forEach(function(el) {
     el.addEventListener("click", function() {
       var target = document.getElementById(this.dataset.target);
       if (!target) return;
@@ -917,6 +1051,375 @@ function init() {
 }
 
 init();
+window.__refreshIncomeDetails = function() {
+  allItems = (DATA.income_details || []).filter(function(t) { return !isInternalTx(t); });
+  if (curPlatform && document.getElementById('incomeDetails').style.display !== 'none') {
+    renderTabs();
+    curPage = 1;
+    renderTable();
+  }
+};
+})();
+
+// ── Expense details — tab + pagination + filters ──
+(function(){
+var allItems = (DATA.all_transactions || []).filter(function(t) {
+  return (t.tx_type === '支出' || t.tx_type === 'pay' || t.tx_type === 'Pay') && !isInternalTx(t);
+});
+var PLATFORM_META = {
+  wechat: { name: "微信支付", color: "#07c160" },
+  alipay: { name: "支付宝", color: "#1677ff" },
+  bank: { name: "银行账户", color: "#722ed1" },
+};
+var PLATFORM_FILTER_LABELS = {
+  wechat: { category: "交易类型", counterparty: "交易对方", description: "商品", payment_method: "支付方式" },
+  alipay: { category: "交易分类", counterparty: "交易对方", description: "商品说明", payment_method: "收/付款方式" },
+  bank:   { category: "交易名称", counterparty: "对方账户名", description: "附言", payment_method: "渠道",
+            balance: "余额", currency: "币别", branch: "网点名称", cp_bank: "对方开户行", cp_account: "对方卡号" },
+};
+var PLATFORM_ORDER = ["wechat", "alipay", "bank"];
+var tabEl = document.getElementById("expenseTabs");
+var contentEl = document.getElementById("expenseContent");
+var pageInfoEl = document.getElementById("expPageInfo");
+var pagePrevEl = document.getElementById("expPagePrev");
+var pageNextEl = document.getElementById("expPageNext");
+var pageSizeEl = document.getElementById("expPageSizeSelect");
+var dateStartEl = document.getElementById("filterExpDateStart");
+var dateEndEl = document.getElementById("filterExpDateEnd");
+var amountMinEl = document.getElementById("filterExpAmountMin");
+var amountMaxEl = document.getElementById("filterExpAmountMax");
+var filterCategoryEl = document.getElementById("filterExpCategory");
+var filterCounterpartyEl = document.getElementById("filterExpCounterparty");
+var filterDescriptionEl = document.getElementById("filterExpDescription");
+var filterPaymentMethodEl = document.getElementById("filterExpPaymentMethod");
+var categoryTagsEl = document.getElementById("expCategoryTags");
+var categoryDropdownEl = document.getElementById("expCategoryDropdown");
+var counterpartyTagsEl = document.getElementById("expCounterpartyTags");
+var counterpartyDropdownEl = document.getElementById("expCounterpartyDropdown");
+var descriptionTagsEl = document.getElementById("expDescriptionTags");
+var descriptionDropdownEl = document.getElementById("expDescriptionDropdown");
+var paymentMethodTagsEl = document.getElementById("expPaymentMethodTags");
+var paymentMethodDropdownEl = document.getElementById("expPaymentMethodDropdown");
+var balanceMinEl = document.getElementById("filterExpBalanceMin");
+var balanceMaxEl = document.getElementById("filterExpBalanceMax");
+var filterCurrencyEl = document.getElementById("filterExpCurrency");
+var currencyTagsEl = document.getElementById("expCurrencyTags");
+var currencyDropdownEl = document.getElementById("expCurrencyDropdown");
+var filterCpAccountEl = document.getElementById("filterExpCpAccount");
+var filterCpBankEl = document.getElementById("filterExpCpBank");
+var cpBankTagsEl = document.getElementById("expCpBankTags");
+var cpBankDropdownEl = document.getElementById("expCpBankDropdown");
+var filterBranchEl = document.getElementById("filterExpBranch");
+var branchTagsEl = document.getElementById("expBranchTags");
+var branchDropdownEl = document.getElementById("expBranchDropdown");
+var resetBtn = document.getElementById("filterExpReset");
+var curPlatform = null;
+var curPage = 1;
+var pageSize = 10;
+var dateStart = null;
+var dateEnd = null;
+var amountMin = null;
+var amountMax = null;
+var fCategory = [];
+var fCounterparty = [];
+var fDescription = [];
+var fPaymentMethod = [];
+var balanceMin = null;
+var balanceMax = null;
+var fCurrency = [];
+var fCpAccount = "";
+var fCpBank = [];
+var fBranch = [];
+
+function getActivePlatforms() {
+  return PLATFORM_ORDER.filter(function(p) { return allItems.some(function(t) { return t.platform === p; }); });
+}
+
+function getFiltered() {
+  return allItems.filter(function(t) {
+    if (t.platform !== curPlatform) return false;
+    if (dateStart && t.time < dateStart) return false;
+    if (dateEnd && t.time > dateEnd + " 23:59:59") return false;
+    if (amountMin !== null && t.amount < amountMin) return false;
+    if (amountMax !== null && t.amount > amountMax) return false;
+    if (fCategory.length && !fCategory.includes(t.category || "")) return false;
+    if (fCounterparty.length && !fCounterparty.includes(t.counterparty || "")) return false;
+    if (fDescription.length && !fDescription.includes(t.description || "")) return false;
+    if (fPaymentMethod.length && !fPaymentMethod.includes(t.payment_method || "")) return false;
+    if (balanceMin !== null && (t.balance === undefined || t.balance < balanceMin)) return false;
+    if (balanceMax !== null && (t.balance === undefined || t.balance > balanceMax)) return false;
+    if (fCurrency.length && !fCurrency.includes(t.currency || "")) return false;
+    if (fCpAccount && !(t.cp_account || "").includes(fCpAccount)) return false;
+    if (fCpBank.length && !fCpBank.includes(t.cp_bank || "")) return false;
+    if (fBranch.length && !fBranch.includes(t.branch || "")) return false;
+    return true;
+  });
+}
+
+function getUniqueValues(field) {
+  var set = {};
+  allItems.forEach(function(t) {
+    if (t.platform === curPlatform && t[field]) { set[t[field]] = true; }
+  });
+  return Object.keys(set).sort();
+}
+
+function renderTagDropdown(inputEl, dropdownEl, selectedArr, field) {
+  var val = inputEl.value.trim();
+  var allVals = getUniqueValues(field);
+  var filtered = val
+    ? allVals.filter(function(v) { return v.includes(val) && !selectedArr.includes(v); })
+    : allVals.filter(function(v) { return !selectedArr.includes(v); });
+  if (filtered.length === 0) { dropdownEl.style.display = "none"; return; }
+  var html = "";
+  filtered.forEach(function(v) { html += '<div class="tag-dropdown-item" data-value="' + v.replace(/"/g,'&quot;') + '">' + v + '</div>'; });
+  dropdownEl.innerHTML = html;
+  dropdownEl.style.display = "block";
+  dropdownEl.querySelectorAll(".tag-dropdown-item").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var v = this.dataset.value;
+      if (!selectedArr.includes(v)) { selectedArr.push(v); }
+      inputEl.value = "";
+      dropdownEl.style.display = "none";
+      renderTags();
+      curPage = 1;
+      renderTable();
+    });
+  });
+}
+
+function renderTags() {
+  function tagsHtml(arr, containerId) {
+    var html = arr.map(function(v) { return '<span class="tag">' + v + '<span class="tag-remove" data-value="' + v.replace(/"/g,'&quot;') + '">×</span></span>'; }).join("");
+    document.getElementById(containerId).innerHTML = html;
+  }
+  tagsHtml(fCategory, "expCategoryTags");
+  tagsHtml(fCounterparty, "expCounterpartyTags");
+  tagsHtml(fDescription, "expDescriptionTags");
+  tagsHtml(fPaymentMethod, "expPaymentMethodTags");
+  tagsHtml(fCurrency, "expCurrencyTags");
+  tagsHtml(fCpBank, "expCpBankTags");
+  tagsHtml(fBranch, "expBranchTags");
+  document.querySelectorAll("#expenseDetails .tag-remove").forEach(function(el) {
+    el.addEventListener("click", function() {
+      var container = el.parentElement.parentElement.id;
+      var arr = container === "expCategoryTags" ? fCategory : (container === "expCounterpartyTags" ? fCounterparty : (container === "expDescriptionTags" ? fDescription : (container === "expCurrencyTags" ? fCurrency : (container === "expCpBankTags" ? fCpBank : (container === "expBranchTags" ? fBranch : fPaymentMethod)))));
+      var idx = arr.indexOf(el.dataset.value);
+      if (idx > -1) { arr.splice(idx, 1); }
+      renderTags();
+      curPage = 1;
+      renderTable();
+    });
+  });
+}
+
+function renderTable() {
+  var items = getFiltered();
+  var totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  if (curPage > totalPages) curPage = totalPages;
+  var start = (curPage - 1) * pageSize;
+  var pageItems = items.slice(start, start + pageSize);
+  var total = items.reduce(function(s, t) { return s + t.amount; }, 0);
+
+  var columns = PLATFORM_COLUMNS[curPlatform] || PLATFORM_COLUMNS.bank;
+
+  if (items.length === 0) {
+    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无匹配记录</p>';
+  } else {
+    var h = '<div style="font-size:13px;color:#666;margin-bottom:10px">共 <strong>' + items.length +
+      '</strong> 笔，合计 ' + fmtYuan(total) + '</div>';
+    h += '<div class="table-wrap"><table><thead><tr>';
+    columns.forEach(function(col) { h += '<th>' + col.label + '</th>'; });
+    h += '</tr></thead><tbody>';
+    pageItems.forEach(function(t) {
+      h += '<tr>';
+      columns.forEach(function(col) {
+        var val = t[col.field];
+        if (col.field === "amount") {
+          h += '<td style="color:#cf1322;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+        } else if (col.field === "balance" && val) {
+          h += '<td style="text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+        } else if (col.field === "balance") {
+          h += '<td style="text-align:right">-</td>';
+        } else {
+          h += '<td>' + (val || "-") + '</td>';
+        }
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    contentEl.innerHTML = h;
+  }
+
+  pageInfoEl.textContent = curPage + " / " + totalPages;
+  pagePrevEl.disabled = curPage <= 1;
+  pageNextEl.disabled = curPage >= totalPages;
+}
+
+function renderTabs() {
+  var platforms = getActivePlatforms();
+  if (platforms.length === 0) {
+    tabEl.innerHTML = "";
+    contentEl.innerHTML = '<p style="color:#999;padding:10px">暂无支出记录</p>';
+    return;
+  }
+  var h = "";
+  platforms.forEach(function(p) {
+    var meta = PLATFORM_META[p] || { name: p, color: "#888" };
+    var count = allItems.filter(function(t) { return t.platform === p; }).length;
+    var active = p === curPlatform ? " active" : "";
+    h += '<button class="income-tab' + active + '" data-platform="' + p + '">' +
+      meta.name + '<span class="tab-count">' + count + ' 笔</span></button>';
+  });
+  tabEl.innerHTML = h;
+  tabEl.querySelectorAll(".income-tab").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      tabEl.querySelectorAll(".income-tab").forEach(function(b) { b.classList.remove("active"); });
+      this.classList.add("active");
+      curPlatform = this.dataset.platform;
+      curPage = 1;
+      resetFilters();
+      updateFilterLabels();
+      renderTable();
+    });
+  });
+}
+
+function updateFilterLabels() {
+  var labels = PLATFORM_FILTER_LABELS[curPlatform] || PLATFORM_FILTER_LABELS.bank;
+  document.getElementById("filterLabelExpCategory").textContent = labels.category + "：";
+  document.getElementById("filterLabelExpCounterparty").textContent = labels.counterparty + "：";
+  document.getElementById("filterLabelExpDescription").textContent = labels.description + "：";
+  document.getElementById("filterLabelExpPaymentMethod").textContent = labels.payment_method + "：";
+  var isBank = curPlatform === "bank";
+  document.getElementById("expBankFilterRow").style.display = isBank ? "flex" : "none";
+  document.getElementById("expBankFilterRow2").style.display = isBank ? "flex" : "none";
+  if (isBank && labels.balance) {
+    document.getElementById("filterLabelExpCurrency").textContent = labels.currency + "：";
+    document.getElementById("filterLabelExpCpBank").textContent = labels.cp_bank + "：";
+    document.getElementById("filterLabelExpBranch").textContent = labels.branch + "：";
+    document.getElementById("filterLabelExpCpAccount").textContent = labels.cp_account + "：";
+  }
+}
+
+function resetFilters() {
+  dateStart = null; dateStartEl.value = "";
+  dateEnd = null; dateEndEl.value = "";
+  amountMin = null; amountMinEl.value = "";
+  amountMax = null; amountMaxEl.value = "";
+  fCategory = []; filterCategoryEl.value = "";
+  fCounterparty = []; filterCounterpartyEl.value = "";
+  fDescription = []; filterDescriptionEl.value = "";
+  fPaymentMethod = []; filterPaymentMethodEl.value = "";
+  balanceMin = null; balanceMinEl.value = "";
+  balanceMax = null; balanceMaxEl.value = "";
+  fCurrency = []; filterCurrencyEl.value = "";
+  fCpAccount = ""; filterCpAccountEl.value = "";
+  fCpBank = []; filterCpBankEl.value = "";
+  fBranch = []; filterBranchEl.value = "";
+  renderTags();
+  categoryDropdownEl.style.display = "none";
+  counterpartyDropdownEl.style.display = "none";
+  descriptionDropdownEl.style.display = "none";
+  paymentMethodDropdownEl.style.display = "none";
+  currencyDropdownEl.style.display = "none";
+  cpBankDropdownEl.style.display = "none";
+  branchDropdownEl.style.display = "none";
+}
+
+function init() {
+  var expCard = document.querySelector(".card.clickable[data-target='expenseDetails']");
+  if (expCard) {
+    expCard.addEventListener("click", function() {
+      var target = document.getElementById("expenseDetails");
+      if (!target) return;
+      if (target.style.display === "none") {
+        target.style.display = "block";
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (!curPlatform) {
+          var platforms = getActivePlatforms();
+          curPlatform = platforms.length > 0 ? platforms[0] : null;
+          renderTabs();
+          updateFilterLabels();
+          renderTable();
+        }
+        var countText = (typeof DATA !== 'undefined' && DATA.summary) ? DATA.summary.total_count + " 笔 · 已剔除内部转账" : "";
+        this.querySelector(".card-sub").textContent = countText + " · 点击收起";
+      } else {
+        target.style.display = "none";
+        var countText2 = (typeof DATA !== 'undefined' && DATA.summary) ? DATA.summary.total_count + " 笔 · 已剔除内部转账" : "";
+        this.querySelector(".card-sub").textContent = countText2 + " · 点击展开";
+      }
+    });
+  }
+
+  pagePrevEl.addEventListener("click", function() {
+    if (curPage > 1) { curPage--; renderTable(); }
+  });
+  pageNextEl.addEventListener("click", function() {
+    var total = Math.max(1, Math.ceil(getFiltered().length / pageSize));
+    if (curPage < total) { curPage++; renderTable(); }
+  });
+  pageSizeEl.addEventListener("change", function() {
+    pageSize = parseInt(this.value);
+    curPage = 1;
+    renderTable();
+  });
+
+  dateStartEl.addEventListener("change", function() { dateStart = this.value || null; curPage = 1; renderTable(); });
+  dateEndEl.addEventListener("change", function() { dateEnd = this.value || null; curPage = 1; renderTable(); });
+  amountMinEl.addEventListener("input", function() { amountMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  amountMaxEl.addEventListener("input", function() { amountMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  filterCategoryEl.addEventListener("input", function() { renderTagDropdown(filterCategoryEl, categoryDropdownEl, fCategory, "category"); });
+  filterCategoryEl.addEventListener("focus", function() { renderTagDropdown(filterCategoryEl, categoryDropdownEl, fCategory, "category"); });
+  filterCounterpartyEl.addEventListener("input", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
+  filterCounterpartyEl.addEventListener("focus", function() { renderTagDropdown(filterCounterpartyEl, counterpartyDropdownEl, fCounterparty, "counterparty"); });
+  filterDescriptionEl.addEventListener("input", function() { renderTagDropdown(filterDescriptionEl, descriptionDropdownEl, fDescription, "description"); });
+  filterDescriptionEl.addEventListener("focus", function() { renderTagDropdown(filterDescriptionEl, descriptionDropdownEl, fDescription, "description"); });
+  filterDescriptionEl.addEventListener("keydown", function(e) { if (e.key === "Escape") descriptionDropdownEl.style.display = "none"; });
+  filterPaymentMethodEl.addEventListener("input", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
+  filterPaymentMethodEl.addEventListener("focus", function() { renderTagDropdown(filterPaymentMethodEl, paymentMethodDropdownEl, fPaymentMethod, "payment_method"); });
+  filterCategoryEl.addEventListener("keydown", function(e) { if (e.key === "Escape") categoryDropdownEl.style.display = "none"; });
+  filterCounterpartyEl.addEventListener("keydown", function(e) { if (e.key === "Escape") counterpartyDropdownEl.style.display = "none"; });
+  filterPaymentMethodEl.addEventListener("keydown", function(e) { if (e.key === "Escape") paymentMethodDropdownEl.style.display = "none"; });
+  // Bank-specific filters
+  balanceMinEl.addEventListener("input", function() { balanceMin = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  balanceMaxEl.addEventListener("input", function() { balanceMax = this.value ? parseFloat(this.value) : null; curPage = 1; renderTable(); });
+  filterCurrencyEl.addEventListener("input", function() { renderTagDropdown(filterCurrencyEl, currencyDropdownEl, fCurrency, "currency"); });
+  filterCurrencyEl.addEventListener("focus", function() { renderTagDropdown(filterCurrencyEl, currencyDropdownEl, fCurrency, "currency"); });
+  filterCurrencyEl.addEventListener("keydown", function(e) { if (e.key === "Escape") currencyDropdownEl.style.display = "none"; });
+  filterCpAccountEl.addEventListener("input", function() { fCpAccount = this.value; curPage = 1; renderTable(); });
+  filterCpBankEl.addEventListener("input", function() { renderTagDropdown(filterCpBankEl, cpBankDropdownEl, fCpBank, "cp_bank"); });
+  filterCpBankEl.addEventListener("focus", function() { renderTagDropdown(filterCpBankEl, cpBankDropdownEl, fCpBank, "cp_bank"); });
+  filterCpBankEl.addEventListener("keydown", function(e) { if (e.key === "Escape") cpBankDropdownEl.style.display = "none"; });
+  filterBranchEl.addEventListener("input", function() { renderTagDropdown(filterBranchEl, branchDropdownEl, fBranch, "branch"); });
+  filterBranchEl.addEventListener("focus", function() { renderTagDropdown(filterBranchEl, branchDropdownEl, fBranch, "branch"); });
+  filterBranchEl.addEventListener("keydown", function(e) { if (e.key === "Escape") branchDropdownEl.style.display = "none"; });
+  resetBtn.addEventListener("click", function() { resetFilters(); curPage = 1; renderTable(); });
+  document.addEventListener("click", function(e) {
+    if (!e.target.closest("#expenseDetails .tag-input-wrap")) {
+      categoryDropdownEl.style.display = "none";
+      counterpartyDropdownEl.style.display = "none";
+      descriptionDropdownEl.style.display = "none";
+      paymentMethodDropdownEl.style.display = "none";
+      currencyDropdownEl.style.display = "none";
+      cpBankDropdownEl.style.display = "none";
+      branchDropdownEl.style.display = "none";
+    }
+  });
+}
+
+init();
+window.__refreshExpenseDetails = function() {
+  allItems = (DATA.all_transactions || []).filter(function(t) {
+    return (t.tx_type === '支出' || t.tx_type === 'pay' || t.tx_type === 'Pay') && !isInternalTx(t);
+  });
+  if (curPlatform && document.getElementById('expenseDetails').style.display !== 'none') {
+    renderTabs();
+    curPage = 1;
+    renderTable();
+  }
+};
 })();
 
 // Platform comparison
@@ -944,14 +1447,71 @@ window.addEventListener("resize", function() { chart.resize(); });
 })();
 
 // ── Dynamic refresh system ──
-var rules = loadRules();
 
 function getStats() {
   var classified = classify(DATA.all_transactions || [], rules);
   var stats = aggregate(classified.external);
   stats.internal_count = classified.internal.length;
   stats.internal_total = Math.round(classified.internal.reduce(function(s,t){ return s + t.amount; },0)*100)/100;
+  stats.internal_txs = classified.internal;
   return stats;
+}
+
+// ── Internal transfer table ──
+var curIntPage = 1;
+var intPageSize = 10;
+var internalTxs = [];
+
+function renderInternalTable() {
+  var section = document.getElementById('internalTableSection');
+  var headEl = document.getElementById('internalTableHead');
+  var bodyEl = document.getElementById('internalTableBody');
+  var pageInfoEl = document.getElementById('intPageInfo');
+  var pagePrevEl = document.getElementById('intPagePrev');
+  var pageNextEl = document.getElementById('intPageNext');
+
+  // Filter by active rules tab
+  var filtered = internalTxs.filter(function(tx) { return tx.platform === curRulesTab; });
+  if (filtered.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+
+  section.style.display = 'block';
+
+  // Dynamic column headers from current platform
+  var columns = (PLATFORM_COLUMNS || {})[curRulesTab] || [];
+  var headHtml = '';
+  columns.forEach(function(col) { headHtml += '<th>' + col.label + '</th>'; });
+  headEl.innerHTML = headHtml;
+
+  var totalPages = Math.max(1, Math.ceil(filtered.length / intPageSize));
+  if (curIntPage > totalPages) curIntPage = totalPages;
+  var start = (curIntPage - 1) * intPageSize;
+  var pageItems = filtered.slice(start, start + intPageSize);
+
+  var rowsHtml = '';
+  pageItems.forEach(function(tx) {
+    rowsHtml += '<tr>';
+    columns.forEach(function(col) {
+      var val = tx[col.field];
+      if (col.field === 'amount') {
+        rowsHtml += '<td style="color:#cf1322;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+      } else if (col.field === 'balance' && val) {
+        rowsHtml += '<td style="text-align:right;font-variant-numeric:tabular-nums">' + fmtYuan(val) + '</td>';
+      } else if (col.field === 'balance') {
+        rowsHtml += '<td style="text-align:right">-</td>';
+      } else {
+        rowsHtml += '<td>' + (val || '-') + '</td>';
+      }
+    });
+    rowsHtml += '</tr>';
+  });
+  bodyEl.innerHTML = rowsHtml;
+
+  pageInfoEl.textContent = curIntPage + ' / ' + totalPages;
+  pagePrevEl.disabled = curIntPage <= 1;
+  pageNextEl.disabled = curIntPage >= totalPages;
 }
 
 function refreshAllCards(stats) {
@@ -959,7 +1519,9 @@ function refreshAllCards(stats) {
   var cards = document.querySelectorAll('.cards .card');
   if (cards.length >= 3) {
     cards[0].querySelector('.card-value').textContent = fmtYuan(s.total_expense);
-    cards[0].querySelector('.card-sub').textContent = s.total_count + ' 笔 · 已剔除内部转账';
+    var expDetails = document.getElementById('expenseDetails');
+    var isExpanded = expDetails && expDetails.style.display !== 'none';
+    cards[0].querySelector('.card-sub').textContent = s.total_count + ' 笔 · 已剔除内部转账' + (isExpanded ? ' · 点击收起' : ' · 点击展开');
     cards[1].querySelector('.card-value').textContent = fmtYuan(s.monthly_avg);
     cards[2].querySelector('.card-value').textContent = fmtYuan(s.total_income);
   }
@@ -981,8 +1543,11 @@ function refreshAllCards(stats) {
     } else {
       noteEl.classList.remove('show');
     }
+    internalTxs = stats.internal_txs || [];
+    curIntPage = 1;
+    renderInternalTable();
   }
-  var mtbody = document.querySelector('.section .table-wrap tbody');
+  var mtbody = document.getElementById('monthlyTableBody');
   if (mtbody) {
     var mhtml = '';
     stats.monthly.forEach(function(m) {
@@ -1043,32 +1608,25 @@ function refreshAll(mode) {
   refreshAllCards(stats);
   refreshCharts(stats, mode);
   updateRulesUI();
+  if (window.__refreshIncomeDetails) window.__refreshIncomeDetails();
+  if (window.__refreshExpenseDetails) window.__refreshExpenseDetails();
 }
 
 // ── Rules UI ──
 var rulesBody = document.getElementById('rulesBody');
 var rulesHeader = document.getElementById('rulesHeader');
 var rulesTabs = document.getElementById('rulesTabs');
-var rulesField = document.getElementById('rulesField');
-var rulesOperator = document.getElementById('rulesOperator');
-var rulesTags = document.getElementById('rulesTags');
-var rulesAddInput = document.getElementById('rulesAddInput');
-var rulesDropdown = document.getElementById('rulesDropdown');
 var rulesChip = document.getElementById('rulesChip');
 var rulesChipText = document.getElementById('rulesChipText');
 var curRulesTab = 'wechat';
-
-function getFieldValues(platform, field) {
-  var set = {};
-  (DATA.all_transactions || []).forEach(function(t) {
-    if (t.platform === platform && t[field]) set[t[field]] = true;
-  });
-  return Object.keys(set).sort();
-}
+var nextRuleId = 1;
 
 function updateRulesChip() {
   var totalVals = 0;
-  ['wechat','alipay','bank'].forEach(function(p){ totalVals += (rules[p] && rules[p].values ? rules[p].values.length : 0); });
+  ['wechat','alipay','bank'].forEach(function(p){
+    var groups = rules[p] || [];
+    groups.forEach(function(g) { totalVals += (g.values ? g.values.length : 0); });
+  });
   if (totalVals > 0) {
     rulesChip.style.display = 'inline-flex';
     rulesChipText.textContent = totalVals + ' 个值生效中';
@@ -1079,12 +1637,15 @@ function updateRulesChip() {
 
 function updateRulesUI() {
   updateRulesChip();
+
+  // Render tabs
   var tabsHtml = '';
   ['wechat','alipay','bank'].forEach(function(p){
-    var r = rules[p] || {};
-    var count = r.values ? r.values.length : 0;
+    var groups = rules[p] || [];
+    var totalVals = 0;
+    groups.forEach(function(g) { totalVals += (g.values ? g.values.length : 0); });
     var active = p === curRulesTab ? ' active' : '';
-    var dotClass = count > 0 ? 'warn' : 'empty';
+    var dotClass = totalVals > 0 ? 'warn' : 'empty';
     tabsHtml += '<button class="rules-tab' + active + '" data-platform="' + p + '"><span class="tab-dot ' + dotClass + '"></span>' + PLATFORM_NAMES[p] + '</button>';
   });
   rulesTabs.innerHTML = tabsHtml;
@@ -1092,98 +1653,143 @@ function updateRulesUI() {
     btn.addEventListener('click', function() {
       curRulesTab = this.dataset.platform;
       updateRulesUI();
+      curIntPage = 1;
+      renderInternalTable();
     });
   });
 
-  var fields = PLATFORM_FIELDS[curRulesTab] || [];
-  var curRule = rules[curRulesTab] || {};
-  rulesField.innerHTML = fields.map(function(f){
-    return '<option value="' + f + '"' + (f === curRule.field ? ' selected' : '') + '>' + (FIELD_LABELS[f] || f) + '</option>';
-  }).join('');
+  // Render rule groups for current tab
+  var groupsEl = document.getElementById('rulesGroups');
+  var groups = rules[curRulesTab] || [];
+  var columns = PLATFORM_COLUMNS[curRulesTab] || [];
+  var labelMap = {};
+  columns.forEach(function(col) { labelMap[col.field] = col.label; });
 
-  rulesOperator.innerHTML = OPERATORS.map(function(o){
-    return '<option value="' + o.value + '"' + (o.value === curRule.operator ? ' selected' : '') + '>' + o.label + '</option>';
-  }).join('');
-
-  var vals = curRule.values || [];
-  rulesTags.innerHTML = vals.map(function(v){
-    return '<span class="tag">' + v + '<span class="tag-remove" data-value="' + v.replace(/"/g,'&quot;') + '">×</span></span>';
-  }).join('');
-  rulesTags.querySelectorAll('.tag-remove').forEach(function(el) {
-    el.addEventListener('click', function() {
-      var idx = (rules[curRulesTab].values || []).indexOf(this.dataset.value);
-      if (idx > -1) { rules[curRulesTab].values.splice(idx, 1); }
-      saveRules(rules);
-      updateRulesUI();
-      refreshAll();
-    });
-  });
-
-  rulesAddInput.value = '';
-  rulesDropdown.style.display = 'none';
-}
-
-rulesField.addEventListener('change', function() {
-  if (!rules[curRulesTab]) return;
-  rules[curRulesTab].field = this.value;
-  rules[curRulesTab].values = [];
-  saveRules(rules);
-  refreshAll();
-  updateRulesUI();
-});
-
-rulesOperator.addEventListener('change', function() {
-  if (!rules[curRulesTab]) return;
-  rules[curRulesTab].operator = this.value;
-  saveRules(rules);
-  refreshAll();
-  updateRulesUI();
-});
-
-function renderRulesTagDropdown() {
-  var inputEl = document.getElementById('rulesAddInput');
-  var dropdownEl = document.getElementById('rulesDropdown');
-  var cr = rules[curRulesTab] || {};
-  var field = cr.field || 'category';
-  var selectedArr = cr.values || [];
-  var val = inputEl.value.trim();
-  var allVals = [];
-  var set = {};
-  (DATA.all_transactions || []).forEach(function(t) {
-    if (t.platform === curRulesTab && t[field]) set[t[field]] = true;
-  });
-  allVals = Object.keys(set).sort();
-  var filtered = val
-    ? allVals.filter(function(v) { return v.indexOf(val) !== -1 && selectedArr.indexOf(v) === -1; })
-    : allVals.filter(function(v) { return selectedArr.indexOf(v) === -1; });
-  if (filtered.length === 0) { dropdownEl.style.display = 'none'; return; }
   var html = '';
-  filtered.slice(0, 20).forEach(function(v) {
-    html += '<div class="tag-dropdown-item">' + v + '</div>';
+  groups.forEach(function(grp) {
+    var fieldOpts = columns.map(function(col) {
+      return '<option value="' + col.field + '"' + (col.field === grp.field ? ' selected' : '') + '>' + col.label + '</option>';
+    }).join('');
+
+    var opOpts = OPERATORS.map(function(op) {
+      return '<option value="' + op.value + '"' + (op.value === grp.operator ? ' selected' : '') + '>' + op.label + '</option>';
+    }).join('');
+
+    var vals = (grp.values || []).map(function(v) {
+      return '<span class="tag">' + v + '<span class="tag-remove" data-gid="' + grp.id + '" data-val="' + v.replace(/"/g,'&quot;') + '">×</span></span>';
+    }).join('');
+
+    html += '<div class="rules-group" data-gid="' + grp.id + '" style="background:#fafafa;border-radius:8px;padding:10px;margin-bottom:10px">' +
+      '<div class="f-row" style="margin-bottom:6px">' +
+        '<div class="f-group"><label>字段</label><select class="rules-grp-field" data-gid="' + grp.id + '">' + fieldOpts + '</select></div>' +
+        '<div class="f-group"><label>运算符</label><select class="rules-grp-operator" data-gid="' + grp.id + '">' + opOpts + '</select></div>' +
+        '<button class="page-btn rules-grp-del" data-gid="' + grp.id + '" style="margin-left:auto;color:#ff4d4f;border-color:#ff4d4f">删除</button>' +
+      '</div>' +
+      '<div class="f-row">' +
+        '<div class="f-group" style="flex:1;align-items:flex-start">' +
+          '<label style="padding-top:5px">值</label>' +
+          '<div class="multi-tag-select" style="flex:1">' +
+            '<div class="tag-input-wrap">' +
+              '<input type="text" class="rules-grp-input" data-gid="' + grp.id + '" placeholder="输入后按回车添加…" style="max-width:200px">' +
+              '<div class="tag-dropdown" style="display:none"></div>' +
+            '</div>' +
+            '<div class="tag-list rules-grp-tags" data-gid="' + grp.id + '">' + vals + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '</div>';
   });
-  dropdownEl.innerHTML = html;
-  dropdownEl.style.display = 'block';
-  dropdownEl.querySelectorAll('.tag-dropdown-item').forEach(function(el) {
-    el.addEventListener('click', function() {
-      var v = this.textContent;
-      if (selectedArr.indexOf(v) === -1) selectedArr.push(v);
-      inputEl.value = '';
-      dropdownEl.style.display = 'none';
-      saveRules(rules);
-      updateRulesUI();
-      refreshAll();
-    });
+
+  if (groups.length === 0) {
+    html = '<p style="color:#999;padding:10px;text-align:center">暂无规则，点击"+ 添加规则"开始</p>';
+  }
+
+  groupsEl.innerHTML = html;
+
+  // Bind event listeners for each group
+  groups.forEach(function(grp) {
+    // Field change
+    var fieldSel = groupsEl.querySelector('.rules-grp-field[data-gid="' + grp.id + '"]');
+    if (fieldSel) {
+      fieldSel.addEventListener('change', function() {
+        grp.field = this.value;
+        saveRules(rules);
+        refreshAll();
+        updateRulesUI();
+      });
+    }
+
+    // Operator change
+    var opSel = groupsEl.querySelector('.rules-grp-operator[data-gid="' + grp.id + '"]');
+    if (opSel) {
+      opSel.addEventListener('change', function() {
+        grp.operator = this.value;
+        saveRules(rules);
+        refreshAll();
+        updateRulesUI();
+      });
+    }
+
+    // Delete group
+    var delBtn = groupsEl.querySelector('.rules-grp-del[data-gid="' + grp.id + '"]');
+    if (delBtn) {
+      delBtn.addEventListener('click', function() {
+        var arr = rules[curRulesTab] || [];
+        var idx = -1;
+        arr.forEach(function(g, i) { if (g.id === grp.id) idx = i; });
+        if (idx > -1) arr.splice(idx, 1);
+        saveRules(rules);
+        refreshAll();
+        updateRulesUI();
+      });
+    }
+
+    // Tag remove (delegated via groupsEl)
+    var tagsEl = groupsEl.querySelector('.rules-grp-tags[data-gid="' + grp.id + '"]');
+    if (tagsEl) {
+      tagsEl.querySelectorAll('.tag-remove').forEach(function(el) {
+        el.addEventListener('click', function() {
+          var arr = grp.values || [];
+          var idx = arr.indexOf(el.dataset.val);
+          if (idx > -1) arr.splice(idx, 1);
+          saveRules(rules);
+          updateRulesUI();
+          refreshAll();
+        });
+      });
+    }
+
+    // Input: Enter to add value
+    var inputEl = groupsEl.querySelector('.rules-grp-input[data-gid="' + grp.id + '"]');
+    if (inputEl) {
+      inputEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var v = this.value.trim();
+          if (!v) return;
+          if (!grp.values) grp.values = [];
+          if (grp.values.indexOf(v) === -1) {
+            grp.values.push(v);
+            this.value = '';
+            saveRules(rules);
+            updateRulesUI();
+            refreshAll();
+          }
+        }
+      });
+    }
   });
 }
 
-rulesAddInput.addEventListener('input', function() {
-  renderRulesTagDropdown();
-});
-rulesAddInput.addEventListener('focus', function() {
-  renderRulesTagDropdown();
-});
-rulesAddInput.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') document.getElementById('rulesDropdown').style.display = 'none';
+// Add group button
+document.getElementById('rulesAddGroup').addEventListener('click', function() {
+  if (!rules[curRulesTab]) rules[curRulesTab] = [];
+  var id = 'r' + (nextRuleId++);
+  var columns = PLATFORM_COLUMNS[curRulesTab] || [];
+  var defaultField = columns.length > 0 ? columns[0].field : 'category';
+  rules[curRulesTab].push({ id: id, field: defaultField, operator: 'contains', values: [] });
+  saveRules(rules);
+  updateRulesUI();
 });
 
 rulesHeader.addEventListener('click', function() {
@@ -1207,20 +1813,30 @@ document.getElementById('rulesReset').addEventListener('click', function() {
 
 document.getElementById('rulesClear').addEventListener('click', function() {
   ['wechat','alipay','bank'].forEach(function(p){
-    rules[p] = { field: rules[p] ? rules[p].field : 'category', operator: rules[p] ? rules[p].operator : 'contains', values: [] };
+    rules[p] = [];
   });
   saveRules(rules);
   refreshAll();
   updateRulesUI();
 });
 
-document.addEventListener('click', function(e) {
-  if (!e.target.closest('.tag-input-wrap')) {
-    document.getElementById('rulesDropdown').style.display = 'none';
-  }
-});
-
 updateRulesUI();
+refreshAll();
+
+// ── Internal table pagination events ──
+document.getElementById('intPagePrev').addEventListener('click', function() {
+  if (curIntPage > 1) { curIntPage--; renderInternalTable(); }
+});
+document.getElementById('intPageNext').addEventListener('click', function() {
+  var filtered = internalTxs.filter(function(tx) { return tx.platform === curRulesTab; });
+  var total = Math.max(1, Math.ceil(filtered.length / intPageSize));
+  if (curIntPage < total) { curIntPage++; renderInternalTable(); }
+});
+document.getElementById('intPageSizeSelect').addEventListener('change', function() {
+  intPageSize = parseInt(this.value);
+  curIntPage = 1;
+  renderInternalTable();
+});
 </script>
 </body>
 </html>
