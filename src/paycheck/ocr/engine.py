@@ -27,10 +27,6 @@ def _get_engine():
     """获取 PaddleOCR 引擎（惰性初始化，全局单例）"""
     global _ocr
     if _ocr is None:
-        # 再次确保 MKLDNN 已禁用（_page_worker 中已设，这里是双保险）
-        import os
-        os.environ.setdefault("PADDLE_PDX_ENABLE_MKLDNN_BYDEFAULT", "0")
-
         from paddleocr import PaddleOCR
 
         # PaddleX 内部有自己的一套日志（"paddlex" logger），
@@ -43,10 +39,6 @@ def _get_engine():
         _paddlex_log.propagate = True
 
         log.info("加载 PaddleOCR 模型...")
-
-        # 禁用 MKLDNN 绕过 PaddlePaddle PIR bug
-        import paddle
-        paddle.set_flags({"FLAGS_use_mkldnn": False})
 
         try:
             _ocr = PaddleOCR(

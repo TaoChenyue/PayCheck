@@ -96,8 +96,6 @@ def setup_logging(
     warnings.filterwarnings("ignore", category=UserWarning, module="ppocr")
     warnings.filterwarnings("ignore", message=".*urllib3.*or.*chardet.*doesn't match")
 
-    # 压制 PaddlePaddle C++ GLOG（INFO/WARNING 级）
-    os.environ.setdefault("GLOG_minloglevel", "2")
 
     _LOG_CONFIGURED = True
     logger = logging.getLogger("paycheck")
