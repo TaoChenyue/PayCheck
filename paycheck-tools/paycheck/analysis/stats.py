@@ -178,6 +178,7 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             "counterparty": t["counterparty"],
             "description": t["description"],
             "amount": t["amount"],
+            "tx_type": t["tx_type"],
             "payment_method": t["payment_method"],
             "balance": t["balance"],
             "currency": t["currency"],

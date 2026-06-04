@@ -10,6 +10,7 @@ PayCheck - 个人账单统计工具
 
 import argparse
 import glob
+import json
 import logging
 import os
 import re

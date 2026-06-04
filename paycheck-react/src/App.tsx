@@ -17,8 +17,8 @@ import Footer from "./components/Footer";
 
 export default function App() {
   const [data, setData] = useState<AggregatedData | null>(null);
-  const [incomeExpanded, setIncomeExpanded] = useState(false);
-  const [expenseExpanded, setExpenseExpanded] = useState(false);
+  const [incomeExpanded, setIncomeExpanded] = useState(true);
+  const [expenseExpanded, setExpenseExpanded] = useState(true);
 
   const { fingerprints, addFingerprints, removeFingerprint } = useFingerprints();
   const { internalTxs, stats } = useAggregation(data, fingerprints);
