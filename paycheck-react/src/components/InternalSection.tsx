@@ -32,8 +32,6 @@ export default function InternalSection({
 
   const activePlatforms = PLATFORM_ORDER.filter((p) => internalTxs.some((t) => t.platform === p));
 
-  if (internalTxs.length === 0) return null;
-
   const handleExport = useCallback(() => {
     const data = {
       version: 1,
@@ -74,6 +72,8 @@ export default function InternalSection({
     },
     [onImportFingerprints]
   );
+
+  if (internalTxs.length === 0) return null;
 
   return (
     <div className="section">
