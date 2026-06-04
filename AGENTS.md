@@ -3,14 +3,16 @@
 ## 快速命令
 
 ```bash
-uv run paycheck pdf2image <input_dir>   # ① PDF → 裁剪后 PNG
-uv run paycheck image2csv <bank_dir>    # ② OCR → CSV
-uv run paycheck analyse <input_dir>     # ③ 分析 → HTML 报表
+uv run --directory paycheck-tools paycheck pdf2image <input_dir>   # ① PDF → 裁剪后 PNG
+uv run --directory paycheck-tools paycheck image2csv <bank_dir>    # ② OCR → CSV
+uv run --directory paycheck-tools paycheck analyse <input_dir>     # ③ 分析 → JSON 报表
 ```
 
 ## 项目结构
 
-`src/paycheck/` — 标准 `src` layout，package name 为 `paycheck`。
+`paycheck-tools/paycheck/` — CLI 工具，package name 为 `paycheck`。
+
+`paycheck-react/` — React 前端报表可视化（Vite + React + TypeScript + ECharts）。
 
 模块层级（从 __main__.py 的 handlers 可以看出完整调用链）：
 

@@ -1,0 +1,23 @@
+.income-tabs{display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #e8e8e8}
+.income-tab{padding:10px 24px;border:none;background:none;cursor:pointer;font-size:14px;color:#888;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all 0.2s}
+.income-tab:hover{color:#333}
+.income-tab.active{color:#1a1a2e;font-weight:600;border-bottom-color:#1a1a2e}
+.income-tab .tab-count{font-weight:400;font-size:12px;color:#999;margin-left:4px}
+.income-filters{background:#fafafa;border-radius:8px;padding:12px;margin-bottom:12px}
+.income-filters .f-row{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.income-filters .f-row:last-child{margin-bottom:0}
+.income-filters .f-group{display:flex;align-items:center;gap:6px}
+.income-filters label{font-size:13px;color:#666;white-space:nowrap}
+.income-filters input[type=date],.income-filters input[type=number],.income-filters input[type=text]{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;font-family:inherit;max-width:160px}
+.income-filters input[type=number]{max-width:110px}
+.income-filters input:focus{outline:none;border-color:#1a1a2e}
+.income-filters .reset-btn{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:13px;transition:all 0.2s;margin-left:auto}
+.income-filters .reset-btn:hover{border-color:#1a1a2e;color:#1a1a2e}
+.income-pagination{display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid #f0f0f0}
+.income-page-controls{display:flex;align-items:center;gap:8px}
+.page-btn{padding:4px 12px;border:1px solid #d9d9d9;background:#fff;border-radius:4px;cursor:pointer;font-size:14px;transition:all 0.2s}
+.page-btn:hover:not(:disabled){border-color:#1a1a2e;color:#1a1a2e}
+.page-btn:disabled{opacity:0.4;cursor:not-allowed}
+.page-info{font-size:13px;color:#666;min-width:60px;text-align:center}
+.page-size-select{padding:4px 8px;border:1px solid #d9d9d9;border-radius:4px;font-size:13px;cursor:pointer;background:#fff}
+.page-size-select:focus{outline:none;border-color:#1a1a2e}

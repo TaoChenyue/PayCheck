@@ -1,0 +1,17 @@
+.section{background:#fff;border-radius:12px;padding:24px;margin:20px 0;box-shadow:0 2px 8px rgba(0,0,0,0.06)}
+.section h2{font-size:18px;color:#1a1a2e;margin-bottom:16px}
+.chart{width:100%;height:400px}
+.filter{margin-bottom:12px}
+.filter button{padding:6px 18px;border:1px solid #d9d9d9;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;transition:all 0.2s}
+.filter button.active{background:#1a1a2e;color:#fff;border-color:#1a1a2e}
+.filter button:hover:not(.active){border-color:#1a1a2e;color:#1a1a2e}
+.chart-row{display:flex;gap:16px}
+.chart-row .chart{height:380px}
+.chart-inline{display:inline-block;vertical-align:top}
+.category-list{margin-top:16px}
+.category-item{display:flex;align-items:center;padding:6px 0}
+.category-item .cat-dot{width:10px;height:10px;border-radius:50%;margin-right:10px;flex-shrink:0}
+.category-item .cat-name{flex:1;font-size:14px}
+.category-item .cat-amount{font-size:14px;font-weight:600}
+.category-item .cat-pct{font-size:13px;color:#999;margin-left:8px}
+@media(max-width:768px){.chart-row{flex-direction:column}}

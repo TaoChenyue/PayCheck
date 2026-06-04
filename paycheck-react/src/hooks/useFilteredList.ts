@@ -73,7 +73,7 @@ export function useFilteredList(items: Transaction[]) {
   }, []);
 
   const setPlatform = useCallback((platform: string) => {
-    setFilters((prev) => ({ ...emptyFilters, platform }));
+    setFilters({ ...emptyFilters, platform });
     setPage(1);
   }, []);
 

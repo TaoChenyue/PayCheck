@@ -63,7 +63,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description="解析已有 CSV/XLSX 账单文件，生成多维度 ECharts 分析报告。",
     )
     p_ana.add_argument("dir", help="输入目录（含 wechat/ ant/ 及银行子目录）")
-    p_ana.add_argument("-o", "--output", default=None, help="输出 HTML 报表路径 (默认 report.html)")
+    p_ana.add_argument("-o", "--output", default=None, help="输出 JSON 报表路径 (默认 report.json)")
     p_ana.add_argument("-v", "--verbose", action="store_true", help="显示详细日志")
 
     return parser
@@ -217,9 +217,8 @@ def _run_analyse(args) -> None:
     from paycheck.ingest.scanner import scan_directory
     from paycheck.ingest.parsers import parse_file
     from paycheck.analysis.stats import aggregate
-    from paycheck.report.html_reporter import generate_html
 
-    output_path = args.output or "report.html"
+    output_path = args.output or "report.json"
 
     log.info("扫描目录: %s", args.dir)
     result = scan_directory(args.dir)
@@ -282,15 +281,14 @@ def _run_analyse(args) -> None:
     log.info("  微信: %s | 支付宝: %s | 银行: %s",
              wechat_total, alipay_total, bank_total)
 
-    # ── 报表 ──
-    log.info("生成报表...")
-    html = generate_html(data)
+    # ── 报表 ── JSON 输出
+    log.info("生成 JSON 报表...")
     out_dir = os.path.dirname(output_path)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write(html)
-    log.info("报表已生成: %s", output_path)
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    log.info("JSON 报表已生成: %s", output_path)
 
 
 def cli():

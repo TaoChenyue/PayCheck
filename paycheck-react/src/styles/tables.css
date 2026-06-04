@@ -1,0 +1,8 @@
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+thead{background:#fafafa}
+th{padding:12px 16px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #e8e8e8}
+td{padding:10px 16px;border-bottom:1px solid #f0f0f0}
+tr:hover td{background:#fafafa}
+td:last-child,th:last-child{text-align:right}
+td:nth-child(3),td:nth-child(4),td:nth-child(5),td:nth-child(6){text-align:right;font-variant-numeric:tabular-nums}

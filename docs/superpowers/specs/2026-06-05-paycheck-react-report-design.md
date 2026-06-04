@@ -31,14 +31,27 @@ Python CLI（解析 + 聚合）                  React SPA（可视化）
 | CSS | 纯 CSS（从原 template.html 移植，按组件拆分） |
 | 包管理 | npm（跟随项目现有习惯） |
 
+## 仓库目录重组
+
+```
+PayCheck/                          ← 仓库根目录
+├── paycheck-react/                ← React 前端（新建）
+├── paycheck-tools/                ← Python CLI 工具（从 src/paycheck/ 移动）
+├── pyproject.toml                 ← 保持不变，路径调整为 paycheck-tools/
+├── AGENTS.md                      ← 不变
+└── README.md                      ← 不变
+```
+
+- 原有 `src/paycheck/` 全部移动到 `paycheck-tools/`，`pyproject.toml` 中的包路径同步调整
+- `html_reporter.py` 和 `template.html` 可标记废弃（不删除，保留参考）
+
 ## Python 端改动
 
-文件：`src/paycheck/__main__.py`
+文件：`paycheck-tools/__main__.py`（原 `src/paycheck/__main__.py`）
 
 - `_run_analyse()` 末尾：去掉 `generate_html()` 调用，改为 `json.dump(data, f, ensure_ascii=False, indent=2)`
 - 默认输出文件名从 `report.html` 改为 `report.json`
 - `aggregate()` 函数本身不变，输出数据结构保持不变
-- `html_reporter.py` 和 `template.html` 可标记废弃（不删除，保留参考）
 
 ## React 项目结构
 

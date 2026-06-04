@@ -1,0 +1,14 @@
+.internal-note{background:#fff7e6;border:1px solid #ffd591;border-radius:8px;padding:10px 16px;margin:12px 0;font-size:13px;color:#ad4e00}
+.internal-note.show{display:block}
+.internal-note strong{color:#d46b08}
+.internal-table-wrap{margin-top:12px}
+.tag-list{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px}
+.tag{display:inline-flex;align-items:center;gap:2px;background:#e6f7ff;border:1px solid #91d5ff;border-radius:4px;padding:1px 8px;font-size:12px;color:#1a1a2e;line-height:1.6}
+.tag .tag-remove{cursor:pointer;font-size:14px;line-height:1;margin-left:2px;color:#999;user-select:none}
+.tag .tag-remove:hover{color:#ff4d4f}
+.tag-input-wrap{position:relative;display:inline-block}
+.tag-dropdown{position:absolute;top:100%;left:0;z-index:1000;background:#fff;border:1px solid #d9d9d9;border-radius:4px;max-height:180px;overflow-y:auto;min-width:150px;box-shadow:0 2px 8px rgba(0,0,0,0.12);display:none}
+.tag-dropdown-item{padding:5px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid #f5f5f5}
+.tag-dropdown-item:last-child{border-bottom:none}
+.tag-dropdown-item:hover{background:#f0f5ff}
+.multi-tag-select{display:inline-flex;flex-direction:row;flex-wrap:wrap;align-items:center;gap:4px}
