@@ -6,7 +6,7 @@ requires-python = ">=3.10, <3.12"
 dependencies = [
     "opencv-python",
     "openpyxl",
-    "paddleocr>=3.6.0",
+    "paddleocr",
     "paddlepaddle-gpu",
     "Pillow",
     "PyMuPDF",
