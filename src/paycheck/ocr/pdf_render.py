@@ -54,6 +54,8 @@ def _render_worker(args) -> str:
     """子进程：渲染单页 PDF → 裁剪 → 存 PNG"""
     pdf_path, page_num, scale, output_dir = args
 
+    log.debug("渲染第%d页开始", page_num)
+
     import fitz
     doc = fitz.open(pdf_path)
     try:
@@ -66,6 +68,7 @@ def _render_worker(args) -> str:
     os.makedirs(page_dir, exist_ok=True)
     out_path = os.path.join(page_dir, f"p{page_num}.png")
     pil_img.save(out_path, "PNG")
+    log.debug("渲染第%d页完成", page_num)
     return out_path
 
 
@@ -112,6 +115,7 @@ def pdf_to_images(
         max_workers = min(os.cpu_count() or 4, 10)
     args_list = [(pdf_path, i, scale, out_dir) for i in range(total_pages)]
     n_workers = min(max_workers, total_pages)
+    log.info("PDF渲染: %s (%d页, 缩放%.1f, %d进程)", pdf_path, total_pages, scale, n_workers)
 
     results: List[str] = []
     with ProcessPoolExecutor(max_workers=n_workers) as executor:
@@ -125,6 +129,7 @@ def pdf_to_images(
                 except Exception as e:
                     log.error("第 %d 页渲染失败: %s", futures[future] + 1, e)
 
+    log.info("渲染完成: %d张图片", len(results))
     # 按页码排序
     results.sort(key=lambda p: int(os.path.basename(p)[1:].replace(".png", "")))
     return results

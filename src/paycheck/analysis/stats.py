@@ -1,14 +1,18 @@
 """数据聚合统计模块 — 月度、平台、类别多维度统计"""
 
 from datetime import datetime
+import logging
 from collections import defaultdict
 from typing import List, Dict
 
 from paycheck.core.models import Transaction
 
+log = logging.getLogger("paycheck.analysis")
+
 
 def compute_stats(txs: List[Dict]) -> Dict:
     """对一组交易计算通用统计量"""
+    log.info("计算统计: %d 条交易", len(txs))
     expenses = [t for t in txs if t["tx_type_norm"] == "支出"]
     incomes = [t for t in txs if t["tx_type_norm"] == "收入"]
 
@@ -96,7 +100,9 @@ def compute_stats(txs: List[Dict]) -> Dict:
 
 def aggregate(transactions: List[Transaction]) -> Dict:
     """聚合所有交易记录，返回统计结果"""
+    log.info("开始聚合: %d 条交易", len(transactions))
     if not transactions:
+        log.warning("交易列表为空")
         return {
             "period": {"start": "", "end": ""},
             "summary": {
@@ -124,6 +130,7 @@ def aggregate(transactions: List[Transaction]) -> Dict:
             try:
                 dt = datetime.strptime(dt_str, "%Y/%m/%d")
             except (ValueError, AttributeError):
+                log.debug("日期解析失败: %s", t.time)
                 continue
         month = f"{dt.year}-{dt.month:02d}"
         parsed.append({
@@ -191,6 +198,10 @@ def aggregate(transactions: List[Transaction]) -> Dict:
     ]
     # 按时间排序
     income_details.sort(key=lambda x: x["time"])
+
+    log.info("聚合完成: 支出%d条/收入%d条, %d个月, %d个类别",
+             ext["totalCount"], len(income_details),
+             len(ext["months"]), len(ext["categories"]))
 
     return {
         "period": {

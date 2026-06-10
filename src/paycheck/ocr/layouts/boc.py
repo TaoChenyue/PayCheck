@@ -6,9 +6,14 @@
   对方账户名(1801) 对方卡号/账号(2018) 对方开户行(2250)
 """
 
+import logging
+
 from typing import List, Tuple
 
 from paycheck.ocr.layouts.base import BankLayout, Row
+
+
+log = logging.getLogger("paycheck.layout.boc")
 
 
 COLUMNS_3X = [
@@ -80,4 +85,5 @@ class BocLayout(BankLayout):
                 "cp_account": r.cp_account.strip(),
                 "cp_bank": r.cp_bank.strip(),
             })
+        log.info("BOC转换: %d 行 → %d 条交易", len(rows), len(transactions))
         return transactions

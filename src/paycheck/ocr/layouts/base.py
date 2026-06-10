@@ -1,11 +1,16 @@
 """BankLayout 抽象基类 + 共用工具函数"""
 
+import logging
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
 from PIL import Image
+
+
+log = logging.getLogger("paycheck.layout")
 
 
 @dataclass
@@ -136,12 +141,12 @@ def find_table_bounds(pil_image: Image.Image) -> BBox:
     right = int(width - 1 - (col_dark[::-1] > MIN_COL).argmax())
 
     pad = 4
-    return (
-        max(0, t - pad),
-        min(height, b + pad),
-        max(0, left - pad),
-        min(width, right + pad),
-    )
+    top = max(0, t - pad)
+    bottom = min(height, b + pad)
+    left = max(0, left - pad)
+    right = min(width, right + pad)
+    log.debug("表格检测: %dx%d, 区域 top=%d bottom=%d left=%d right=%d", width, height, top, bottom, left, right)
+    return (top, bottom, left, right)
 
 
 # =========================================================================
@@ -207,4 +212,5 @@ def group_items_to_rows(
                 existing = getattr(rows[best_ri], key, "")
                 setattr(rows[best_ri], key, existing + it.text)
 
+    log.debug("行分组: %d 个OCR块 → %d 行", len(items), len(rows))
     return rows

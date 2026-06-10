@@ -1,8 +1,11 @@
 """目录扫描模块 — 按子目录名自动发现账单文件和匹配 layout"""
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import List, Dict
+
+log = logging.getLogger("paycheck.scanner")
 
 
 @dataclass
@@ -39,9 +42,11 @@ def scan_directory(dir_path: str) -> ScanResult:
       ant/    → .csv
       <其他名>/  → .csv 和 .pdf，以子目录名作为 bank group key
     """
+    log.info("扫描目录: %s", dir_path)
     result = ScanResult()
 
     if not os.path.isdir(dir_path):
+        log.warning("目录不存在: %s", dir_path)
         return result
 
     for entry in sorted(os.listdir(dir_path)):
@@ -56,6 +61,7 @@ def scan_directory(dir_path: str) -> ScanResult:
             for f in _walk_dir(subdir):
                 if f.endswith('.xlsx') and not os.path.basename(f).startswith('~$'):
                     result.wechat_files.append(f)
+            log.info("微信: %d 个文件", len(result.wechat_files))
             continue
 
         # 支付宝 - 只收 csv
@@ -63,6 +69,7 @@ def scan_directory(dir_path: str) -> ScanResult:
             for f in _walk_dir(subdir):
                 if f.lower().endswith('.csv'):
                     result.ant_files.append(f)
+            log.info("支付宝: %d 个文件", len(result.ant_files))
             continue
 
         # 其他子目录（boc/、icbc/ 等）— 按目录名分组
@@ -75,5 +82,10 @@ def scan_directory(dir_path: str) -> ScanResult:
 
         if group.csv_files or group.pdf_files:
             result.bank_groups[dirname] = group
+            log.info("银行[%s]: %d 个 CSV, %d 个 PDF", dirname,
+                     len(group.csv_files), len(group.pdf_files))
 
+    log.info("扫描完成: 微信%d, 支付宝%d, %d个银行组",
+             len(result.wechat_files), len(result.ant_files),
+             len(result.bank_groups))
     return result

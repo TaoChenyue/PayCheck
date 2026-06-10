@@ -131,6 +131,7 @@ def images_to_csv(
         return 1
 
     total_pages = len(image_paths)
+    log.info("OCR开始: %d 张图片, 布局=%s, 缩放=%.1f, 超时=%d分钟", total_pages, layout_name, scale, timeout_minutes)
     desc = os.path.basename(os.path.dirname(image_paths[0])) if len(image_paths) > 1 else os.path.basename(image_paths[0])
 
     # 提取页码（从文件名 _p{N}.png）
@@ -186,6 +187,7 @@ def images_to_csv(
 
     # 写出 CSV（预览模式 → 终端输出）
     if exit_code == 0:
+        log.info("OCR识别: %d 条交易", total_txns)
         if preview:
             print(_write_csv(page_results, total_pages))
         else:

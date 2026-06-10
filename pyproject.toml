@@ -21,9 +21,6 @@ paycheck = "paycheck.__main__:main"
 [tool.uv]
 package = true
 
-[tool.setuptools.package-data]
-paycheck = ["report/template.html"]
-
 [[tool.uv.index]]
 name = "paddle"
 url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"

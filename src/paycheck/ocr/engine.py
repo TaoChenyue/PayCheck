@@ -80,6 +80,9 @@ def process_image(
     else:
         img = image_input
 
+    h, w = img.shape[:2]
+    log.info("OCR识别图片: %dx%d", h, w)
+
     remaining = timeout_sec - (time.time() - start_time)
     if remaining <= 0:
         raise TimeoutError("图片加载已超时")
@@ -105,4 +108,5 @@ def process_image(
             cy = sum(p[1] for p in poly) / len(poly)
             items.append(OCRItem(text=text, cx=cx, cy=cy))
 
+    log.debug("OCR结果: %d 个文字块 (过滤前 %d)", len(items), len(rec_texts))
     return items
