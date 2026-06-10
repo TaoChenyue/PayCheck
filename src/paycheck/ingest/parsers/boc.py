@@ -14,17 +14,25 @@ BANK_CSV_HEADER = ["date", "time", "tx_type", "amount", "counterparty", "channel
 
 
 def _decode_file(filepath: str) -> str:
-    """检测编码并解码银行 CSV（UTF-16 LE、UTF-8 BOM、UTF-8）"""
+    """检测编码并解码银行 CSV"""
     with open(filepath, "rb") as f:
         raw = f.read()
 
+    # BOM 检测
     if len(raw) >= 2 and raw[0] == 0xFF and raw[1] == 0xFE:
         return raw.decode("utf-16-le")
     if len(raw) >= 2 and raw[0] == 0xFE and raw[1] == 0xFF:
         return raw.decode("utf-16-be")
     if len(raw) >= 3 and raw[0] == 0xEF and raw[1] == 0xBB and raw[2] == 0xBF:
         return raw[3:].decode("utf-8")
-    return raw.decode("utf-8")
+
+    # 无 BOM：先试 UTF-8，失败回退 GBK
+    for enc in ("utf-8", "gbk", "gb2312", "utf-16-le"):
+        try:
+            return raw.decode(enc)
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return raw.decode("utf-8", errors="ignore")
 
 
 def parse_boc_csv(filepath: str) -> List[Transaction]:
