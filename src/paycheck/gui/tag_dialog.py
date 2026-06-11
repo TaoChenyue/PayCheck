@@ -150,13 +150,11 @@ class TagDialog(QDialog):
         """在 assign 模式下，预选所有已选交易共有的标签"""
         if not self._tx_ids:
             return
-        tag_sets: List[Set[int]] = []
-        for tx_id in self._tx_ids:
-            tags = db.get_transaction_tags(tx_id, path=self._db_path)
-            tag_sets.append({t["id"] for t in tags})
-        common_ids: Set[int] = tag_sets[0]
-        for s in tag_sets[1:]:
-            common_ids &= s
+        # 批量查询，避免逐笔打开连接
+        tag_map = db.get_transaction_tags_batch(self._tx_ids, path=self._db_path)
+        if not tag_map:
+            return
+        common_ids: Set[int] = set.intersection(*tag_map.values()) if tag_map else set()
         for cb in self._all_checkboxes:
             tag_id = cb.property("tag_id")
             if tag_id in common_ids:
@@ -195,8 +193,7 @@ class TagDialog(QDialog):
             self._table.setItem(row_idx, 0, name_item)
 
             # 笔数列
-            count_str = str(tag["count"]) + "笔"
-            count_item = QTableWidgetItem(count_str)
+            count_item = QTableWidgetItem(str(tag["count"]))
             count_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(row_idx, 1, count_item)
 
