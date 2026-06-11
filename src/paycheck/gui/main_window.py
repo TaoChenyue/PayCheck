@@ -100,6 +100,81 @@ class ImportWorker(QThread):
             self.error.emit(str(e))
 
 
+class Pdf2CsvWorker(QThread):
+    """PDF→CSV 后台线程，通过信号更新 UI"""
+    progress_val = Signal(int)
+    progress_text = Signal(str)
+    finished = Signal(str)   # csv_name
+    error = Signal(str)
+
+    def __init__(self, pdf_paths: list, layout_name: str):
+        super().__init__()
+        self._pdf_paths = pdf_paths
+        self._layout_name = layout_name
+
+    def run(self):
+        try:
+            import fitz, cv2
+            import numpy as np
+            from PIL import Image
+            from paycheck.ocr.pdf_render import render_page_cropped
+            from paycheck.ocr.engine import process_image, warmup_engine
+            from paycheck.ocr.layouts import get_layout
+
+            layout = get_layout(self._layout_name)
+            if layout is None:
+                raise ValueError(f"不支持的银行类型: {self._layout_name}")
+
+            total_pages = 0
+            for p in self._pdf_paths:
+                d = fitz.open(p)
+                total_pages += len(d)
+                d.close()
+
+            warmup_engine()
+            log.info("OCR 引擎就绪，共 %d 页，开始处理...", total_pages)
+
+            all_dicts = []
+            done = 0
+            for pdf_path in self._pdf_paths:
+                doc = fitz.open(pdf_path)
+                for page_num in range(len(doc)):
+                    pil_img = render_page_cropped(doc, page_num, scale=layout.base_scale)
+                    arr = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
+                    items = process_image(arr)
+                    if items:
+                        rows = layout.group_rows(items, scale=layout.base_scale)
+                        all_dicts.extend(layout.to_transactions(rows))
+                    done += 1
+                    pct = int(done / total_pages * 100)
+                    log.info("OCR %d/%d (%d%%)", done, total_pages, pct)
+                    self.progress_val.emit(pct)
+                    self.progress_text.emit(f"{done}/{total_pages} 页")
+                doc.close()
+
+            if not all_dicts:
+                raise RuntimeError("OCR 未识别到任何交易记录")
+
+            out_dir = os.path.dirname(self._pdf_paths[0]) or "."
+            csv_name = os.path.splitext(os.path.basename(self._pdf_paths[0]))[0] + ".csv"
+            csv_path = os.path.join(out_dir, csv_name)
+
+            import csv
+            header = ["date", "time", "tx_type", "amount", "counterparty",
+                      "channel", "balance", "memo", "tx_name", "currency",
+                      "branch", "cp_account", "cp_bank"]
+            with open(csv_path, "w", encoding="utf-8", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(header)
+                for t in all_dicts:
+                    w.writerow([t.get(k, "") for k in header])
+
+            self.finished.emit(csv_name)
+        except Exception as e:
+            log.exception("PDF 转换失败")
+            self.error.emit(str(e))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -764,71 +839,20 @@ class MainWindow(QMainWindow):
         self._pdf_progress.setVisible(True)
         self._pdf_progress.setValue(0)
 
-        from threading import Thread
-        Thread(target=self._run_pdf2csv, args=(self._pdf_files, layout_name), daemon=True).start()
+        self._pdf_worker = Pdf2CsvWorker(self._pdf_files, layout_name)
+        self._pdf_worker.progress_val.connect(self._pdf_progress.setValue)
+        self._pdf_worker.progress_text.connect(self._pdf_status.setText)
+        self._pdf_worker.finished.connect(self._on_pdf2csv_done)
+        self._pdf_worker.error.connect(self._on_pdf2csv_error)
+        self._pdf_worker.start()
 
-    def _run_pdf2csv(self, pdf_paths: list, layout_name: str):
-        try:
-            import fitz, cv2
-            import numpy as np
-            from PIL import Image
-            from paycheck.ocr.pdf_render import render_page_cropped
-            from paycheck.ocr.engine import process_image, warmup_engine
-            from paycheck.ocr.layouts import get_layout
+    def _on_pdf2csv_done(self, csv_name: str):
+        self._pdf_status.setText(f"输出: {csv_name}")
+        self._pdf_progress.setVisible(False)
+        self._bank_files.append(os.path.join(
+            os.path.dirname(self._pdf_files[0]), csv_name))
+        getattr(self, "_bank_files_edit").setText(f"已选 {len(self._bank_files)} 个文件")
 
-            layout = get_layout(layout_name)
-            if layout is None:
-                raise ValueError(f"不支持的银行类型: {layout_name}")
-
-            # 计算总页数
-            total_pages = 0
-            for p in pdf_paths:
-                d = fitz.open(p)
-                total_pages += len(d)
-                d.close()
-
-            warmup_engine()
-
-            all_dicts = []
-            done = 0
-            for pdf_path in pdf_paths:
-                doc = fitz.open(pdf_path)
-                for page_num in range(len(doc)):
-                    pil_img = render_page_cropped(doc, page_num, scale=layout.base_scale)
-                    arr = cv2.cvtColor(np.array(pil_img.convert("RGB")), cv2.COLOR_RGB2BGR)
-                    items = process_image(arr)
-                    if items:
-                        rows = layout.group_rows(items, scale=layout.base_scale)
-                        all_dicts.extend(layout.to_transactions(rows))
-                    done += 1
-                    pct = int(done / total_pages * 100)
-                    self._pdf_progress.setValue(pct)
-                    self._pdf_status.setText(f"{done}/{total_pages} 页")
-                doc.close()
-
-            if not all_dicts:
-                raise RuntimeError("OCR 未识别到任何交易记录")
-
-            out_dir = os.path.dirname(pdf_paths[0]) or "."
-            csv_name = os.path.splitext(os.path.basename(pdf_paths[0]))[0] + ".csv"
-            csv_path = os.path.join(out_dir, csv_name)
-
-            import csv
-            header = ["date", "time", "tx_type", "amount", "counterparty",
-                      "channel", "balance", "memo", "tx_name", "currency",
-                      "branch", "cp_account", "cp_bank"]
-            with open(csv_path, "w", encoding="utf-8", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(header)
-                for t in all_dicts:
-                    w.writerow([t.get(k, "") for k in header])
-
-            self._pdf_status.setText(f"✓ 输出: {csv_name}")
-            self._pdf_progress.setVisible(False)
-            self._bank_files.append(csv_path)
-            getattr(self, "_bank_files_edit").setText(f"已选 {len(self._bank_files)} 个文件")
-
-        except Exception as e:
-            log.exception("PDF 转换失败")
-            self._pdf_status.setText(f"✗ {e}")
-            self._pdf_progress.setVisible(False)
+    def _on_pdf2csv_error(self, msg: str):
+        self._pdf_status.setText(f"失败: {msg}")
+        self._pdf_progress.setVisible(False)
