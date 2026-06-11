@@ -3,7 +3,7 @@
 import logging
 import sqlite3
 import os
-from typing import List, Dict
+from typing import Dict, List, Set
 
 log = logging.getLogger("paycheck.database")
 
@@ -186,7 +186,7 @@ def get_summary(path: str = DB_PATH) -> Dict:
 
 
 def get_all_tags(path: str = DB_PATH) -> List[Dict]:
-    """获取所有标签及其使用次数"""
+    """获取所有标签及其使用次数（较慢，含 COUNT）"""
     log.debug("查询所有标签")
     conn = _connect(path)
     rows = conn.execute("""
@@ -203,6 +203,16 @@ def get_all_tags(path: str = DB_PATH) -> List[Dict]:
         {"id": r[0], "name": r[1], "count": r[2]}
         for r in rows
     ]
+
+
+def get_tag_list(path: str = DB_PATH) -> List[Dict]:
+    """获取所有标签（仅 id + name，无统计）"""
+    conn = _connect(path)
+    rows = conn.execute(
+        "SELECT id, name FROM tags ORDER BY name"
+    ).fetchall()
+    conn.close()
+    return [{"id": r[0], "name": r[1]} for r in rows]
 
 
 def create_tag(name: str, path: str = DB_PATH) -> int:
@@ -319,6 +329,23 @@ def get_transaction_tags(tx_id: int, path: str = DB_PATH) -> List[Dict]:
         {"id": r[0], "name": r[1]}
         for r in rows
     ]
+
+
+def get_transaction_tags_batch(tx_ids: List[int], path: str = DB_PATH) -> Dict[int, Set[int]]:
+    """批量查询多条交易的标签，返回 {tx_id: {tag_id, ...}}"""
+    if not tx_ids:
+        return {}
+    conn = _connect(path)
+    placeholders = ",".join("?" for _ in tx_ids)
+    rows = conn.execute(
+        f"SELECT transaction_id, tag_id FROM transaction_tags WHERE transaction_id IN ({placeholders})",
+        tuple(tx_ids)
+    ).fetchall()
+    conn.close()
+    result: Dict[int, Set[int]] = {tx_id: set() for tx_id in tx_ids}
+    for tx_id, tag_id in rows:
+        result[tx_id].add(tag_id)
+    return result
 
 
 def query_by_tag_ids(tag_ids: List[int], path: str = DB_PATH) -> List[int]:
