@@ -257,6 +257,7 @@ class MainWindow(QMainWindow):
         self._tables = {}
         self._col_filters = {"wechat": {}, "alipay": {}, "bank": {}}
         self._filter_frames = {}
+        self._filter_widgets = {}
 
         channel_names = {"wechat": "微信", "alipay": "支付宝", "bank": "银行"}
         for ch_key, ch_name in channel_names.items():
@@ -497,12 +498,40 @@ class MainWindow(QMainWindow):
         if self._all_transactions:
             self._render_current_tab()
 
-    def _on_col_filter(self, channel: str, col: int, text: str):
-        text = text.strip()
-        if text:
-            self._col_filters[channel][col] = text
-        else:
-            self._col_filters[channel].pop(col, None)
+    def _on_apply_filters(self, channel: str):
+        """从所有筛选控件收集值并执行筛选"""
+        new_filters = {}
+        for item in self._filter_widgets.get(channel, []):
+            wtype = item[0]
+            if wtype == "text":
+                _, col, inp = item
+                text = inp.text().strip()
+                if text:
+                    new_filters[col] = text
+            elif wtype == "range":
+                _, col, lo, hi = item
+                try:
+                    lo_val = float(lo.text()) if lo.text().strip() else None
+                except ValueError:
+                    lo_val = None
+                try:
+                    hi_val = float(hi.text()) if hi.text().strip() else None
+                except ValueError:
+                    hi_val = None
+                if lo_val is not None or hi_val is not None:
+                    new_filters[f"{col}_range"] = (lo_val, hi_val)
+            elif wtype == "combo":
+                _, col, cb = item
+                val = cb.currentText()
+                if val and val != "全部":
+                    new_filters[col] = val
+            elif wtype == "date":
+                _, col, frm, to = item
+                d_from = frm.date() if frm.date() > frm.minimumDate() else None
+                d_to = to.date() if to.date() > to.minimumDate() else None
+                if d_from or d_to:
+                    new_filters[f"{col}_range"] = (d_from, d_to)
+        self._col_filters[channel] = new_filters
         self._render_table(channel)
 
     def _apply_filters(self, transactions: list, channel: str) -> list:
@@ -567,6 +596,7 @@ class MainWindow(QMainWindow):
             grid.setColumnStretch(c, 1)
 
         filters = self._col_filters.get(channel, {})
+        self._filter_widgets[channel] = []
         for i, (key, title, _) in enumerate(cols):
             card = QFrame()
             card.setFrameStyle(QFrame.StyledPanel | QFrame.Plain)
@@ -582,31 +612,27 @@ class MainWindow(QMainWindow):
                 lo = QLineEdit(); lo.setPlaceholderText("最低"); lo.setMinimumWidth(80)
                 hi = QLineEdit(); hi.setPlaceholderText("最高"); hi.setMinimumWidth(80)
 
-                # 恢复已存储的值
                 rng = filters.get(f"{i}_range")
                 if rng:
-                    lo.blockSignals(True); hi.blockSignals(True)
                     if rng[0] is not None:
                         lo.setText(str(rng[0]))
                     if rng[1] is not None:
                         hi.setText(str(rng[1]))
-                    lo.blockSignals(False); hi.blockSignals(False)
 
-                lo.editingFinished.connect(lambda ch=channel, ci=i: self._on_text_filter(ch, ci, lo, hi))
-                hi.editingFinished.connect(lambda ch=channel, ci=i: self._on_text_filter(ch, ci, lo, hi))
+                self._filter_widgets[channel].append(("range", i, lo, hi))
                 row.addWidget(lo, 1); row.addWidget(QLabel("~")); row.addWidget(hi, 1)
                 wrapper.addLayout(row, 1)
             elif key == "tx_type":
                 cb = QComboBox()
-                cb.addItems(["全部", "支出", "收入"])
+                cb.addItems(["全部", "支出", "收入", "不计收支"])
                 if i in filters:
                     idx = cb.findText(filters[i])
                     if idx >= 0:
                         cb.setCurrentIndex(idx)
-                cb.currentIndexChanged.connect(lambda _, ch=channel, ci=i, c=cb: self._on_combo_filter(ch, ci, c))
+
+                self._filter_widgets[channel].append(("combo", i, cb))
                 wrapper.addWidget(cb, 1)
             elif key == "time":
-                # 从该渠道数据中提取时间范围
                 times = [t.get("time", "")[:7] for t in self._all_transactions
                          if t.get("platform") == channel and t.get("time")]
                 if times:
@@ -637,52 +663,61 @@ class MainWindow(QMainWindow):
                     to.setDate(max_date)
                 frm.blockSignals(False)
                 to.blockSignals(False)
-                frm.dateChanged.connect(lambda d, ch=channel, ci=i, w=frm: self._on_date_range(ch, ci, frm, to))
-                to.dateChanged.connect(lambda d, ch=channel, ci=i, w=to: self._on_date_range(ch, ci, frm, to))
+
+                self._filter_widgets[channel].append(("date", i, frm, to))
                 row.addWidget(frm, 1); row.addWidget(QLabel("~")); row.addWidget(to, 1)
                 wrapper.addLayout(row, 1)
             else:
                 inp = QLineEdit()
-                # 恢复已存储的文本值
                 if i in filters:
                     inp.setText(str(filters[i]))
-                inp.editingFinished.connect(lambda ch=channel, ci=i, w=inp: self._on_col_filter(ch, ci, w.text()))
+
+                self._filter_widgets[channel].append(("text", i, inp))
                 wrapper.addWidget(inp, 1)
             grid.addWidget(card, i // max_cols, i % max_cols)
 
-    def _on_text_filter(self, channel: str, col: int, lo: QLineEdit, hi: QLineEdit):
-        try:
-            lo_val = float(lo.text()) if lo.text().strip() else None
-        except ValueError:
-            lo_val = None
-        try:
-            hi_val = float(hi.text()) if hi.text().strip() else None
-        except ValueError:
-            hi_val = None
-        key = f"{col}_range"
-        if lo_val is not None or hi_val is not None:
-            self._col_filters[channel][key] = (lo_val, hi_val)
-        else:
-            self._col_filters[channel].pop(key, None)
-        self._render_table(channel)
+        # 筛选按钮
+        filter_btn = QPushButton("筛选")
+        filter_btn.clicked.connect(lambda checked, ch=channel: self._on_apply_filters(ch))
+        grid.addWidget(filter_btn, ((len(cols)) // max_cols), (len(cols)) % max_cols)
 
-    def _on_date_range(self, channel: str, col: int, frm: QDateEdit, to: QDateEdit):
-        d_from = frm.date() if frm.date() > frm.minimumDate() else None
-        d_to = to.date() if to.date() > to.minimumDate() else None
-        key = f"{col}_range"
-        if d_from or d_to:
-            self._col_filters[channel][key] = (d_from, d_to)
-        else:
-            self._col_filters[channel].pop(key, None)
-        self._render_table(channel)
+    def _apply_filters(self, transactions: list, channel: str) -> list:
+        """应用该渠道的列筛选（含文本/范围/下拉）"""
+        filters = self._col_filters.get(channel, {})
+        if not filters:
+            return transactions
 
-    def _on_combo_filter(self, channel: str, col: int, cb: QComboBox):
-        val = cb.currentText()
-        if val and val != "全部":
-            self._col_filters[channel][col] = val
-        else:
-            self._col_filters[channel].pop(col, None)
-        self._render_table(channel)
+        cols = CHANNEL_COLUMNS[channel]
+        result = transactions
+
+        for fkey, fval in filters.items():
+            if isinstance(fkey, str) and fkey.endswith("_range"):
+                col_idx = int(fkey.replace("_range", ""))
+                key = cols[col_idx][0] if col_idx < len(cols) else None
+                if not key:
+                    continue
+                lo, hi = fval
+                if isinstance(lo, (int, float)) or isinstance(hi, (int, float)):
+                    if lo is not None:
+                        result = [t for t in result if float(t.get(key, 0)) >= lo]
+                    if hi is not None:
+                        result = [t for t in result if float(t.get(key, 0)) <= hi]
+                elif lo is not None or hi is not None:
+                    if lo:
+                        s = lo.toString("yyyy-MM")
+                        result = [t for t in result if (t.get("time", "") or "") >= s]
+                    if hi:
+                        s = hi.toString("yyyy-MM")
+                        result = [t for t in result if (t.get("time", "") or "")[:7] <= s]
+            else:
+                col_idx = fkey
+                key = cols[col_idx][0] if isinstance(col_idx, int) and col_idx < len(cols) else None
+                if not key:
+                    continue
+                val = str(fval).lower()
+                result = [t for t in result if val in str(t.get(key, "")).lower()]
+
+        return result
 
     def _render_table(self, channel: str):
         cols = CHANNEL_COLUMNS[channel]
@@ -691,7 +726,6 @@ class MainWindow(QMainWindow):
         self._build_filter_row(channel, cols)
 
         filtered = [t for t in self._all_transactions if t.get("platform") == channel]
-        # 标签筛选（与列筛选取 AND）
         if self._tag_filter_ids is not None:
             filtered = [t for t in filtered if t.get("id") in self._tag_filter_ids]
         filtered = self._apply_filters(filtered, channel)
