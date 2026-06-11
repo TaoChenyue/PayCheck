@@ -1,8 +1,8 @@
-"""PySide6 主窗口 — PDF→CSV + 导入 + 分渠道表格 + 分页"""
+"""PySide6 主窗口 — PDF→CSV + 导入 + 分渠道表格 + 分页 + 标签筛选"""
 
 import logging
 import os
-from typing import List
+from typing import List, Set
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
@@ -19,6 +19,9 @@ from paycheck.ingest.parsers.wechat import parse_wechat_xlsx
 from paycheck.ingest.parsers.alipay import parse_alipay_csv
 from paycheck.ingest.parsers.boc import parse_boc_csv
 from paycheck.storage import database as db
+from paycheck.gui.tag_builder import TagBuilder
+from paycheck.gui.tag_dialog import TagDialog
+from paycheck.core.tag_expr import validate_expression, compile_expression
 
 try:
     from paycheck.ocr.layouts import list_layouts
@@ -108,9 +111,11 @@ class MainWindow(QMainWindow):
         self._bank_files = []
         self._pdf_files = []
         self._all_transactions = []
-        self._page_size = 50
         self._bank_type_combo = None  # _init_ui 中创建
+        self._tag_map = {}            # {tag_name: tag_id}
+        self._tag_filter_ids: Set[int] | None = None  # None=无筛选, set=筛选结果
 
+        self._setup_menu()
         self._init_ui()
         self._sync_bank_tab_label()
         self._load_from_db()
@@ -127,7 +132,14 @@ class MainWindow(QMainWindow):
         for name in layouts:
             self._bank_type_combo.addItem(name.upper(), name)
 
-        # ═══ PDF→CSV ═══
+        # ═══ 顶层分页：导入 / 交易明细 ═══
+        self._page_tabs = QTabWidget()
+
+        # ── 页1: 导入 ──
+        import_page = QWidget()
+        import_page_layout = QVBoxLayout(import_page)
+
+        # PDF→CSV
         pdf_group = QGroupBox("PDF → CSV（可选）")
         pdf_layout = QVBoxLayout(pdf_group)
 
@@ -161,9 +173,9 @@ class MainWindow(QMainWindow):
         row1.addStretch()
         pdf_layout.addLayout(row1)
 
-        layout.addWidget(pdf_group)
+        import_page_layout.addWidget(pdf_group)
 
-        # ═══ 数据源 ═══
+        # 数据源
         import_group = QGroupBox("数据源")
         import_layout = QVBoxLayout(import_group)
 
@@ -183,7 +195,6 @@ class MainWindow(QMainWindow):
             row.addWidget(btn)
             import_layout.addLayout(row)
 
-        # 银行 CSV + 类型选择
         row = QHBoxLayout()
         row.addWidget(QLabel("银行 (.csv):"))
         self._bank_csv_edit = QLineEdit()
@@ -209,14 +220,20 @@ class MainWindow(QMainWindow):
         self._import_status = QLabel("")
         import_layout.addWidget(self._import_status)
 
-        layout.addWidget(import_group)
+        import_page_layout.addWidget(import_group)
+        import_page_layout.addStretch()
+        self._page_tabs.addTab(import_page, "导入")
 
-        # ═══ 摘要 ═══
+        # ── 页2: 交易明细 ──
+        detail_page = QWidget()
+        detail_layout = QVBoxLayout(detail_page)
+
+        # 摘要
         summary_group = QGroupBox("摘要")
-        summary_layout = QGridLayout(summary_group)
+        summary_layout_inner = QGridLayout(summary_group)
         self._summary_labels = {}
         card_names = ["总支出", "总收入", "月均支出", "月均收入",
-                      "微信", "支付宝", "银行"]
+                      "微信", "支付宝", "银行", "总交易"]
         for i, name in enumerate(card_names):
             card = QGroupBox(name)
             card.setMinimumWidth(120)
@@ -226,18 +243,18 @@ class MainWindow(QMainWindow):
             lbl.setStyleSheet("font-size: 16px; font-weight: bold;")
             cl.addWidget(lbl)
             self._summary_labels[name] = lbl
-            summary_layout.addWidget(card, i // 4, i % 4)
-        layout.addWidget(summary_group)
+            summary_layout_inner.addWidget(card, i // 4, i % 4)
+        detail_layout.addWidget(summary_group)
 
-        # ═══ 交易明细 ═══
-        table_group = QGroupBox("交易明细（点击表头筛选）")
-        table_layout = QVBoxLayout(table_group)
+        # 标签筛选
+        self._tag_builder = TagBuilder()
+        self._tag_builder.execute_requested.connect(self._on_tag_filter)
+        detail_layout.addWidget(self._tag_builder)
 
+        # 交易表格
         self._tabs = QTabWidget()
         self._tabs.currentChanged.connect(self._on_tab_changed)
         self._tables = {}
-        self._page_labels = {}
-        self._page_states = {"wechat": 0, "alipay": 0, "bank": 0}
         self._col_filters = {"wechat": {}, "alipay": {}, "bank": {}}
         self._filter_frames = {}
 
@@ -246,7 +263,6 @@ class MainWindow(QMainWindow):
             tab = QWidget()
             tab_layout = QVBoxLayout(tab)
 
-            # 筛选行（表格上方，每列适配控件类型）
             filter_frame = QFrame()
             filter_layout = QHBoxLayout(filter_frame)
             filter_layout.setContentsMargins(0, 0, 0, 0)
@@ -266,29 +282,127 @@ class MainWindow(QMainWindow):
             self._filter_frames[ch_key] = filter_frame
             self._tables[ch_key] = tbl
 
-            page_bar = QHBoxLayout()
-            page_bar.addStretch()
-            btn_p = QPushButton("<")
-            btn_p.clicked.connect(lambda checked, k=ch_key: self._go_page(-1, k))
-            page_bar.addWidget(btn_p)
-            pl = QLabel("")
-            page_bar.addWidget(pl)
-            self._page_labels[ch_key] = pl
-            btn_n = QPushButton(">")
-            btn_n.clicked.connect(lambda checked, k=ch_key: self._go_page(1, k))
-            page_bar.addWidget(btn_n)
-            page_bar.addStretch()
-            tab_layout.addLayout(page_bar)
-
             self._tabs.addTab(tab, ch_name)
 
-        table_layout.addWidget(self._tabs, 1)
-        layout.addWidget(table_group, 1)
+        detail_layout.addWidget(self._tabs, 1)
+        self._page_tabs.addTab(detail_page, "交易明细")
+
+        layout.addWidget(self._page_tabs, 1)
 
         # ── 底部状态 ──
         self._status = QLabel("就绪")
         self._status.setStyleSheet("color: gray;")
         layout.addWidget(self._status)
+
+    # ── 菜单栏 ──
+
+    def _setup_menu(self):
+        pass
+
+    def _on_open_tag_manager(self):
+        dlg = TagDialog(self, db_path=db.DB_PATH, mode="manage")
+        if dlg.exec():
+            self._load_from_db()
+
+    # ── 快捷键 ──
+
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_T:
+            self._on_tag_shortcut()
+        else:
+            super().keyPressEvent(event)
+
+    def _on_tag_shortcut(self):
+        """Ctrl+T: 为交易明细中选中的行批量打标签"""
+        idx = self._tabs.currentIndex()
+        ch_key = ("wechat", "alipay", "bank")[idx] if 0 <= idx < 3 else "wechat"
+        tbl = self._tables[ch_key]
+        selected = tbl.selectedIndexes()
+        if not selected:
+            return
+        # 通过选中行反查交易 ID
+        selected_rows = set()
+        for sel in selected:
+            selected_rows.add(sel.row())
+        tx_ids = []
+        # 必须与 _render_table 使用相同的筛选逻辑
+        channel_data = [t for t in self._all_transactions if t.get("platform") == ch_key]
+        if self._tag_filter_ids is not None:
+            channel_data = [t for t in channel_data if t.get("id") in self._tag_filter_ids]
+        channel_data = self._apply_filters(channel_data, ch_key)
+        for row in sorted(selected_rows):
+            if row < len(channel_data):
+                tx_ids.append(channel_data[row].get("id"))
+        if not tx_ids:
+            return
+        dlg = TagDialog(self, db_path=db.DB_PATH, mode="assign", tx_ids=tx_ids)
+        if dlg.exec():
+            self._load_from_db()
+
+    # ── 标签筛选 ──
+
+    def _on_tag_filter(self, expr_text: str):
+        """TagBuilder 执行按钮回调"""
+        if not expr_text.strip():
+            self._tag_filter_ids = None
+            db.set_setting("tag_expr", "")
+        else:
+            valid, error = validate_expression(expr_text, self._tag_map)
+            if not valid:
+                self._status.setText(f"标签表达式无效: {error}")
+                return
+            sql = compile_expression(expr_text, self._tag_map)
+            conn = db._connect(db.DB_PATH)
+            try:
+                rows = conn.execute(sql).fetchall()
+                self._tag_filter_ids = {r[0] for r in rows}
+            finally:
+                conn.close()
+            db.set_setting("tag_expr", expr_text)
+        self._update_summary()
+        self._render_all_tables()
+
+    def _update_summary(self):
+        """根据当前标签筛选更新摘要卡片"""
+        if self._tag_filter_ids is not None:
+            txs = [t for t in self._all_transactions if t.get("id") in self._tag_filter_ids]
+        else:
+            txs = self._all_transactions
+
+        if not txs:
+            for name in self._summary_labels:
+                self._summary_labels[name].setText("-")
+            self._status.setText("无匹配交易")
+            return
+
+        expenses = [t for t in txs if t.get("tx_type") == "支出"]
+        incomes = [t for t in txs if t.get("tx_type") == "收入"]
+
+        total_expense = sum(t["amount"] for t in expenses)
+        total_income = sum(t["amount"] for t in incomes)
+
+        expense_months = len(set(t["time"][:7] for t in expenses if t.get("time"))) or 1
+        monthly_avg = round(total_expense / expense_months, 2)
+
+        income_months = len(set(t["time"][:7] for t in incomes if t.get("time"))) or 1
+        monthly_income = round(total_income / income_months, 2)
+
+        def platform_total(ts, p):
+            return sum(t["amount"] for t in ts if t.get("platform") == p)
+
+        wechat_exp = [t for t in expenses if t.get("platform") == "wechat"]
+        alipay_exp = [t for t in expenses if t.get("platform") == "alipay"]
+        bank_exp = [t for t in expenses if t.get("platform") == "bank"]
+
+        self._summary_labels["总支出"].setText(f"¥{total_expense:,.2f}")
+        self._summary_labels["总收入"].setText(f"¥{total_income:,.2f}")
+        self._summary_labels["月均支出"].setText(f"¥{monthly_avg:,.2f}")
+        self._summary_labels["月均收入"].setText(f"¥{monthly_income:,.2f}")
+        self._summary_labels["微信"].setText(f"¥{platform_total(expenses, 'wechat'):,.2f} / {len(wechat_exp)}笔")
+        self._summary_labels["支付宝"].setText(f"¥{platform_total(expenses, 'alipay'):,.2f} / {len(alipay_exp)}笔")
+        self._summary_labels["银行"].setText(f"¥{platform_total(expenses, 'bank'):,.2f} / {len(bank_exp)}笔")
+        self._summary_labels["总交易"].setText(f"{len(expenses)} 笔")
+        self._status.setText(f"共 {len(txs)} 条交易")
 
     # ── 文件选择 ──
 
@@ -341,27 +455,28 @@ class MainWindow(QMainWindow):
 
     def _load_from_db(self):
         self._all_transactions = db.get_all_transactions()
+        self._tag_filter_ids = None
         if self._all_transactions:
-            s = db.get_summary()
-            # 月均收入 = 总收入 / 有收入的月份数
-            income_months = len(set(
-                t["time"][:7] for t in self._all_transactions
-                if t.get("tx_type") == "收入" and t.get("time")
-            )) or 1
-            monthly_income = round(s['total_income'] / income_months, 2)
-
-            self._summary_labels["总支出"].setText(f"¥{s['total_expense']:,.2f}")
-            self._summary_labels["总收入"].setText(f"¥{s['total_income']:,.2f}")
-            self._summary_labels["月均支出"].setText(f"¥{s['monthly_avg']:,.2f}")
-            self._summary_labels["月均收入"].setText(f"¥{monthly_income:,.2f}")
-            self._summary_labels["微信"].setText(f"¥{s['wechat_total']:,.2f} / {s['wechat_count']}笔")
-            self._summary_labels["支付宝"].setText(f"¥{s['alipay_total']:,.2f} / {s['alipay_count']}笔")
-            self._summary_labels["银行"].setText(f"¥{s['bank_total']:,.2f} / {s['bank_count']}笔")
-            self._status.setText(f"已存储 {s['total_count']} 笔交易")
+            self._update_summary()
         else:
             self._status.setText("请导入账单文件")
 
         self._render_all_tables()
+        self._refresh_tag_data()
+        self._restore_tag_filter()
+
+    def _restore_tag_filter(self):
+        """从数据库恢复上次的标签筛选表达式和视觉状态"""
+        expr = db.get_setting("tag_expr", "")
+        if expr:
+            self._tag_builder.restore_expression(expr)
+            self._on_tag_filter(expr)
+
+    def _refresh_tag_data(self):
+        """刷新标签数据到 TagBuilder"""
+        tags = db.get_all_tags()
+        self._tag_map = {t["name"]: t["id"] for t in tags}
+        self._tag_builder.set_tag_data(self._tag_map, tags)
 
     def _sync_bank_tab_label(self):
         if self._bank_type_combo is not None and self._bank_type_combo.count() > 0:
@@ -371,8 +486,6 @@ class MainWindow(QMainWindow):
     # ── 表格渲染 ──
 
     def _render_all_tables(self):
-        for ch_key in ("wechat", "alipay", "bank"):
-            self._page_states[ch_key] = 0
         self._render_current_tab()
 
     def _render_current_tab(self):
@@ -390,7 +503,6 @@ class MainWindow(QMainWindow):
             self._col_filters[channel][col] = text
         else:
             self._col_filters[channel].pop(col, None)
-        self._page_states[channel] = 0
         self._render_table(channel)
 
     def _apply_filters(self, transactions: list, channel: str) -> list:
@@ -531,7 +643,10 @@ class MainWindow(QMainWindow):
                 wrapper.addLayout(row, 1)
             else:
                 inp = QLineEdit()
-                inp.editingFinished.connect(lambda ch=channel, ci=i: self._on_col_filter(ch, ci, inp.text()))
+                # 恢复已存储的文本值
+                if i in filters:
+                    inp.setText(str(filters[i]))
+                inp.editingFinished.connect(lambda ch=channel, ci=i, w=inp: self._on_col_filter(ch, ci, w.text()))
                 wrapper.addWidget(inp, 1)
             grid.addWidget(card, i // max_cols, i % max_cols)
 
@@ -549,7 +664,6 @@ class MainWindow(QMainWindow):
             self._col_filters[channel][key] = (lo_val, hi_val)
         else:
             self._col_filters[channel].pop(key, None)
-        self._page_states[channel] = 0
         self._render_table(channel)
 
     def _on_date_range(self, channel: str, col: int, frm: QDateEdit, to: QDateEdit):
@@ -560,7 +674,6 @@ class MainWindow(QMainWindow):
             self._col_filters[channel][key] = (d_from, d_to)
         else:
             self._col_filters[channel].pop(key, None)
-        self._page_states[channel] = 0
         self._render_table(channel)
 
     def _on_combo_filter(self, channel: str, col: int, cb: QComboBox):
@@ -569,32 +682,27 @@ class MainWindow(QMainWindow):
             self._col_filters[channel][col] = val
         else:
             self._col_filters[channel].pop(col, None)
-        self._page_states[channel] = 0
         self._render_table(channel)
 
     def _render_table(self, channel: str):
         cols = CHANNEL_COLUMNS[channel]
         tbl = self._tables[channel]
-        page = self._page_states.get(channel, 0)
 
         self._build_filter_row(channel, cols)
 
         filtered = [t for t in self._all_transactions if t.get("platform") == channel]
+        # 标签筛选（与列筛选取 AND）
+        if self._tag_filter_ids is not None:
+            filtered = [t for t in filtered if t.get("id") in self._tag_filter_ids]
         filtered = self._apply_filters(filtered, channel)
         total = len(filtered)
-        total_pages = max(1, (total + self._page_size - 1) // self._page_size)
-        page = max(0, min(page, total_pages - 1))
-        self._page_states[channel] = page
-        start = page * self._page_size
-        end = min(start + self._page_size, total)
-        page_data = filtered[start:end]
 
         tbl.clear()
         tbl.setColumnCount(len(cols))
-        tbl.setRowCount(len(page_data))
+        tbl.setRowCount(total)
         tbl.setHorizontalHeaderLabels([c[1] for c in cols])
 
-        for r, t in enumerate(page_data):
+        for r, t in enumerate(filtered):
             for c, (key, _, _) in enumerate(cols):
                 val = t.get(key, "")
                 if key == "amount":
@@ -609,12 +717,6 @@ class MainWindow(QMainWindow):
         header = tbl.horizontalHeader()
         for i in range(len(cols)):
             header.setSectionResizeMode(i, QHeaderView.Stretch)
-
-        self._page_labels[channel].setText(f"第 {page + 1}/{total_pages} 页 ({total} 条)")
-
-    def _go_page(self, delta: int, channel: str):
-        self._page_states[channel] = self._page_states.get(channel, 0) + delta
-        self._render_table(channel)
 
     # ── PDF→CSV ──
 
