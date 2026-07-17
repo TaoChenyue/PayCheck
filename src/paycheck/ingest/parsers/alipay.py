@@ -5,6 +5,11 @@ import os
 from typing import List
 
 from paycheck.core.models import Transaction
+from paycheck.core.constants import (
+    PARSER_COL_TIME, PARSER_COL_CATEGORY, PARSER_COL_COUNTERPARTY,
+    PARSER_COL_DESCRIPTION, PARSER_COL_TX_TYPE, PARSER_COL_AMOUNT,
+    PARSER_COL_PAYMENT,
+)
 from paycheck.ingest.csv_utils import parse_csv_line
 
 log = logging.getLogger("paycheck.parser.alipay")
@@ -13,13 +18,13 @@ log = logging.getLogger("paycheck.parser.alipay")
 ALIPAY_ENCODINGS = ["gbk", "gb2312", "utf-8", "utf-16-le"]
 
 HEADER_KEYWORDS = {
-    "time": ["交易时间"],
-    "category": ["交易类型", "交易分类"],
-    "counterparty": ["交易对方"],
-    "description": ["商品"],
-    "tx_type": ["收/支"],
-    "amount": ["金额"],
-    "payment": ["支付方式", "收/付款方式"],
+    PARSER_COL_TIME: ["交易时间"],
+    PARSER_COL_CATEGORY: ["交易类型", "交易分类"],
+    PARSER_COL_COUNTERPARTY: ["交易对方"],
+    PARSER_COL_DESCRIPTION: ["商品"],
+    PARSER_COL_TX_TYPE: ["收/支"],
+    PARSER_COL_AMOUNT: ["金额"],
+    PARSER_COL_PAYMENT: ["支付方式", "收/付款方式"],
 }
 
 
@@ -68,7 +73,7 @@ def parse_alipay_csv(filepath: str) -> List[Transaction]:
     headers = parse_csv_line(lines[header_idx])
     col_map = _map_columns(headers)
 
-    if "time" not in col_map or "amount" not in col_map:
+    if PARSER_COL_TIME not in col_map or PARSER_COL_AMOUNT not in col_map:
         log.warning("支付宝关键列缺失: %s", os.path.basename(filepath))
         return []
 
@@ -79,11 +84,11 @@ def parse_alipay_csv(filepath: str) -> List[Transaction]:
             continue
 
         values = parse_csv_line(line)
-        time_str = values[col_map["time"]].strip() if col_map["time"] < len(values) else ""
+        time_str = values[col_map[PARSER_COL_TIME]].strip() if col_map[PARSER_COL_TIME] < len(values) else ""
         if not time_str or time_str.lower() == "nan":
             continue
 
-        amount_str = values[col_map["amount"]].strip().replace(",", "").replace(" ", "") if col_map["amount"] < len(values) else ""
+        amount_str = values[col_map[PARSER_COL_AMOUNT]].strip().replace(",", "").replace(" ", "") if col_map[PARSER_COL_AMOUNT] < len(values) else ""
         if not amount_str or amount_str.lower() == "nan":
             continue
         try:
@@ -92,8 +97,8 @@ def parse_alipay_csv(filepath: str) -> List[Transaction]:
             continue
 
         tx_type_str = (
-            values[col_map["tx_type"]].strip()
-            if col_map.get("tx_type") is not None and col_map["tx_type"] < len(values)
+            values[col_map[PARSER_COL_TX_TYPE]].strip()
+            if col_map.get(PARSER_COL_TX_TYPE) is not None and col_map[PARSER_COL_TX_TYPE] < len(values)
             else "支出"
         )
         if not tx_type_str or tx_type_str.lower() == "nan":
@@ -103,16 +108,16 @@ def parse_alipay_csv(filepath: str) -> List[Transaction]:
             Transaction(
                 platform="alipay",
                 time=time_str,
-                category=values[col_map.get("category", -1)].strip()
-                if col_map.get("category") is not None and col_map["category"] < len(values) else "",
-                counterparty=values[col_map.get("counterparty", -1)].strip()
-                if col_map.get("counterparty") is not None and col_map["counterparty"] < len(values) else "",
-                description=values[col_map.get("description", -1)].strip()
-                if col_map.get("description") is not None and col_map["description"] < len(values) else "",
+                category=values[col_map.get(PARSER_COL_CATEGORY, -1)].strip()
+                if col_map.get(PARSER_COL_CATEGORY) is not None and col_map[PARSER_COL_CATEGORY] < len(values) else "",
+                counterparty=values[col_map.get(PARSER_COL_COUNTERPARTY, -1)].strip()
+                if col_map.get(PARSER_COL_COUNTERPARTY) is not None and col_map[PARSER_COL_COUNTERPARTY] < len(values) else "",
+                description=values[col_map.get(PARSER_COL_DESCRIPTION, -1)].strip()
+                if col_map.get(PARSER_COL_DESCRIPTION) is not None and col_map[PARSER_COL_DESCRIPTION] < len(values) else "",
                 amount=amount,
                 tx_type=tx_type_str,
-                payment_method=values[col_map.get("payment", -1)].strip()
-                if col_map.get("payment") is not None and col_map["payment"] < len(values) else "",
+                payment_method=values[col_map.get(PARSER_COL_PAYMENT, -1)].strip()
+                if col_map.get(PARSER_COL_PAYMENT) is not None and col_map[PARSER_COL_PAYMENT] < len(values) else "",
             )
         )
 

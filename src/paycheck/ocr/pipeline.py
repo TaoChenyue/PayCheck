@@ -16,6 +16,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from tqdm import tqdm
 
 from paycheck.ocr.layouts import get_layout
+from paycheck.core.constants import (
+    FIELD_TIME, FIELD_AMOUNT, FIELD_COUNTERPARTY,
+    FIELD_TX_TYPE, FIELD_BALANCE, FIELD_CURRENCY, FIELD_BRANCH,
+    FIELD_CP_ACCOUNT, FIELD_CP_BANK, BANK_COL_DATE, BANK_COL_CHANNEL,
+    BANK_COL_MEMO, BANK_COL_TX_NAME,
+)
 
 log = logging.getLogger("paycheck.pipeline")
 
@@ -68,23 +74,23 @@ def _write_csv(
 ) -> str:
     """将按页分组的交易记录写出为 CSV 字符串，可选写文件"""
     csv_buf = io.StringIO()
-    csv_buf.write("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name,currency,branch,cp_account,cp_bank\n")
+    csv_buf.write(f"date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name,currency,branch,cp_account,cp_bank\n")
     for p in range(total_pages):
         for t in page_results.get(p, []):
             row = [
-                _esc_csv(t.get("date", "")),
-                _esc_csv(t.get("time", "")),
-                _esc_csv(t.get("tx_type", "")),
-                f"{t['amount']:.2f}" if isinstance(t.get("amount"), (int, float)) else "",
-                _esc_csv(t.get("counterparty", "")),
-                _esc_csv(t.get("channel", "")),
-                f"{float(t['balance']):.2f}" if isinstance(t.get("balance"), (int, float)) else "0.00",
-                _esc_csv(t.get("memo", "")),
-                _esc_csv(t.get("tx_name", "")),
-                _esc_csv(t.get("currency", "")),
-                _esc_csv(t.get("branch", "")),
-                _esc_csv(t.get("cp_account", "")),
-                _esc_csv(t.get("cp_bank", "")),
+                _esc_csv(t.get(BANK_COL_DATE, "")),
+                _esc_csv(t.get(FIELD_TIME, "")),
+                _esc_csv(t.get(FIELD_TX_TYPE, "")),
+                f"{t[FIELD_AMOUNT]:.2f}" if isinstance(t.get(FIELD_AMOUNT), (int, float)) else "",
+                _esc_csv(t.get(FIELD_COUNTERPARTY, "")),
+                _esc_csv(t.get(BANK_COL_CHANNEL, "")),
+                f"{float(t[FIELD_BALANCE]):.2f}" if isinstance(t.get(FIELD_BALANCE), (int, float)) else "0.00",
+                _esc_csv(t.get(BANK_COL_MEMO, "")),
+                _esc_csv(t.get(BANK_COL_TX_NAME, "")),
+                _esc_csv(t.get(FIELD_CURRENCY, "")),
+                _esc_csv(t.get(FIELD_BRANCH, "")),
+                _esc_csv(t.get(FIELD_CP_ACCOUNT, "")),
+                _esc_csv(t.get(FIELD_CP_BANK, "")),
             ]
             csv_buf.write(",".join(row) + "\n")
 

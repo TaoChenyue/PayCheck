@@ -5,12 +5,19 @@ import os
 from typing import List
 
 from paycheck.core.models import Transaction
+from paycheck.core.constants import (
+    FIELD_PLATFORM, FIELD_TIME, FIELD_CATEGORY, FIELD_COUNTERPARTY,
+    FIELD_DESCRIPTION, FIELD_AMOUNT, FIELD_TX_TYPE, FIELD_PAYMENT_METHOD,
+    FIELD_BALANCE, FIELD_CURRENCY, FIELD_BRANCH, FIELD_CP_ACCOUNT,
+    FIELD_CP_BANK, BANK_COL_DATE, BANK_COL_CHANNEL, BANK_COL_MEMO,
+    BANK_COL_TX_NAME,
+)
 from paycheck.ingest.csv_utils import parse_csv_line
 
 log = logging.getLogger("paycheck.parser.boc")
 
 
-BANK_CSV_HEADER = ["date", "time", "tx_type", "amount", "counterparty", "channel", "balance", "memo", "tx_name", "currency", "branch", "cp_account", "cp_bank"]
+BANK_CSV_HEADER = [BANK_COL_DATE, FIELD_TIME, FIELD_TX_TYPE, FIELD_AMOUNT, FIELD_COUNTERPARTY, BANK_COL_CHANNEL, FIELD_BALANCE, BANK_COL_MEMO, BANK_COL_TX_NAME, FIELD_CURRENCY, FIELD_BRANCH, FIELD_CP_ACCOUNT, FIELD_CP_BANK]
 
 
 def _decode_file(filepath: str) -> str:
@@ -50,7 +57,7 @@ def parse_boc_csv(filepath: str) -> List[Transaction]:
         if h_lower in BANK_CSV_HEADER:
             col_map[h_lower] = i
 
-    if "date" not in col_map and "amount" not in col_map:
+    if BANK_COL_DATE not in col_map and FIELD_AMOUNT not in col_map:
         log.warning("BOC CSV 缺少关键列: %s", os.path.basename(filepath))
         return []
 
@@ -58,13 +65,13 @@ def parse_boc_csv(filepath: str) -> List[Transaction]:
     for i in range(1, len(lines)):
         values = parse_csv_line(lines[i])
 
-        date_str = values[col_map.get("date", -1)].strip() if col_map.get("date", -1) < len(values) else ""
+        date_str = values[col_map.get(BANK_COL_DATE, -1)].strip() if col_map.get(BANK_COL_DATE, -1) < len(values) else ""
         if not date_str:
             continue
-        time_of_day = values[col_map.get("time", -1)].strip() if col_map.get("time") is not None and col_map["time"] < len(values) else ""
+        time_of_day = values[col_map.get(FIELD_TIME, -1)].strip() if col_map.get(FIELD_TIME) is not None and col_map[FIELD_TIME] < len(values) else ""
         full_time = f"{date_str} {time_of_day}".strip() if time_of_day else date_str
 
-        amount_str = values[col_map.get("amount", -1)].strip() if col_map.get("amount", -1) < len(values) else ""
+        amount_str = values[col_map.get(FIELD_AMOUNT, -1)].strip() if col_map.get(FIELD_AMOUNT, -1) < len(values) else ""
         if not amount_str:
             continue
         try:
@@ -72,33 +79,33 @@ def parse_boc_csv(filepath: str) -> List[Transaction]:
         except (ValueError, TypeError):
             continue
 
-        tx_type_str = values[col_map.get("tx_type", -1)].strip() if col_map.get("tx_type", -1) < len(values) else "支出"
+        tx_type_str = values[col_map.get(FIELD_TX_TYPE, -1)].strip() if col_map.get(FIELD_TX_TYPE, -1) < len(values) else "支出"
 
-        balance_str = values[col_map.get("balance", -1)].strip() if col_map.get("balance") is not None and col_map["balance"] < len(values) else ""
+        balance_str = values[col_map.get(FIELD_BALANCE, -1)].strip() if col_map.get(FIELD_BALANCE) is not None and col_map[FIELD_BALANCE] < len(values) else ""
         try:
             balance = float(balance_str.replace(",", ""))
         except (ValueError, TypeError):
             balance = 0.0
 
-        cp_account_str = values[col_map.get("cp_account", -1)].strip() if col_map.get("cp_account") is not None and col_map["cp_account"] < len(values) else ""
-        currency_str = values[col_map.get("currency", -1)].strip() if col_map.get("currency") is not None and col_map["currency"] < len(values) else ""
-        branch_str = values[col_map.get("branch", -1)].strip() if col_map.get("branch") is not None and col_map["branch"] < len(values) else ""
-        cp_bank_str = values[col_map.get("cp_bank", -1)].strip() if col_map.get("cp_bank") is not None and col_map["cp_bank"] < len(values) else ""
+        cp_account_str = values[col_map.get(FIELD_CP_ACCOUNT, -1)].strip() if col_map.get(FIELD_CP_ACCOUNT) is not None and col_map[FIELD_CP_ACCOUNT] < len(values) else ""
+        currency_str = values[col_map.get(FIELD_CURRENCY, -1)].strip() if col_map.get(FIELD_CURRENCY) is not None and col_map[FIELD_CURRENCY] < len(values) else ""
+        branch_str = values[col_map.get(FIELD_BRANCH, -1)].strip() if col_map.get(FIELD_BRANCH) is not None and col_map[FIELD_BRANCH] < len(values) else ""
+        cp_bank_str = values[col_map.get(FIELD_CP_BANK, -1)].strip() if col_map.get(FIELD_CP_BANK) is not None and col_map[FIELD_CP_BANK] < len(values) else ""
 
         transactions.append(
             Transaction(
                 platform="bank",
                 time=full_time,
-                category=values[col_map.get("tx_name", -1)].strip()
-                if col_map.get("tx_name") is not None and col_map["tx_name"] < len(values) else "",
-                counterparty=values[col_map.get("counterparty", -1)].strip()
-                if col_map.get("counterparty") is not None and col_map["counterparty"] < len(values) else "",
-                description=values[col_map.get("memo", -1)].strip()
-                if col_map.get("memo") is not None and col_map["memo"] < len(values) else "",
+                category=values[col_map.get(BANK_COL_TX_NAME, -1)].strip()
+                if col_map.get(BANK_COL_TX_NAME) is not None and col_map[BANK_COL_TX_NAME] < len(values) else "",
+                counterparty=values[col_map.get(FIELD_COUNTERPARTY, -1)].strip()
+                if col_map.get(FIELD_COUNTERPARTY) is not None and col_map[FIELD_COUNTERPARTY] < len(values) else "",
+                description=values[col_map.get(BANK_COL_MEMO, -1)].strip()
+                if col_map.get(BANK_COL_MEMO) is not None and col_map[BANK_COL_MEMO] < len(values) else "",
                 amount=amount,
                 tx_type=tx_type_str,
-                payment_method=values[col_map.get("channel", -1)].strip()
-                if col_map.get("channel") is not None and col_map["channel"] < len(values) else "",
+                payment_method=values[col_map.get(BANK_COL_CHANNEL, -1)].strip()
+                if col_map.get(BANK_COL_CHANNEL) is not None and col_map[BANK_COL_CHANNEL] < len(values) else "",
                 balance=balance,
                 currency=currency_str,
                 branch=branch_str,

@@ -7,13 +7,18 @@ dependencies = [
     "opencv-python",
     "openpyxl",
     "paddleocr",
-    "paddlepaddle-gpu",
     "Pillow",
     "PyMuPDF",
     "pyside6",
     "torch",
     "tqdm",
 ]
+
+[project.optional-dependencies]
+# CPU 用户: uv sync --extra cpu
+cpu = ["paddlepaddle>=2.6.0"]
+# GPU 用户 (CUDA 12.6): uv sync --extra gpu
+gpu = ["paddlepaddle-gpu>=2.6.0"]
 
 [project.scripts]
 paycheck = "paycheck.__main__:main"
@@ -22,15 +27,15 @@ paycheck = "paycheck.__main__:main"
 package = true
 
 [[tool.uv.index]]
-name = "paddle"
-url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+name = "paddle-cpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cpu/"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch"
-url = "https://download.pytorch.org/whl/cu126"
+name = "paddle-gpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
 explicit = true
 
 [tool.uv.sources]
-paddlepaddle-gpu = { index = "paddle" }
-torch = { index = "pytorch" }
+paddlepaddle = { index = "paddle-cpu" }
+paddlepaddle-gpu = { index = "paddle-gpu" }

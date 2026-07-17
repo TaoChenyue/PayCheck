@@ -7,18 +7,23 @@ from typing import List
 import openpyxl
 
 from paycheck.core.models import Transaction
+from paycheck.core.constants import (
+    PARSER_COL_TIME, PARSER_COL_CATEGORY, PARSER_COL_COUNTERPARTY,
+    PARSER_COL_DESCRIPTION, PARSER_COL_TX_TYPE, PARSER_COL_AMOUNT,
+    PARSER_COL_PAYMENT,
+)
 
 log = logging.getLogger("paycheck.parser.wechat")
 
 
 HEADER_KEYWORDS = {
-    "time": ["交易时间"],
-    "category": ["交易类型", "交易分类"],
-    "counterparty": ["交易对方"],
-    "description": ["商品"],
-    "tx_type": ["收/支"],
-    "amount": ["金额"],
-    "payment": ["支付方式", "收/付款方式"],
+    PARSER_COL_TIME: ["交易时间"],
+    PARSER_COL_CATEGORY: ["交易类型", "交易分类"],
+    PARSER_COL_COUNTERPARTY: ["交易对方"],
+    PARSER_COL_DESCRIPTION: ["商品"],
+    PARSER_COL_TX_TYPE: ["收/支"],
+    PARSER_COL_AMOUNT: ["金额"],
+    PARSER_COL_PAYMENT: ["支付方式", "收/付款方式"],
 }
 
 SUMMARY_KEYWORDS = ["总计", "合计", "开始", "结束", "导出", "---", "微信支付账单"]
@@ -62,7 +67,7 @@ def parse_wechat_xlsx(filepath: str) -> List[Transaction]:
     headers = data[header_idx]
     col_map = _map_columns(headers)
 
-    if "time" not in col_map or "amount" not in col_map:
+    if PARSER_COL_TIME not in col_map or PARSER_COL_AMOUNT not in col_map:
         log.warning("微信账单关键列缺失: %s", os.path.basename(filepath))
         return []
 
@@ -76,19 +81,19 @@ def parse_wechat_xlsx(filepath: str) -> List[Transaction]:
         if any(kw in first_val for kw in SUMMARY_KEYWORDS) or first_val == "":
             continue
 
-        time_str = str(row[col_map["time"]]).strip() if col_map["time"] < len(row) else ""
+        time_str = str(row[col_map[PARSER_COL_TIME]]).strip() if col_map[PARSER_COL_TIME] < len(row) else ""
         if not time_str:
             continue
 
-        amount_str = str(row[col_map["amount"]]).strip().replace(",", "").replace(" ", "") if col_map["amount"] < len(row) else ""
+        amount_str = str(row[col_map[PARSER_COL_AMOUNT]]).strip().replace(",", "").replace(" ", "") if col_map[PARSER_COL_AMOUNT] < len(row) else ""
         try:
             amount = float(amount_str)
         except (ValueError, TypeError):
             continue
 
         tx_type_str = (
-            str(row[col_map["tx_type"]]).strip()
-            if col_map.get("tx_type") is not None and col_map["tx_type"] < len(row)
+            str(row[col_map[PARSER_COL_TX_TYPE]]).strip()
+            if col_map.get(PARSER_COL_TX_TYPE) is not None and col_map[PARSER_COL_TX_TYPE] < len(row)
             else "支出"
         )
 
@@ -96,16 +101,16 @@ def parse_wechat_xlsx(filepath: str) -> List[Transaction]:
             Transaction(
                 platform="wechat",
                 time=time_str,
-                category=str(row[col_map.get("category", -1)]).strip()
-                if col_map.get("category") is not None and col_map["category"] < len(row) else "",
-                counterparty=str(row[col_map.get("counterparty", -1)]).strip()
-                if col_map.get("counterparty") is not None and col_map["counterparty"] < len(row) else "",
-                description=str(row[col_map.get("description", -1)]).strip()
-                if col_map.get("description") is not None and col_map["description"] < len(row) else "",
+                category=str(row[col_map.get(PARSER_COL_CATEGORY, -1)]).strip()
+                if col_map.get(PARSER_COL_CATEGORY) is not None and col_map[PARSER_COL_CATEGORY] < len(row) else "",
+                counterparty=str(row[col_map.get(PARSER_COL_COUNTERPARTY, -1)]).strip()
+                if col_map.get(PARSER_COL_COUNTERPARTY) is not None and col_map[PARSER_COL_COUNTERPARTY] < len(row) else "",
+                description=str(row[col_map.get(PARSER_COL_DESCRIPTION, -1)]).strip()
+                if col_map.get(PARSER_COL_DESCRIPTION) is not None and col_map[PARSER_COL_DESCRIPTION] < len(row) else "",
                 amount=amount,
                 tx_type=tx_type_str,
-                payment_method=str(row[col_map.get("payment", -1)]).strip()
-                if col_map.get("payment") is not None and col_map["payment"] < len(row) else "",
+                payment_method=str(row[col_map.get(PARSER_COL_PAYMENT, -1)]).strip()
+                if col_map.get(PARSER_COL_PAYMENT) is not None and col_map[PARSER_COL_PAYMENT] < len(row) else "",
             )
         )
 

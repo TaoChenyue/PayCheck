@@ -11,24 +11,30 @@ import logging
 from typing import List, Tuple
 
 from paycheck.ocr.layouts.base import BankLayout, Row
+from paycheck.core.constants import (
+    FIELD_TIME, FIELD_AMOUNT, FIELD_COUNTERPARTY,
+    FIELD_TX_TYPE, FIELD_BALANCE, FIELD_CURRENCY, FIELD_BRANCH,
+    FIELD_CP_ACCOUNT, FIELD_CP_BANK, BANK_COL_DATE, BANK_COL_CHANNEL,
+    BANK_COL_MEMO, BANK_COL_TX_NAME,
+)
 
 
 log = logging.getLogger("paycheck.layout.boc")
 
 
 COLUMNS_3X = [
-    ("date",         0,    202),
-    ("time",         202,  380),
-    ("currency",     380,  553),
-    ("amount",       553,  737),
-    ("balance",      737,  923),
-    ("tx_name",      923,  1093),
-    ("channel",      1093, 1266),
-    ("branch",       1266, 1469),
-    ("memo",         1469, 1689),
-    ("counterparty", 1689, 1909),
-    ("cp_account",   1909, 2180),
-    ("cp_bank",      2180, 9999),
+    (BANK_COL_DATE,         0,    202),
+    (FIELD_TIME,         202,  380),
+    (FIELD_CURRENCY,     380,  553),
+    (FIELD_AMOUNT,       553,  737),
+    (FIELD_BALANCE,      737,  923),
+    (BANK_COL_TX_NAME,      923,  1093),
+    (BANK_COL_CHANNEL,      1093, 1266),
+    (FIELD_BRANCH,       1266, 1469),
+    (BANK_COL_MEMO,         1469, 1689),
+    (FIELD_COUNTERPARTY, 1689, 1909),
+    (FIELD_CP_ACCOUNT,   1909, 2180),
+    (FIELD_CP_BANK,      2180, 9999),
 ]
 
 
@@ -70,20 +76,20 @@ class BocLayout(BankLayout):
             cp = r.counterparty.strip()
 
             transactions.append({
-                "date": r.date,
-                "time": r.time,
+                BANK_COL_DATE: r.date,
+                FIELD_TIME: r.time,
                 "dateTime": f"{r.date} {r.time}".strip() if r.date else "",
-                "amount": amount,
-                "balance": balance,
-                "tx_name": r.tx_name.strip(),
-                "channel": r.channel.strip(),
-                "counterparty": cp,
-                "memo": r.memo.strip(),
-                "tx_type": tx_type,
-                "currency": r.currency.strip(),
-                "branch": r.branch.strip(),
-                "cp_account": r.cp_account.strip(),
-                "cp_bank": r.cp_bank.strip(),
+                FIELD_AMOUNT: amount,
+                FIELD_BALANCE: balance,
+                BANK_COL_TX_NAME: r.tx_name.strip(),
+                BANK_COL_CHANNEL: r.channel.strip(),
+                FIELD_COUNTERPARTY: cp,
+                BANK_COL_MEMO: r.memo.strip(),
+                FIELD_TX_TYPE: tx_type,
+                FIELD_CURRENCY: r.currency.strip(),
+                FIELD_BRANCH: r.branch.strip(),
+                FIELD_CP_ACCOUNT: r.cp_account.strip(),
+                FIELD_CP_BANK: r.cp_bank.strip(),
             })
         log.info("BOC转换: %d 行 → %d 条交易", len(rows), len(transactions))
         return transactions

@@ -1,12 +1,12 @@
 <p align="center">
   <h1 align="center">📊 PayCheck</h1>
   <p align="center"><strong>个人账单统计工具</strong></p>
-  <p align="center">聚合微信 · 支付宝 · 银行三渠道账单，自动剔除内部转账，生成交互式 HTML 分析报告</p>
+  <p align="center">聚合微信 · 支付宝 · 银行三渠道账单，自动剔除内部转账，图形界面一站式管理</p>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%20|%203.11-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/version-0.2.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.5.0-blueviolet" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/GPU-CUDA%2012.6-orange?logo=nvidia" alt="CUDA">
 </p>
@@ -33,25 +33,25 @@
 
 ## 简介
 
-**PayCheck** 是一款个人账单聚合分析工具。它将分散在微信、支付宝、中国银行（BOC）等多个渠道的账单汇总到统一管线下，经过 **PDF 渲染 → OCR 识别 → 结构化解析 → 聚合统计** 流程，最终生成 ECharts 驱动的交互式 HTML 报表。
+**PayCheck** 是一款个人账单聚合分析工具。它将分散在微信、支付宝、中国银行（BOC）等多个渠道的账单汇总到统一管线下，经过 **PDF 渲染 → OCR 识别 → 结构化解析 → 聚合统计** 流程，在 PySide6 图形界面中完成导入、查看与分析。
 
 核心特性：
 
 - **多源聚合** — 微信 `.xlsx`、支付宝 `.csv`、银行 `.pdf` / `.csv` 统一处理
 - **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，支持表格自动检测与裁剪
 - **智能过滤** — 自动剔除"充值/提现/零钱"等内部转账，还原真实消费
-- **可视化报表** — ECharts 5 交互式 HTML，含月度趋势、平台对比、类别分布
+- **可视化分析** — 摘要卡片 + 分渠道可筛选表格，含月度趋势、平台对比、类别分布
 
 ---
 
 ## 前置依赖
 
-- **操作系统**: Windows / macOS / Linux
+- **操作系统**: Windows / macOS / Linux（需图形桌面环境）
 - **Python**: 3.10 ~ 3.11（PaddlePaddle 兼容性要求）
 - **GPU**（推荐）: NVIDIA GPU + CUDA 12.6，用于加速 OCR 推理
 - **Package Manager**: [uv](https://docs.astral.sh/uv/)（推荐）或 pip
 
-> 无 GPU 也可运行（自动回退 CPU），但 OCR 速度会明显降低。
+> 无 GPU 也可运行（安装时选择 `uv sync --extra cpu`），OCR 速度会明显降低但不影响功能。
 
 ---
 
@@ -72,28 +72,59 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```bash
 git clone <repo-url>
 cd paycheck
-uv sync
+
+# GPU 用户（NVIDIA + CUDA 12.6）
+uv sync --extra gpu
+
+# CPU-only 用户（无 NVIDIA GPU）
+uv sync --extra cpu
 ```
 
-`uv sync` 会自动从自定义索引拉取 PaddlePaddle GPU 版和 PyTorch（CUDA 12.6）。如需 CPU 版本，手动修改 `pyproject.toml` 中的索引 URL。
+- `uv sync --extra gpu`：从自定义索引拉取 PaddlePaddle GPU 版（CUDA 12.6），OCR 推理加速
+- `uv sync --extra cpu`：拉取 PaddlePaddle CPU 版，无需 GPU，OCR 速度较慢但不影响功能
 
 ### 3. 验证安装
 
 ```bash
-uv run paycheck --help
+uv run paycheck
 ```
+
+启动后应看到 PySide6 图形界面（导入 / 交易明细两个标签页）。
 
 ---
 
 ## 快速开始
 
+### 启动 GUI
+
 ```bash
-uv run paycheck pdf2image <input_dir>          # ① PDF → 裁剪后 PNG
-uv run paycheck image2csv <input_dir>/boc/     # ② OCR → CSV
-uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
+uv run paycheck
 ```
 
-**输入目录结构约定**：
+程序将打开 PySide6 图形界面，包含两个标签页：
+
+#### 📥 导入
+
+一站式导入所有账单文件：
+
+1. **PDF → CSV（可选）** — 选择银行 PDF 流水文件，选择银行类型（默认 BOC），点击「开始转换 PDF→CSV」完成 OCR 识别，生成 CSV 文件
+2. **数据源** — 分别浏览选择微信 `.xlsx`、支付宝 `.csv`、银行 `.csv` 文件
+3. 点击 **「导入并合并」** 将所有交易写入数据库
+
+> 账单文件可直接通过 GUI 浏览选择，无强制目录结构要求。
+
+#### 📊 交易明细
+
+查看与分析已导入的数据：
+
+- **摘要卡片** — 总支出 / 总收入 / 月均支出 / 月均收入 / 各平台消费统计
+- **分渠道表格** — 微信、支付宝、银行三个标签页，每列支持文本/金额范围/下拉筛选
+- **标签系统** — 为交易打标签，支持标签表达式筛选（如 `(餐饮 | 交通) & !报销`）
+- **快捷键** — 选中行按 `Ctrl+T` 批量打标签
+
+### 准备账单文件
+
+推荐按平台分目录管理，便于批量导入：
 
 ```
 <input_dir>/
@@ -109,6 +140,8 @@ uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 
 ## 数据流
 
+以下管道已完全集成到 GUI 中（导入页的「开始转换 PDF→CSV」覆盖前两阶段，「导入并合并」覆盖第三阶段），用户无需手动执行中间命令。
+
 三阶段管道，渲染 / OCR / 分析完全解耦：
 
 ```
@@ -121,7 +154,7 @@ uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 │       ↓                  │    │       ↓                  │    │       ↓                      │
 │  *_p*.png 图片           │    │  boc/*.csv (输出)       │ ──→│  CSV/XLSX → Transaction     │
 └──────────────────────────┘    └──────────────────────────┘    │       ↓                      │
-                                                                  │  聚合统计 → HTML 报表        │
+                                                                  │  聚合统计 → 摘要卡片 / 表格  │
                                                                   └──────────────────────────────┘
 
 ```
@@ -135,7 +168,7 @@ uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 | ③ | `scan_directory()` | 按子目录名（wechat/ant/boc）自动归类文件 |
 | ④ | `parse_file()` | 根据平台调用对应解析器：CSV/XLSX → Transaction 列表 |
 | ⑤ | `aggregate()` | 过滤内部转账 → 多维度聚合统计 |
-| ⑥ | `generate_html()` | ECharts 5 交互式 HTML 报表输出 |
+| ⑥ | `_update_summary()` / `_render_table()` | 更新摘要卡片与分渠道表格 |
 
 
 
@@ -166,7 +199,7 @@ uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 | 支付宝 | `tx_type == "不计收支"` |
 | 微信 | category 含"充值"/"提现"/"零钱" |
 
-报表中独立展示内部转账金额，消费统计仅基于真实外部交易。
+内部转账金额独立展示于平台统计中，消费统计仅基于真实外部交易。
 
 ### 分析维度
 
@@ -185,15 +218,7 @@ uv run paycheck analyse <input_dir>            # ③ 分析 → HTML 报表
 2. **`ocr/layouts/__init__.py`** — 注册 `register_layout("icbc", IcbcLayout)`
 3. **`ingest/parsers/icbc.py`** — 解析 ICBC 格式 CSV 为 Transaction
 
-输入目录放入 `<input_dir>/icbc/*.pdf`，然后：
-
-```bash
-paycheck pdf2image <input_dir>            # 渲染 PDF → 图片
-paycheck image2csv <input_dir>/icbc/      # OCR → CSV
-paycheck analyse <input_dir>              # 分析 → 报表
-# 或一步到位:
-paycheck pdf2image <input_dir> && paycheck image2csv <input_dir>/icbc/ && paycheck analyse <input_dir>
-```
+注册后，启动 GUI（`uv run paycheck`），在 **导入** 页的银行类型下拉框中即可选择 `ICBC`。然后通过「开始转换 PDF→CSV」和「导入并合并」按钮完成处理。
 
 ---
 
@@ -201,24 +226,24 @@ paycheck pdf2image <input_dir> && paycheck image2csv <input_dir>/icbc/ && payche
 
 | 问题 | 排查方向 |
 |---|---|
-| `PaddleOCR` 初始化失败 | 检查 CUDA 版本是否匹配（本项目使用 CUDA 12.6）；GPU 显存不足时设置 `CUDA_VISIBLE_DEVICES=""` 回退 CPU |
+| `PaddleOCR` 初始化失败 | 确认安装时选择了正确版本（`--extra gpu` 需 CUDA 12.6）；GPU 显存不足时可改用 `uv sync --extra cpu` 回退 CPU |
 | OCR 识别结果乱码 | 确认 PDF 为可渲染的扫描件（非图片嵌入型 PDF）；检查 `boc/` 目录下 PNG 图片是否裁剪正确 |
 | CSV 编码错误 | 支付宝默认 GBK，银行默认 UTF-16 LE，工具会自动探测；如仍失败，手动转为 UTF-8 再试 |
 | 微信 XLSX 解析失败 | 确认微信导出的为 `.xlsx` 格式（非 `.csv`）；检查文件是否被加密或损坏 |
-| 报表显示空白 | ECharts 通过 CDN 加载，检查网络连接；或手动下载 ECharts 5 替换 CDN 引用 |
+| 交易明细无数据显示 | 确认已通过「导入并合并」成功导入账单文件；检查数据库是否正常 |
 
 ---
 
 ## 依赖
 
 - Python 3.10–3.11
-- PaddleOCR ≥ 3.6.0 + PaddlePaddle（中文 OCR 引擎）
+- PaddleOCR ≥ 3.6.0 + PaddlePaddle（中文 OCR 引擎，可选 CPU/GPU 版）
 - PyMuPDF（PDF 渲染）
 - Pillow（图像处理）
 - openpyxl（微信 XLSX 解析）
 - opencv-python（图像处理）
 - torch（PaddleOCR 底层）
-- ECharts 5（报表图表，CDN 加载）
+- PySide6（图形界面）
 
 ---
 

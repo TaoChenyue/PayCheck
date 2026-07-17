@@ -5,29 +5,36 @@ import sqlite3
 import os
 from typing import Dict, List, Set
 
+from paycheck.core.constants import (
+    FIELD_PLATFORM, FIELD_TIME, FIELD_CATEGORY, FIELD_COUNTERPARTY,
+    FIELD_DESCRIPTION, FIELD_AMOUNT, FIELD_TX_TYPE, FIELD_PAYMENT_METHOD,
+    FIELD_BALANCE, FIELD_CURRENCY, FIELD_BRANCH, FIELD_CP_ACCOUNT,
+    FIELD_CP_BANK, FIELD_ID,
+)
+
 log = logging.getLogger("paycheck.database")
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))), "log", "paycheck.db")
 
-CREATE_TABLE = """
+CREATE_TABLE = f"""
 CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    platform TEXT NOT NULL,
-    time TEXT NOT NULL,
-    category TEXT DEFAULT '',
-    counterparty TEXT DEFAULT '',
-    amount REAL NOT NULL,
-    tx_type TEXT DEFAULT '',
-    payment_method TEXT DEFAULT '',
-    description TEXT DEFAULT '',
-    balance REAL DEFAULT 0,
-    currency TEXT DEFAULT '',
-    branch TEXT DEFAULT '',
-    cp_account TEXT DEFAULT '',
-    cp_bank TEXT DEFAULT '',
+    {FIELD_ID} INTEGER PRIMARY KEY AUTOINCREMENT,
+    {FIELD_PLATFORM} TEXT NOT NULL,
+    {FIELD_TIME} TEXT NOT NULL,
+    {FIELD_CATEGORY} TEXT DEFAULT '',
+    {FIELD_COUNTERPARTY} TEXT DEFAULT '',
+    {FIELD_AMOUNT} REAL NOT NULL,
+    {FIELD_TX_TYPE} TEXT DEFAULT '',
+    {FIELD_PAYMENT_METHOD} TEXT DEFAULT '',
+    {FIELD_DESCRIPTION} TEXT DEFAULT '',
+    {FIELD_BALANCE} REAL DEFAULT 0,
+    {FIELD_CURRENCY} TEXT DEFAULT '',
+    {FIELD_BRANCH} TEXT DEFAULT '',
+    {FIELD_CP_ACCOUNT} TEXT DEFAULT '',
+    {FIELD_CP_BANK} TEXT DEFAULT '',
     created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(time, amount, counterparty)
+    UNIQUE({FIELD_TIME}, {FIELD_AMOUNT}, {FIELD_COUNTERPARTY})
 );
 """
 
@@ -78,26 +85,26 @@ def insert_transactions(transactions: List[Dict], path: str = DB_PATH) -> int:
     added = 0
     for t in transactions:
         try:
-            conn.execute("""
+            conn.execute(f"""
                 INSERT OR IGNORE INTO transactions
-                (platform, time, category, counterparty, amount, tx_type,
-                 payment_method, description, balance, currency, branch,
-                 cp_account, cp_bank)
+                ({FIELD_PLATFORM}, {FIELD_TIME}, {FIELD_CATEGORY}, {FIELD_COUNTERPARTY}, {FIELD_AMOUNT}, {FIELD_TX_TYPE},
+                 {FIELD_PAYMENT_METHOD}, {FIELD_DESCRIPTION}, {FIELD_BALANCE}, {FIELD_CURRENCY}, {FIELD_BRANCH},
+                 {FIELD_CP_ACCOUNT}, {FIELD_CP_BANK})
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                t.get("platform", ""),
-                t.get("time", ""),
-                t.get("category", ""),
-                t.get("counterparty", ""),
-                t.get("amount", 0),
-                t.get("tx_type", ""),
-                t.get("payment_method", ""),
-                t.get("description", ""),
-                t.get("balance", 0),
-                t.get("currency", ""),
-                t.get("branch", ""),
-                t.get("cp_account", ""),
-                t.get("cp_bank", ""),
+                t.get(FIELD_PLATFORM, ""),
+                t.get(FIELD_TIME, ""),
+                t.get(FIELD_CATEGORY, ""),
+                t.get(FIELD_COUNTERPARTY, ""),
+                t.get(FIELD_AMOUNT, 0),
+                t.get(FIELD_TX_TYPE, ""),
+                t.get(FIELD_PAYMENT_METHOD, ""),
+                t.get(FIELD_DESCRIPTION, ""),
+                t.get(FIELD_BALANCE, 0),
+                t.get(FIELD_CURRENCY, ""),
+                t.get(FIELD_BRANCH, ""),
+                t.get(FIELD_CP_ACCOUNT, ""),
+                t.get(FIELD_CP_BANK, ""),
             ))
             if conn.total_changes > added:
                 added += 1
@@ -115,11 +122,11 @@ def get_all_transactions(path: str = DB_PATH) -> List[Dict]:
     """获取所有交易记录"""
     log.debug("查询所有交易")
     conn = _connect(path)
-    rows = conn.execute("""
-        SELECT id, platform, time, category, counterparty, amount, tx_type,
-               payment_method, description, balance, currency,
-               branch, cp_account, cp_bank
-        FROM transactions ORDER BY time DESC
+    rows = conn.execute(f"""
+        SELECT {FIELD_ID}, {FIELD_PLATFORM}, {FIELD_TIME}, {FIELD_CATEGORY}, {FIELD_COUNTERPARTY}, {FIELD_AMOUNT}, {FIELD_TX_TYPE},
+               {FIELD_PAYMENT_METHOD}, {FIELD_DESCRIPTION}, {FIELD_BALANCE}, {FIELD_CURRENCY},
+               {FIELD_BRANCH}, {FIELD_CP_ACCOUNT}, {FIELD_CP_BANK}
+        FROM transactions ORDER BY {FIELD_TIME} DESC
     """).fetchall()
     conn.close()
 
@@ -127,12 +134,12 @@ def get_all_transactions(path: str = DB_PATH) -> List[Dict]:
 
     return [
         {
-            "id": r[0],
-            "platform": r[1], "time": r[2], "category": r[3],
-            "counterparty": r[4], "amount": r[5], "tx_type": r[6],
-            "payment_method": r[7], "description": r[8],
-            "balance": r[9], "currency": r[10], "branch": r[11],
-            "cp_account": r[12], "cp_bank": r[13],
+            FIELD_ID: r[0],
+            FIELD_PLATFORM: r[1], FIELD_TIME: r[2], FIELD_CATEGORY: r[3],
+            FIELD_COUNTERPARTY: r[4], FIELD_AMOUNT: r[5], FIELD_TX_TYPE: r[6],
+            FIELD_PAYMENT_METHOD: r[7], FIELD_DESCRIPTION: r[8],
+            FIELD_BALANCE: r[9], FIELD_CURRENCY: r[10], FIELD_BRANCH: r[11],
+            FIELD_CP_ACCOUNT: r[12], FIELD_CP_BANK: r[13],
         }
         for r in rows
     ]
@@ -143,22 +150,22 @@ def get_summary(path: str = DB_PATH) -> Dict:
     log.debug("查询汇总统计")
     conn = _connect(path)
 
-    row = conn.execute("""
+    row = conn.execute(f"""
         SELECT
-            COALESCE(SUM(CASE WHEN tx_type = '支出' THEN amount ELSE 0 END), 0) AS total_expense,
-            COALESCE(SUM(CASE WHEN tx_type = '收入' THEN amount ELSE 0 END), 0) AS total_income,
-            COUNT(CASE WHEN tx_type = '支出' THEN 1 END) AS total_count,
-            COALESCE(SUM(CASE WHEN tx_type = '支出' AND platform = 'wechat' THEN amount ELSE 0 END), 0) AS wechat_total,
-            COALESCE(SUM(CASE WHEN tx_type = '支出' AND platform = 'alipay' THEN amount ELSE 0 END), 0) AS alipay_total,
-            COALESCE(SUM(CASE WHEN tx_type = '支出' AND platform = 'bank' THEN amount ELSE 0 END), 0) AS bank_total,
-            COUNT(CASE WHEN tx_type = '支出' AND platform = 'wechat' THEN 1 END) AS wechat_count,
-            COUNT(CASE WHEN tx_type = '支出' AND platform = 'alipay' THEN 1 END) AS alipay_count,
-            COUNT(CASE WHEN tx_type = '支出' AND platform = 'bank' THEN 1 END) AS bank_count
+            COALESCE(SUM(CASE WHEN {FIELD_TX_TYPE} = '支出' THEN {FIELD_AMOUNT} ELSE 0 END), 0) AS total_expense,
+            COALESCE(SUM(CASE WHEN {FIELD_TX_TYPE} = '收入' THEN {FIELD_AMOUNT} ELSE 0 END), 0) AS total_income,
+            COUNT(CASE WHEN {FIELD_TX_TYPE} = '支出' THEN 1 END) AS total_count,
+            COALESCE(SUM(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'wechat' THEN {FIELD_AMOUNT} ELSE 0 END), 0) AS wechat_total,
+            COALESCE(SUM(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'alipay' THEN {FIELD_AMOUNT} ELSE 0 END), 0) AS alipay_total,
+            COALESCE(SUM(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'bank' THEN {FIELD_AMOUNT} ELSE 0 END), 0) AS bank_total,
+            COUNT(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'wechat' THEN 1 END) AS wechat_count,
+            COUNT(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'alipay' THEN 1 END) AS alipay_count,
+            COUNT(CASE WHEN {FIELD_TX_TYPE} = '支出' AND {FIELD_PLATFORM} = 'bank' THEN 1 END) AS bank_count
         FROM transactions
     """).fetchone()
 
     month_row = conn.execute(
-        "SELECT COUNT(DISTINCT substr(time, 1, 7)) FROM transactions WHERE tx_type = '支出'"
+        f"SELECT COUNT(DISTINCT substr({FIELD_TIME}, 1, 7)) FROM transactions WHERE {FIELD_TX_TYPE} = '支出'"
     ).fetchone()
 
     conn.close()
@@ -376,9 +383,9 @@ def get_transactions_by_ids(tx_ids: List[int], path: str = DB_PATH) -> List[Dict
     conn = _connect(path)
     placeholders = ",".join("?" for _ in tx_ids)
     rows = conn.execute(
-        f"SELECT id, platform, time, category, counterparty, amount, tx_type, "
-        f"payment_method, description, balance, currency, branch, cp_account, cp_bank "
-        f"FROM transactions WHERE id IN ({placeholders}) ORDER BY time DESC",
+        f"SELECT {FIELD_ID}, {FIELD_PLATFORM}, {FIELD_TIME}, {FIELD_CATEGORY}, {FIELD_COUNTERPARTY}, {FIELD_AMOUNT}, {FIELD_TX_TYPE}, "
+        f"{FIELD_PAYMENT_METHOD}, {FIELD_DESCRIPTION}, {FIELD_BALANCE}, {FIELD_CURRENCY}, {FIELD_BRANCH}, {FIELD_CP_ACCOUNT}, {FIELD_CP_BANK} "
+        f"FROM transactions WHERE {FIELD_ID} IN ({placeholders}) ORDER BY {FIELD_TIME} DESC",
         tuple(tx_ids)
     ).fetchall()
     conn.close()
@@ -386,12 +393,12 @@ def get_transactions_by_ids(tx_ids: List[int], path: str = DB_PATH) -> List[Dict
     log.debug("查询到 %d 条交易", len(rows))
     return [
         {
-            "id": r[0],
-            "platform": r[1], "time": r[2], "category": r[3],
-            "counterparty": r[4], "amount": r[5], "tx_type": r[6],
-            "payment_method": r[7], "description": r[8],
-            "balance": r[9], "currency": r[10], "branch": r[11],
-            "cp_account": r[12], "cp_bank": r[13],
+            FIELD_ID: r[0],
+            FIELD_PLATFORM: r[1], FIELD_TIME: r[2], FIELD_CATEGORY: r[3],
+            FIELD_COUNTERPARTY: r[4], FIELD_AMOUNT: r[5], FIELD_TX_TYPE: r[6],
+            FIELD_PAYMENT_METHOD: r[7], FIELD_DESCRIPTION: r[8],
+            FIELD_BALANCE: r[9], FIELD_CURRENCY: r[10], FIELD_BRANCH: r[11],
+            FIELD_CP_ACCOUNT: r[12], FIELD_CP_BANK: r[13],
         }
         for r in rows
     ]

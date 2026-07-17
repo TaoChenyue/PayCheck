@@ -9,6 +9,7 @@ os.environ["QT_LOGGING_RULES"] = "qt.text.font.db=false"
 from PySide6.QtWidgets import QApplication
 from paycheck.core.log import setup_logging
 from paycheck.gui.main_window import MainWindow
+from paycheck.gui.theme import ThemeManager
 
 
 def main():
@@ -16,7 +17,12 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("PayCheck")
 
-    window = MainWindow()
+    # 主题管理 — 在创建窗口前加载并应用
+    theme_mgr = ThemeManager()
+    theme_mgr.load_preference()
+    theme_mgr.apply(app)
+
+    window = MainWindow(theme_mgr=theme_mgr)
     window.resize(1100, 800)
     window.show()
 

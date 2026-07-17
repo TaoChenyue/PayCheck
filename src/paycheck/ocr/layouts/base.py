@@ -9,6 +9,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 from PIL import Image
 
+from paycheck.core.constants import BANK_COL_DATE
+
 
 log = logging.getLogger("paycheck.layout")
 
@@ -187,7 +189,7 @@ def group_items_to_rows(
             col_map.setdefault(key, []).append(it)
 
     # 以 date 列做行锚点
-    dates = sorted(col_map.get("date", []), key=lambda x: x.cy)
+    dates = sorted(col_map.get(BANK_COL_DATE, []), key=lambda x: x.cy)
     if not dates:
         return []
 
@@ -196,9 +198,9 @@ def group_items_to_rows(
     MAX_ROW_DIST = 40 * factor
 
     for key, its in col_map.items():
-        if key == "date":
+        if key == BANK_COL_DATE:
             for j, d in enumerate(dates):
-                setattr(rows[j], "date", d.text)
+                setattr(rows[j], BANK_COL_DATE, d.text)
             continue
         for it in its:
             best = float("inf")
