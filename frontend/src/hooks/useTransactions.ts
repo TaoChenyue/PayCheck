@@ -9,7 +9,7 @@ import type {
   PaginatedResponse,
 } from '@/types';
 
-const TRANSACTIONS_URL = '/transactions/transactions/';
+const TRANSACTIONS_URL = '/transactions/';
 
 async function fetchTransactions(params: TransactionQueryParams): Promise<PaginatedResponse<Transaction>> {
   const { data } = await apiClient.get(TRANSACTIONS_URL, { params });
