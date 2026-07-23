@@ -1,6 +1,10 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import AppLayout from './components/layout/AppLayout';
+import DashboardPage from './pages/DashboardPage';
+import ChannelPage from './pages/ChannelPage';
+import ImportPage from './pages/ImportPage';
 import PdfToCsvPage from './pages/PdfToCsvPage';
 import './App.css';
 
@@ -18,8 +22,14 @@ export default function App() {
       <AntApp>
         <BrowserRouter>
           <Routes>
-            <Route path="/pdf-to-csv" element={<PdfToCsvPage />} />
-            <Route path="*" element={<Navigate to="/pdf-to-csv" replace />} />
+            <Route element={<AppLayout />}>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route path="/channels/:channel" element={<ChannelPage />} />
+              <Route path="/import" element={<ImportPage />} />
+              <Route path="/tools/pdf-to-csv" element={<PdfToCsvPage />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Route>
           </Routes>
         </BrowserRouter>
       </AntApp>
