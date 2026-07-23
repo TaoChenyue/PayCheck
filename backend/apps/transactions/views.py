@@ -3,10 +3,15 @@
 from django.db import transaction as db_transaction
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.mixins import (
+    DestroyModelMixin,
+    ListModelMixin,
+    RetrieveModelMixin,
+)
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from apps.channels.models import AlipayTx, WechatTx, BocTx
 from apps.transactions.filters import TransactionFilter
@@ -18,15 +23,17 @@ from apps.transactions.serializers import (
 )
 
 
-class TransactionViewSet(ModelViewSet):
+class TransactionViewSet(GenericViewSet, ListModelMixin, RetrieveModelMixin, DestroyModelMixin):
     """统一交易记录 ViewSet
 
-    提供完整的 CRUD + 标签管理操作：
+    仅暴露 DESIGN.md §7.1 定义的端点：
     - list: 分页查询，支持多维度筛选/搜索/排序
     - retrieve: 单条详情
     - destroy: 删除交易（级联删除渠道表源数据）
     - tags (detail): 为单条交易设置标签
     - batch-tags (collection): 批量打标签
+
+    不暴露 POST/PUT/PATCH（创建/更新），交易数据仅由导入流程写入。
     """
 
     queryset = Transaction.objects.prefetch_related("tags").all()

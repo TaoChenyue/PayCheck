@@ -8,6 +8,7 @@ import os
 import tempfile
 
 from celery import shared_task
+from django.db import IntegrityError
 from django.utils import timezone
 
 from apps.ingest.models import ImportJob, ImportFile
@@ -78,7 +79,12 @@ def _sync_to_transactions(tx_dicts, platform, source_model_label):
             "row_hash": row_hash,
             **channel_kwargs,
         }
-        Transaction.objects.create(**tx_kwargs)
+        try:
+            Transaction.objects.create(**tx_kwargs)
+        except IntegrityError:
+            # Race condition: duplicate row_hash from concurrent task
+            skipped += 1
+            continue
         created += 1
 
     return created, skipped

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { Typography } from 'antd';
 import { useTransactions } from '@/hooks/useTransactions';
-import TransactionTable from '@/components/tables/TransactionTable';
+import ChannelTable from '@/components/tables/ChannelTable';
 import type { TransactionQueryParams, ChannelType } from '@/types';
 
 const { Title } = Typography;
@@ -92,14 +92,14 @@ export default function ChannelPage() {
       <Title level={3} style={{ marginBottom: 24 }}>
         {title}
       </Title>
-      <TransactionTable
+      <ChannelTable
         data={transactions}
         loading={isLoading}
         pagination={{ page, pageSize, total }}
         onPageChange={handlePageChange}
         onSearch={handleSearch}
         onSort={handleSort}
-        isBank={channel === 'boc'}
+        channel={channel as 'alipay' | 'wechat' | 'boc'}
       />
     </div>
   );
