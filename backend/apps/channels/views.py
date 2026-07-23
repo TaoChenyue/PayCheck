@@ -6,7 +6,7 @@
 
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.channels.models import AlipayTx, WechatTx, BocTx
 from apps.channels.serializers import (
@@ -16,8 +16,8 @@ from apps.channels.serializers import (
 )
 
 
-class AlipayTxViewSet(ModelViewSet):
-    """支付宝交易记录 ViewSet — 支持筛选/搜索/排序"""
+class AlipayTxViewSet(ReadOnlyModelViewSet):
+    """支付宝交易记录 ViewSet — 只读，支持筛选/搜索/排序"""
 
     queryset = AlipayTx.objects.all()
     serializer_class = AlipayTxSerializer
@@ -27,8 +27,8 @@ class AlipayTxViewSet(ModelViewSet):
     ordering = ["-time"]
 
 
-class WechatTxViewSet(ModelViewSet):
-    """微信交易记录 ViewSet — 支持筛选/搜索/排序"""
+class WechatTxViewSet(ReadOnlyModelViewSet):
+    """微信交易记录 ViewSet — 只读，支持筛选/搜索/排序"""
 
     queryset = WechatTx.objects.all()
     serializer_class = WechatTxSerializer
@@ -38,8 +38,8 @@ class WechatTxViewSet(ModelViewSet):
     ordering = ["-time"]
 
 
-class BocTxViewSet(ModelViewSet):
-    """银行交易记录 ViewSet — 支持筛选/搜索/排序"""
+class BocTxViewSet(ReadOnlyModelViewSet):
+    """银行交易记录 ViewSet — 只读，支持筛选/搜索/排序"""
 
     queryset = BocTx.objects.all()
     serializer_class = BocTxSerializer

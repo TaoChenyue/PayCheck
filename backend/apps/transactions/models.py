@@ -12,7 +12,7 @@ class Transaction(models.Model):
     PLATFORM_CHOICES = [
         ("alipay", "支付宝"),
         ("wechat", "微信"),
-        ("bank", "银行"),
+        ("boc", "银行"),
     ]
 
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)

@@ -4,7 +4,6 @@ import { Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
   ImportOutlined,
-  FilePdfOutlined,
   BankOutlined,
   AlipayOutlined,
   WechatOutlined,
@@ -12,7 +11,7 @@ import {
   PieChartOutlined,
 } from '@ant-design/icons';
 function getOpenKeys(pathname: string): string[] {
-  if (pathname === '/import' || pathname.startsWith('/channels') || pathname === '/tools/pdf-to-csv') {
+  if (pathname === '/import' || pathname.startsWith('/channels')) {
     return ['/data'];
   }
   if (pathname === '/dashboard' || pathname === '/analysis') {
@@ -46,11 +45,6 @@ const menuItems: MenuProps['items'] = [
         key: '/channels/boc',
         icon: <BankOutlined />,
         label: '银行账单',
-      },
-      {
-        key: '/tools/pdf-to-csv',
-        icon: <FilePdfOutlined />,
-        label: 'PDF转CSV',
       },
     ],
   },

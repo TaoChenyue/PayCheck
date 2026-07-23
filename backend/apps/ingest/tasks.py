@@ -36,7 +36,7 @@ def _sync_to_transactions(tx_dicts, platform, source_model_label):
     Returns:
         (created_count, skipped_count)
     """
-    channel_model = {"alipay": AlipayTx, "wechat": WechatTx, "bank": BocTx}[platform]
+    channel_model = {"alipay": AlipayTx, "wechat": WechatTx, "boc": BocTx}[platform]
     created = 0
     skipped = 0
 
@@ -113,7 +113,7 @@ def process_import_file(self, import_file_id):
         elif import_file.file_type in ("boc_csv", "boc_pdf"):
             # boc_pdf should have been converted to CSV by OCR task first
             txns = parse_boc_csv(file_path)
-            platform = "bank"
+            platform = "boc"
         else:
             raise ValueError(f"Unknown file type: {import_file.file_type}")
 
@@ -158,7 +158,7 @@ def process_pdf_ocr(self, import_file_id):
 
         # Now parse the generated CSV
         txns = parse_boc_csv(output_path)
-        created, skipped = _sync_to_transactions(txns, "bank", "boc_pdf")
+        created, skipped = _sync_to_transactions(txns, "boc", "boc_pdf")
 
         import_file.status = "completed"
         import_file.save(update_fields=["status"])
