@@ -35,7 +35,7 @@ def _sync_to_transactions(tx_dicts, platform, source_model_label):
     Returns:
         (created_count, skipped_count)
     """
-    channel_model = {"alipay": AlipayTx, "wechat": WechatTx, "boc": BocTx}[platform]
+    channel_model = {"alipay": AlipayTx, "wechat": WechatTx, "bank": BocTx}[platform]
     created = 0
     skipped = 0
 
@@ -107,7 +107,7 @@ def process_import_file(self, import_file_id):
         elif import_file.file_type in ("boc_csv", "boc_pdf"):
             # boc_pdf should have been converted to CSV by OCR task first
             txns = parse_boc_csv(file_path)
-            platform = "boc"
+            platform = "bank"
         else:
             raise ValueError(f"Unknown file type: {import_file.file_type}")
 
@@ -152,7 +152,7 @@ def process_pdf_ocr(self, import_file_id):
 
         # Now parse the generated CSV
         txns = parse_boc_csv(output_path)
-        created, skipped = _sync_to_transactions(txns, "boc", "boc_pdf")
+        created, skipped = _sync_to_transactions(txns, "bank", "boc_pdf")
 
         import_file.status = "completed"
         import_file.save(update_fields=["status"])
@@ -168,7 +168,13 @@ def process_pdf_ocr(self, import_file_id):
 
 @shared_task
 def process_import_job(job_id):
-    """Orchestrate import job: dispatch sub-tasks, update progress."""
+    """Orchestrate import job: dispatch sub-tasks, update progress.
+
+    Uses Celery chord to avoid deadlock — subtasks run in parallel,
+    and the chord callback updates job status when all complete.
+    """
+    from celery import chord
+
     try:
         job = ImportJob.objects.get(id=job_id)
     except ImportJob.DoesNotExist:
@@ -178,26 +184,36 @@ def process_import_job(job_id):
     job.save(update_fields=["status"])
 
     import_files = job.files.all()
-    results = []
+    subtasks = []
 
     for import_file in import_files:
         if import_file.file_type == "boc_pdf":
-            result = process_pdf_ocr.delay(import_file.id)
+            subtask = process_pdf_ocr.s(import_file.id)
         else:
-            result = process_import_file.delay(import_file.id)
-        results.append(result)
+            subtask = process_import_file.s(import_file.id)
+        subtasks.append(subtask)
 
-    # Wait for all subtasks and update progress
-    from celery.result import allow_join_result
+    if not subtasks:
+        job.status = "completed"
+        job.completed_at = timezone.now()
+        job.save(update_fields=["status", "completed_at"])
+        return {"total": 0, "processed": 0}
 
-    for i, async_result in enumerate(results):
-        with allow_join_result():
-            async_result.get(timeout=3600)
-        job.processed = i + 1
-        job.save(update_fields=["processed"])
+    # Chord: run all subtasks in parallel, then call _on_import_job_complete
+    chord(subtasks)(_on_import_job_complete.s(job_id))
+
+    return {"job_id": job_id, "status": "processing", "total_files": len(subtasks)}
+
+
+@shared_task
+def _on_import_job_complete(results, job_id):
+    """Chord callback: update ImportJob status after all subtasks complete."""
+    try:
+        job = ImportJob.objects.get(id=job_id)
+    except ImportJob.DoesNotExist:
+        return
 
     job.status = "completed"
+    job.processed = job.total_files
     job.completed_at = timezone.now()
-    job.save(update_fields=["status", "completed_at"])
-
-    return {"total": job.total_files, "processed": job.processed}
+    job.save(update_fields=["status", "processed", "completed_at"])
