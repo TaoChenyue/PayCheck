@@ -3,30 +3,50 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import {
-  ToolOutlined,
+  ImportOutlined,
   FilePdfOutlined,
   BankOutlined,
   AlipayOutlined,
   WechatOutlined,
+  DashboardOutlined,
+  PieChartOutlined,
 } from '@ant-design/icons';
-
-const ROOT_KEYS = ['/tools', '/channels'] as const;
-
 function getOpenKeys(pathname: string): string[] {
-  for (const key of ROOT_KEYS) {
-    if (pathname.startsWith(key)) {
-      return [key];
-    }
+  if (pathname === '/import' || pathname.startsWith('/channels') || pathname === '/tools/pdf-to-csv') {
+    return ['/data'];
+  }
+  if (pathname === '/dashboard' || pathname === '/analysis') {
+    return ['/analyze'];
   }
   return [];
 }
 
 const menuItems: MenuProps['items'] = [
   {
-    key: '/tools',
-    icon: <ToolOutlined />,
-    label: '工具',
+    key: '/data',
+    icon: <ImportOutlined />,
+    label: '数据管理',
     children: [
+      {
+        key: '/import',
+        icon: <ImportOutlined />,
+        label: '数据导入',
+      },
+      {
+        key: '/channels/alipay',
+        icon: <AlipayOutlined />,
+        label: '支付宝账单',
+      },
+      {
+        key: '/channels/wechat',
+        icon: <WechatOutlined />,
+        label: '微信账单',
+      },
+      {
+        key: '/channels/boc',
+        icon: <BankOutlined />,
+        label: '银行账单',
+      },
       {
         key: '/tools/pdf-to-csv',
         icon: <FilePdfOutlined />,
@@ -35,24 +55,19 @@ const menuItems: MenuProps['items'] = [
     ],
   },
   {
-    key: '/channels',
-    icon: <BankOutlined />,
-    label: '账单渠道',
+    key: '/analyze',
+    icon: <PieChartOutlined />,
+    label: '分析',
     children: [
       {
-        key: '/channels/alipay',
-        icon: <AlipayOutlined />,
-        label: '支付宝',
+        key: '/dashboard',
+        icon: <DashboardOutlined />,
+        label: '概览仪表盘',
       },
       {
-        key: '/channels/wechat',
-        icon: <WechatOutlined />,
-        label: '微信',
-      },
-      {
-        key: '/channels/boc',
-        icon: <BankOutlined />,
-        label: '中国银行',
+        key: '/analysis',
+        icon: <PieChartOutlined />,
+        label: '详细分析',
       },
     ],
   },

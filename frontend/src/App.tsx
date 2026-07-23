@@ -6,6 +6,7 @@ import DashboardPage from './pages/DashboardPage';
 import ChannelPage from './pages/ChannelPage';
 import ImportPage from './pages/ImportPage';
 import PdfToCsvPage from './pages/PdfToCsvPage';
+import AnalysisPage from './pages/AnalysisPage';
 import './App.css';
 
 export default function App() {
@@ -28,6 +29,7 @@ export default function App() {
               <Route path="/channels/:channel" element={<ChannelPage />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/tools/pdf-to-csv" element={<PdfToCsvPage />} />
+              <Route path="/analysis" element={<AnalysisPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>
