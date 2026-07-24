@@ -13,6 +13,8 @@ interface ChannelTableProps {
   onSearch: (search: string) => void;
   onSort: (field: string, direction: 'asc' | 'desc') => void;
   channel: 'alipay' | 'wechat' | 'boc';
+  /** Enable virtual scrolling for large datasets (pageSize >= 100) */
+  enableVirtual?: boolean;
 }
 
 /** 渠道账单表格 — 对 TransactionTable 的渠道适配封装 */
