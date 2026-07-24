@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%20|%203.11-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/version-1.0.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.1-blueviolet" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/GPU-CUDA%2012.6-orange?logo=nvidia" alt="CUDA">
 </p>
@@ -97,14 +97,19 @@ PayCheck/
 ├── backend/                    # Django 后端
 │   ├── apps/                   # 业务应用
 │   │   ├── channels/           # 账单渠道管理
-│   │   ├── transactions/       # 交易数据模型
-│   │   ├── ingest/             # 文件导入 & 解析器
+│   │   ├── transactions/       # 交易数据模型 + 标签表达式引擎
+│   │   ├── ingest/             # 文件导入 & 解析器（支付宝/微信/BOC）
 │   │   ├── analysis/           # 统计分析
-│   │   └── ocr_service/        # OCR 异步服务
+│   │   └── ocr_service/        # OCR 异步服务（PaddleOCR 管线）
 │   ├── config/                 # Django 配置
 │   │   ├── settings.py
 │   │   ├── urls.py
-│   │   └── celery.py           # Celery 配置
+│   │   ├── celery.py           # Celery 配置
+│   │   ├── logging.py          # 日志配置（RotatingFileHandler）
+│   │   └── exception_handler.py
+│   ├── tests/                  # 测试（pytest + Django）
+│   │   ├── unit/               # 单元测试
+│   │   └── integration/        # 集成测试
 │   ├── manage.py               # Django 管理入口
 │   └── pyproject.toml
 ├── frontend/                   # React 前端
@@ -121,14 +126,9 @@ PayCheck/
 │   │   └── types/              # TypeScript 类型定义
 │   ├── vite.config.ts
 │   └── package.json
-├── src/paycheck/               # Python 核心包（解析器/OCR/存储）
-│   ├── ingest/parsers/         # 账单解析器（支付宝/微信/BOC）
-│   ├── ocr/                    # PaddleOCR 识别管线
-│   ├── analysis/               # 统计分析
-│   └── storage/                # SQLite 存储层
 ├── design/                     # 架构设计文档
 │   └── DESIGN.md
-└── pyproject.toml              # Python 根项目配置
+└── pyproject.toml              # Monorepo 工作空间锚点
 ```
 
 ---
@@ -284,7 +284,9 @@ uv run manage.py runserver       # 开发服务器
 uv run manage.py makemigrations  # 生成迁移
 uv run manage.py migrate         # 执行迁移
 uv run manage.py shell           # Django shell
-uv run manage.py test            # 运行测试
+uv run manage.py test            # Django 测试
+# 或使用 pytest:
+python -m pytest tests/ -v       # 运行全部测试
 ```
 
 ### 前端

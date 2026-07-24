@@ -2,11 +2,26 @@
 
 提供通过 conftest.py 和依赖注入使用的 fixtures，
 使测试独立且可重复运行。
+
+Django 环境自动初始化，确保 ``apps.*`` 导入可用。
 """
 
 import os
+import sys
 import tempfile
+from pathlib import Path
+
 import pytest
+
+# ── Django 环境初始化 ─────────────────────────────────────────
+# 确保从 backend/tests/ 运行时也能正确导入 apps.* 模块
+
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_BACKEND_DIR))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+
+import django
+django.setup()
 
 
 @pytest.fixture

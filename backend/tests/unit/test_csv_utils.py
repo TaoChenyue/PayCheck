@@ -1,10 +1,10 @@
 """CSV 行解析器测试 — 覆盖引号、逗号、转义等边界情况。
 
-测试 parse_csv_line() 函数 (ingest/csv_utils.py)。
+测试 parse_csv_line() 函数 (apps/ingest/csv_utils.py)。
 """
 
 import pytest
-from paycheck.ingest.csv_utils import parse_csv_line
+from apps.ingest.csv_utils import parse_csv_line
 
 
 class TestBasicParsing:

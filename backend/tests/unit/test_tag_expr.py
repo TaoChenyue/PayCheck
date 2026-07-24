@@ -5,7 +5,7 @@ compile_expression 函数。
 """
 
 import pytest
-from paycheck.core.tag_expr import (
+from apps.transactions.tag_expr import (
     tokenize, Parser, ParseError, Token, TokenType,
     validate_expression, compile_expression,
     TagLeaf, BinOp, ExprNode, ALL_TAG_ID, ALL_TAG_NAME,
