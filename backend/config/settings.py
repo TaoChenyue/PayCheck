@@ -112,6 +112,9 @@ CELERY_BROKER_URL = os.environ.get(
     "CELERY_BROKER_URL",
     "sqla+sqlite:///" + str(BASE_DIR / "db.sqlite3"),
 )
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "polling_interval": 0.5,
+}
 CELERY_RESULT_BACKEND = "django-db"
 CELERY_RESULT_EXTENDED = True
 CELERY_TASK_TRACK_STARTED = True
