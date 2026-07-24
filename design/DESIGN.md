@@ -1,895 +1,527 @@
-# PayCheck 架构设计：Django + React 前后端分离
+# PayCheck 核心包迁移与版本更新设计
 
 > **作者**: 架构师
-> **日期**: 2026-07-24
+> **日期**: 2026-07-25
 > **版本**: 1.1
+> **关联 Issue**: TCY-37
 
 ---
 
 ## 目录
 
-1. [概述与目标](#1-概述与目标)
-2. [技术选型](#2-技术选型)
-3. [项目结构](#3-项目结构)
-4. [后端架构](#4-后端架构)
-5. [前端架构](#5-前端架构)
-6. [数据库设计](#6-数据库设计)
-7. [API 接口设计](#7-api-接口设计)
-8. [异步任务方案](#8-异步任务方案)
-9. [现有代码迁移策略](#9-现有代码迁移策略)
-10. [核心决策记录（ADR）](#10-核心决策记录adr)
-11. [实施阶段划分](#11-实施阶段划分)
-12. [附录：可选方案对比](#12-附录可选方案对比)
+1. [背景与目标](#1-背景与目标)
+2. [现状分析](#2-现状分析)
+3. [迁移方案设计](#3-迁移方案设计)
+4. [版本号更新方案](#4-版本号更新方案)
+5. [文档刷新策略](#5-文档刷新策略)
+6. [测试迁移策略](#6-测试迁移策略)
+7. [实施步骤](#7-实施步骤)
+8. [核心决策记录（ADR）](#8-核心决策记录adr)
+9. [风险与回滚](#9-风险与回滚)
 
 ---
 
-## 1. 概述与目标
+## 1. 背景与目标
 
-### 1.1 背景
+### 1.1 问题陈述
 
-当前 PayCheck 是一个 PySide6 桌面 GUI 应用，功能完备但受限于桌面环境的部署和访问方式。需将其重构为 Web 应用，保留所有核心能力的同时获得以下收益：
+当前 PayCheck 项目在仓库根目录保留了一个 Python 包项目（`src/paycheck/` + 根 `pyproject.toml`），这是 Phase 1-3 重构过程中遗留的旧架构层。该包项目包含：
 
-- **随处访问**：浏览器即可使用，无需安装
-- **多人协作**（远期）：可扩展为家庭/团队共享账单
-- **移动端友好**：React 响应式 UI 可适应移动设备
-- **数据安全**：数据存储在服务器端，不依赖本地文件系统
+- **已迁移代码**：解析器、OCR 管线、统计分析等已完整迁移至 `backend/apps/` 并在生产中使用
+- **未迁移代码**：日志工具（`core/log.py`）、CLI 入口（`__main__.py`）、旧存储层（`storage/database.py`）
+- **重复常量**：`core/constants.py` 与 `backend/apps/transactions/constants.py` 功能重叠
 
-### 1.2 核心能力保留清单
+这使得项目处于"双架构并存"状态，增加维护负担和认知成本。
 
-| 现有能力 | 重构后方案 | 变更说明 |
-|----------|-----------|---------|
-| 支付宝 CSV 导入 | Web 上传 → 后端解析 | 文件来源从本地变为上传 |
-| 微信 XLSX 导入 | Web 上传 → 后端解析 | 同上 |
-| 银行 PDF OCR | Web 上传 → Celery 异步处理 | 后台任务替代阻塞 GUI |
-| 内部转账过滤 | 后端解析阶段自动执行 | 无变化 |
-| 摘要统计卡片 | React 组件渲染 | UI 从 Qt 迁移到 Web |
-| 分渠道表格（筛选/排序） | TanStack Table | 功能增强 |
-| 标签系统 | 后端 API + 前端交互 | 无变化 |
-| OCR 流水线（PaddleOCR） | 复用现有代码，Celery 调用 | 核心逻辑不变 |
+### 1.2 目标
+
+1. **清理旧包**：移除 `src/paycheck/` Python 包，消除双架构并存
+2. **迁移剩余有用代码**：将 `core/log.py` 适配后迁入 `backend/config/`
+3. **版本号统一**：根项目、后端、README 版本号统一更新至 `1.0.1`
+4. **文档刷新**：README、DESIGN.md 反映真实项目结构
+5. **测试路径修正**：将 `tests/` 中的 import 从 `paycheck.*` 切换到 `backend.*`
 
 ---
 
-## 2. 技术选型
+## 2. 现状分析
 
-### 2.1 后端
-
-| 技术 | 版本 | 选型理由 |
-|------|------|---------|
-| **Django** | 5.1+ | 成熟的 Web 框架，ORM 强大，生态丰富 |
-| **Django REST Framework** | 3.15+ | REST API 标准方案，ViewSet/Serializer 加速开发 |
-| **Celery** | 5.4+ | Python 生态最成熟的异步任务队列 |
-| **Redis** | 7.x | Celery broker + 结果缓存 |
-| **SQLite** | 3.x | 初期数据库，个人/小团队场景完全够用 |
-| **Django Channels** | 4.x | WebSocket 支持，用于导入进度推送（可选） |
-
-**为何选 Django 而非 FastAPI？**
-- Django ORM 对复杂查询（聚合、分组、多表关联）的支持远超 SQLAlchemy 的声明式风格
-- Django Admin 可用于初期数据管理和调试
-- DRF 的 ViewSet + Router 模式减少 60% 样板代码
-- 本项目数据操作为主（CRUD + 聚合），Django 的优势场景
-
-**数据库从 SQLite 起步的理由：**
-- 当前数据量预估：个人用户数年账单 < 10 万条，SQLite 完全胜任
-- 零运维成本，备份仅需复制 `.db` 文件
-- 内置 `json1` 扩展支持 JSON 字段
-- 后续通过 `django.db.backends.postgresql` 一键切换 PostgreSQL
-
-### 2.2 前端
-
-| 技术 | 版本 | 选型理由 |
-|------|------|---------|
-| **React** | 19.x | 团队熟悉，生态最丰富 |
-| **TypeScript** | 5.x | 类型安全，降低运行时错误 |
-| **React Router** | 7.x | SPA 路由标准方案 |
-| **TanStack Query** | 5.x | 服务端状态管理，缓存/重试/乐观更新 |
-| **TanStack Table** | 8.x | 无头表格库，完美的筛选/排序/列配置 |
-| **Ant Design** | 5.x | 企业级组件库，表格/表单/菜单开箱即用 |
-| **Recharts** | 2.x | React 图表库，饼图/柱状图/折线图 |
-| **Vite** | 6.x | 极速开发服务器和构建工具 |
-| **Zustand** | 5.x | 轻量客户端状态管理（UI 状态） |
-
-**为何选 Ant Design 而非 shadcn/ui？**
-- Ant Design 的 Table 组件内置筛选、排序、列配置、导出——正切中本项目核心需求
-- 手风琴 Menu 组件（`Menu` mode="inline"）直接可用
-- shadcn/ui 的表格需要大量手动组装，开发效率差距明显
-
-### 2.3 基础设施
-
-| 技术 | 用途 |
-|------|------|
-| **uv** | Python 包管理（保持现有工具链） |
-| **pnpm** | Node.js 包管理（推荐，兼容 npm） |
-| **Docker Compose** | 开发环境一键启动（Django + Redis + Celery） |
-| **GitHub Actions** | CI/CD |
-
----
-
-## 3. 项目结构
+### 2.1 当前项目结构
 
 ```
-PayCheck/                          # 仓库根目录（Monorepo）
-├── backend/                       # Django 后端
-│   ├── config/                    # Django 项目配置
-│   │   ├── __init__.py
-│   │   ├── settings.py            # 主配置
-│   │   ├── urls.py                # 根 URL 路由
-│   │   ├── wsgi.py
-│   │   ├── asgi.py                # Channels ASGI
-│   │   └── celery.py              # Celery 配置
+PayCheck/
+├── pyproject.toml              # 根包配置（定义 paycheck 包，version=1.0.0）
+├── README.md                   # 版本徽章: 1.0.0
+├── src/
+│   └── paycheck/               # ★ 待移除的旧核心包
+│       ├── __init__.py         # 空文件
+│       ├── __main__.py         # CLI 入口（打印启动提示）
+│       ├── core/
+│       │   ├── constants.py    # 字段常量（与 backend 重叠）
+│       │   ├── log.py          # ★ 有用，待迁移
+│       │   ├── models.py       # Transaction dataclass（已被 Django Model 替代）
+│       │   └── tag_expr.py     # 标签表达式（已迁移到 backend）
+│       ├── ingest/
+│       │   ├── csv_utils.py    # CSV 解析（已迁移到 backend）
+│       │   ├── scanner.py      # 目录扫描（CLI 专属，Web 不再需要）
+│       │   └── parsers/        # 解析器（已迁移到 backend，并从 dataclass 重构为 dict）
+│       ├── ocr/                # OCR 管线（已迁移到 backend）
+│       ├── analysis/           # 统计分析（已迁移到 backend）
+│       └── storage/            # SQLite 存储层（已被 Django ORM 替代）
+├── backend/
+│   ├── pyproject.toml          # 后端独立包，version=0.1.0
+│   └── apps/
+│       ├── ingest/parsers/     # 解析器（已从 src/ 迁入，inlined 常量）
+│       ├── ocr_service/        # OCR 管线（已从 src/ 迁入）
+│       ├── analysis/           # 统计分析（Django ORM 重写）
+│       ├── transactions/       # 标签表达式 + 常量（已从 src/core/ 迁入）
+│       └── channels/           # 渠道管理
+└── tests/
+    ├── unit/
+    │   ├── test_csv_utils.py   # import paycheck.ingest.csv_utils ← 待修正
+    │   └── test_tag_expr.py    # import paycheck.core.tag_expr ← 待修正
+    └── integration/
+        └── test_database.py    # import paycheck.storage.database ← 待重写
+```
+
+### 2.2 代码重叠分析
+
+| src/paycheck/ 模块 | backend/ 对应位置 | 重叠状态 | 操作 |
+|---|---|---|---|
+| `core/constants.py` | `apps/transactions/constants.py` | 部分重叠（backend 版本更精简） | 废弃 src 版本 |
+| `core/models.py` | `apps/transactions/models.py` | 已替代（dataclass → Django Model） | 废弃 |
+| `core/tag_expr.py` | `apps/transactions/tag_expr.py` | 完整迁移 | 废弃 src 版本 |
+| `core/log.py` | 无 | **未迁移** | ★ 迁移至 `backend/config/logging.py` |
+| `ingest/parsers/*` | `apps/ingest/parsers/*` | 已迁移（含重构：返回 dict） | 废弃 src 版本 |
+| `ingest/csv_utils.py` | `apps/ingest/csv_utils.py` | 完全相同 | 废弃 src 版本 |
+| `ingest/scanner.py` | 无 | 无需迁移（CLI 专属） | 废弃 |
+| `ocr/*` | `apps/ocr_service/*` | 完整迁移 | 废弃 src 版本 |
+| `analysis/stats.py` | `apps/analysis/stats.py` | 已替代（Django ORM 重写） | 废弃 src 版本 |
+| `storage/database.py` | Django ORM | 已替代 | 废弃 |
+| `__main__.py` | 无 | CLI 入口（内含版本号字符串） | 删除或改为项目级说明 |
+
+### 2.3 依赖分析
+
+- **backend/ 内部**：零引用 `paycheck.*` —— 确认后端完全独立
+- **tests/**：3 处引用 `paycheck.*` —— 需修正 import 路径
+- **根 pyproject.toml**：定义 `paycheck` 包，依赖 paddleocr/torch 等 OCR 库 —— 这些依赖已移至 `backend/pyproject.toml` 的 `[project.optional-dependencies] ocr`
+
+---
+
+## 3. 迁移方案设计
+
+### 3.1 总体策略
+
+**三步走**：删除冗余 → 迁移剩余 → 统一清理
+
+```
+Phase A: 删除已迁移模块        Phase B: 迁移 log.py         Phase C: 清理 & 统一
+─────────────────────────     ────────────────────────     ───────────────────
+src/paycheck/core/models.py   src/paycheck/core/log.py     pyproject.toml 改版
+src/paycheck/core/constants   ──────────迁移──────────►    README.md 刷新
+src/paycheck/core/tag_expr    backend/config/logging.py    DESIGN.md 刷新
+src/paycheck/ingest/*                                    tests/ import 修正
+src/paycheck/ocr/*                                        版本号 1.0.1
+src/paycheck/analysis/*
+src/paycheck/storage/*
+```
+
+### 3.2 Phase A：删除已迁移模块
+
+**操作**：删除整个 `src/` 目录。
+
+这是最核心的变更——`src/paycheck/` 中 90% 的代码已经迁移到 `backend/apps/`，且后端已是生产环境使用的代码路径。保留 `src/` 只会造成混淆。
+
+**具体步骤**：
+
+```bash
+# 1. 删除 src/ 目录
+rm -rf src/
+
+# 2. 确认 backend/ 中所有对应模块可用
+cd backend && uv run manage.py check  # Django 系统检查通过
+
+# 3. 确认无残留引用
+grep -r "from paycheck\." backend/  # 应无输出（已验证）
+```
+
+**影响评估**：
+- `src/paycheck.egg-info/` 同时被删除（不再需要）
+- 根 `pyproject.toml` 中的 `[tool.uv] package = true` 变为无效配置（Phase C 修复）
+
+### 3.3 Phase B：迁移 log.py 到 backend
+
+**分析**：`src/paycheck/core/log.py` 是通用日志工具，提供：
+- `setup_logging()` — 日志配置（文件轮转 + 控制台输出）
+- `get_logger()` — 自动获取调用者 logger
+- `log_time()` — 耗时记录（装饰器 + 上下文管理器）
+- 第三方库噪声压制（paddle、PIL、urllib3 等）
+
+**迁移方案**：将 `log.py` 移动到 `backend/config/logging.py`，并做以下适配：
+
+| 变更项 | 原代码 | 新代码 |
+|---|---|---|
+| 模块路径 | `paycheck.core.log` | `config.logging` |
+| 根日志器名 | `"paycheck"` | `"paycheck"`（保持不变） |
+| 日志文件路径 | `log/paycheck.log`（相对于项目根） | `BASE_DIR / "log" / "paycheck.log"`（Django 风格） |
+| Django 集成 | 无 | 可通过 `LOGGING` dictConfig 集成（可选） |
+| 调用方式 | `from paycheck.core.log import get_logger` | `from config.logging import get_logger` |
+
+**为什么放在 `config/logging.py` 而非 `apps/core/`？**
+- `config/` 是 Django 项目的配置目录，日志配置属于基础设施层
+- 避免创建 `apps/core/` 这个仅有单文件的 app
+- 保持 `config/` 目录的职责内聚（settings、urls、celery、wsgi、logging）
+
+**迁移后的使用方式**：
+```python
+# 在各 app 模块中
+from config.logging import get_logger
+log = get_logger()  # 自动获取当前模块的 logger
+```
+
+### 3.4 Phase C：根项目配置清理
+
+**根 `pyproject.toml` 改造**：
+
+当前根 `pyproject.toml` 定义了 `paycheck` 包，但该包将在 Phase A 被删除。根配置应改为**工作空间级配置**，不再是一个可安装的 Python 包。
+
+```toml
+# 改造前（旧）
+[project]
+name = "paycheck"
+version = "1.0.0"
+requires-python = ">=3.10, <3.14"
+dependencies = [
+    "opencv-python",
+    "openpyxl",
+    # ... OCR 依赖 ...
+]
+
+[tool.uv]
+package = true
+
+# 改造后（新）
+[project]
+name = "paycheck"
+version = "1.0.1"
+description = "个人账单统计工具 — Django + React 前后端分离（Monorepo 根配置）"
+requires-python = ">=3.10, <3.14"
+
+[tool.uv]
+package = false          # ★ 不再作为 Python 包
+workspace = true         # ★ 声明为 uv workspace
+```
+
+**关键变更**：
+- `package = false`：不再从 `src/` 构建 Python 包
+- `version` 升至 `1.0.1`
+- 移除 `dependencies`（OCR 依赖已在 backend 中管理）
+- 移除 `[project.scripts]`（CLI 入口已废弃）
+- 移除 `[project.optional-dependencies]`（已移至 backend）
+- 移除 `[[tool.uv.index]]` 和 `[tool.uv.sources]`（已移至 backend）
+
+---
+
+## 4. 版本号更新方案
+
+### 4.1 版本号统一策略
+
+当前版本号分散在多个位置且不一致：
+
+| 位置 | 当前版本 | 目标版本 |
+|---|---|---|
+| 根 `pyproject.toml` | 1.0.0 | **1.0.1** |
+| `backend/pyproject.toml` | 0.1.0 | **1.0.1** |
+| `README.md` 徽章 | 1.0.0 | **1.0.1** |
+| `src/paycheck/__main__.py` | 1.0.0 | 随 src/ 删除 |
+| `design/DESIGN.md` | 1.0 | **1.1**（设计文档独立版本号） |
+
+### 4.2 语义化版本说明
+
+按照 SemVer 2.0.0：
+- **MAJOR (1)**：不变，无破坏性 API 变更
+- **MINOR (0→1)**：包结构重构（核心包迁移至后端），功能无变化
+- **PATCH (0→1)**：文档更新和版本统一
+
+实际变更为 MINOR bump，但从 1.0.0 到 1.0.1 的 PATCH 级别更符合"内部重构 + 文档刷新"的语义——用户可见的功能和行为无任何变化。
+
+**决策**：使用 `1.0.1`（用户要求），对应 PATCH 级别升级。
+
+### 4.3 具体修改点
+
+**根 `pyproject.toml`**：
+```toml
+version = "1.0.1"
+```
+
+**`backend/pyproject.toml`**：
+```toml
+version = "1.0.1"  # 从 0.1.0 同步升级
+```
+
+**`README.md`**：
+```markdown
+<img src="https://img.shields.io/badge/version-1.0.1-blueviolet" alt="Version">
+```
+
+**`design/DESIGN.md`**（本文档）：
+```markdown
+> **版本**: 1.1
+```
+
+---
+
+## 5. 文档刷新策略
+
+### 5.1 README.md 变更
+
+#### 项目结构章节重写
+
+当前 README 中 `## 项目结构` 包含 `src/paycheck/` 子树：
+
+```
+├── src/paycheck/               # Python 核心包（解析器/OCR/存储）
+│   ├── ingest/parsers/         # 账单解析器
+│   ├── ocr/                    # PaddleOCR 识别管线
+│   ├── analysis/               # 统计分析
+│   └── storage/                # SQLite 存储层
+```
+
+应删除该子树，将对应的功能模块说明合并到 `backend/` 部分：
+
+```
+├── backend/                    # Django 后端（含全部核心逻辑）
 │   ├── apps/
-│   │   ├── channels/              # 账单渠道管理
-│   │   │   ├── models.py          # AlipayTx, WechatTx, BocTx
-│   │   │   ├── serializers.py
-│   │   │   ├── views.py
-│   │   │   ├── urls.py
-│   │   │   └── admin.py
-│   │   ├── ingest/                # 数据导入
-│   │   │   ├── models.py          # ImportJob, ImportFile
-│   │   │   ├── serializers.py
-│   │   │   ├── views.py
-│   │   │   ├── urls.py
-│   │   │   ├── parsers/           # 复用现有解析逻辑
-│   │   │   │   ├── __init__.py
-│   │   │   │   ├── alipay.py
-│   │   │   │   ├── wechat.py
-│   │   │   │   └── boc.py
-│   │   │   ├── tasks.py           # Celery 异步任务
-│   │   │   └── csv_utils.py
-│   │   ├── transactions/          # 统一交易视图
-│   │   │   ├── models.py          # Transaction (统一表)
-│   │   │   ├── serializers.py
-│   │   │   ├── views.py
-│   │   │   ├── urls.py
-│   │   │   ├── filters.py         # DRF 筛选器
-│   │   │   └── admin.py
-│   │   ├── analysis/              # 统计分析
-│   │   │   ├── views.py           # 聚合查询 API
-│   │   │   ├── urls.py
-│   │   └── ocr_service/           # OCR 服务封装
-│   │       ├── tasks.py           # Celery OCR 任务
-│   │       ├── engine.py          # 复用原 ocr/engine.py
-│   │       ├── pipeline.py        # 复用原 ocr/pipeline.py
-│   │       ├── pdf_render.py      # 复用原 ocr/pdf_render.py
-│   │       └── layouts/           # 复用原 ocr/layouts/
+│   │   ├── channels/           # 账单渠道管理
+│   │   ├── transactions/       # 交易数据模型 + 标签表达式引擎
+│   │   ├── ingest/             # 文件导入 & 解析器（支付宝/微信/银行）
+│   │   ├── analysis/           # 统计分析
+│   │   └── ocr_service/        # OCR 异步服务（PaddleOCR 管线）
+│   ├── config/                 # Django 配置
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   ├── celery.py           # Celery 配置
+│   │   └── logging.py          # 日志配置（文件轮转 + 控制台）
 │   ├── manage.py
-│   ├── pyproject.toml             # 后端依赖
-│   └── requirements.txt           # CI 兼容（由 pyproject.toml 导出）
-├── frontend/                      # React 前端
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── layout/            # 布局组件
-│   │   │   │   ├── AppLayout.tsx      # 整体布局（菜单+内容）
-│   │   │   │   └── SideMenu.tsx       # 左侧手风琴菜单
-│   │   │   ├── dashboard/         # 仪表盘
-│   │   │   │   ├── SummaryCards.tsx    # 摘要卡片
-│   │   │   │   └── PlatformCharts.tsx # 平台对比图表
-│   │   │   ├── tables/            # 数据表格
-│   │   │   │   ├── TransactionTable.tsx  # 通用交易表格
-│   │   │   │   └── ChannelTable.tsx      # 渠道专属表格
-│   │   │   ├── import/            # 导入页面
-│   │   │   │   ├── FileUploader.tsx     # 拖拽上传区
-│   │   │   │   └── ImportProgress.tsx   # 进度展示
-│   │   │   └── common/            # 通用组件
-│   │   ├── pages/
-│   │   │   ├── DashboardPage.tsx      # 首页仪表盘
-│   │   │   ├── ImportPage.tsx         # 数据导入页
-│   │   │   ├── ChannelPage.tsx        # 渠道账单详情页
-│   │   │   └── AnalysisPage.tsx       # 分析页
-│   │   ├── hooks/                 # 自定义 Hooks
-│   │   │   ├── useTransactions.ts     # TanStack Query hooks
-│   │   │   ├── useChannels.ts
-│   │   │   └── useImport.ts
-│   │   ├── stores/                # Zustand 状态
-│   │   │   └── uiStore.ts         # UI 状态（侧栏折叠等）
-│   │   ├── api/                   # API 客户端
-│   │   │   └── client.ts          # Axios 实例 + 拦截器
-│   │   ├── types/                 # TypeScript 类型定义
-│   │   │   └── index.ts
-│   │   ├── App.tsx
-│   │   └── main.tsx
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── vite.config.ts
-├── src/                           # 保留原有桌面应用代码（不再维护）
-├── docker-compose.yml             # 开发环境编排
-├── .github/workflows/             # CI/CD
-└── README.md
+│   └── pyproject.toml
 ```
+
+#### 版本徽章更新
+
+```diff
+- <img src="https://img.shields.io/badge/version-1.0.0-blueviolet" alt="Version">
++ <img src="https://img.shields.io/badge/version-1.0.1-blueviolet" alt="Version">
+```
+
+#### 开发指南更新
+
+删除对 `src/paycheck/` 的引用，统一指向 `backend/`：
+
+```diff
+- ### 新增银行支持
+- 1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
+- 2. `backend/apps/ingest/parsers/` — 实现解析器
+- 3. 注册布局并更新渠道配置
++ ### 新增银行支持
++ 1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
++ 2. `backend/apps/ingest/parsers/` — 实现解析器（返回 `List[dict]`）
++ 3. 注册布局并更新渠道配置
+```
+
+### 5.2 DESIGN.md 变更（本次更新）
+
+本次 DESIGN.md 即 v1.1 版本，覆盖：
+- 核心包迁移路径（本文档 §3）
+- 版本号更新方案（本文档 §4）
+- 文档刷新策略（本文档 §5）
+
+DESIGN.md v1.0 中的架构设计（§2-§8）仍然有效，本次更新为增量补充。
+
+### 5.3 新增/变更文件清单
+
+| 文件 | 操作 | 说明 |
+|---|---|---|
+| `src/` | **删除** | 整个旧包目录 |
+| `src/paycheck.egg-info/` | **删除** | 随 src/ 删除 |
+| `backend/config/logging.py` | **新增** | 从 `src/paycheck/core/log.py` 迁移并适配 |
+| `pyproject.toml` | **修改** | 版本 1.0.1，package=false，清理依赖 |
+| `backend/pyproject.toml` | **修改** | 版本 0.1.0 → 1.0.1 |
+| `README.md` | **修改** | 版本徽章 + 项目结构 + 开发指南 |
+| `design/DESIGN.md` | **修改** | 更新为 v1.1（本文档） |
+| `tests/unit/test_csv_utils.py` | **修改** | import 路径 → `backend.apps.ingest.csv_utils` |
+| `tests/unit/test_tag_expr.py` | **修改** | import 路径 → `backend.apps.transactions.tag_expr` |
+| `tests/integration/test_database.py` | **重写/删除** | Django ORM 替代 raw SQLite |
 
 ---
 
-## 4. 后端架构
+## 6. 测试迁移策略
 
-### 4.1 Django App 职责划分
+### 6.1 当前测试与目标
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Django 应用架构                         │
-├─────────────┬─────────────┬──────────────┬─────────────────┤
-│  channels   │   ingest    │ transactions │    analysis     │
-│  (渠道管理)  │  (数据导入)  │  (统一视图)   │   (统计分析)     │
-├─────────────┼─────────────┼──────────────┼─────────────────┤
-│ AlipayTx    │ ImportJob   │ Transaction  │ 聚合查询 API     │
-│ WechatTx    │ ImportFile  │ Tag          │ 月度统计 API     │
-│ BocTx       │ Parsers     │ Transaction  │ 类别分布 API     │
-│             │ Celery Task │  -Tag        │                 │
-└─────────────┴─────────────┴──────────────┴─────────────────┘
-         │             │              │              │
-         └─────────────┴──────────────┴──────────────┘
-                            │
-                    ┌───────┴───────┐
-                    │  ocr_service  │
-                    │  (OCR 封装)   │
-                    │  Celery Task  │
-                    └───────────────┘
-```
+| 测试文件 | 当前 import | 目标 import | 迁移难度 |
+|---|---|---|---|
+| `tests/unit/test_csv_utils.py` | `paycheck.ingest.csv_utils` | `apps.ingest.csv_utils` | 低（函数签名完全相同） |
+| `tests/unit/test_tag_expr.py` | `paycheck.core.tag_expr` | `apps.transactions.tag_expr` | 低（代码完全相同） |
+| `tests/integration/test_database.py` | `paycheck.storage.database` | Django TestCase | 中（需重写为 Django 测试） |
 
-**职责说明：**
+### 6.2 测试配置变更
 
-- **channels**：管理三个渠道的独立数据表。每个渠道表存储该渠道特有的全量字段（如银行有余额、币种、分行等，支付宝/微信没有）。渠道表是"数据源"，不作查询入口。
-
-- **ingest**：处理文件上传→解析→入库的全流程。包含 Celery 任务用于 PDF→CSV 异步转换。解析器直接复用现有 `src/paycheck/ingest/parsers/` 代码，仅替换 `Transaction` dataclass 为 Django Model 序列化。
-
-- **transactions**：统一的交易记录视图。包含去重逻辑（与现有 `time + amount + counterparty` 去重一致），提供 RESTful CRUD API 和标签管理 API。前端的数据展示和筛选均走此 app。
-
-- **analysis**：聚合统计，从 `transactions` 表查询。统计逻辑直接在 `views.py` 中通过 Django ORM 聚合查询实现，使用 `SummaryView`、`MonthlyView`、`CategoriesView` 三个 APIView 暴露 REST 端点。
-
-- **ocr_service**：对现有 `src/paycheck/ocr/` 目录的直接封装。Celery 任务中通过 `subprocess` 或直接 `import` 调用现有 OCR 流水线。
-
-### 4.2 数据流设计
-
-```
-用户上传文件                    后台处理                          前端展示
-┌──────────────┐    ┌──────────────────────────────┐    ┌──────────────────┐
-│ 前端拖拽区域  │───▶│ POST /api/import/upload/      │    │                  │
-│              │    │   ↓                           │    │                  │
-│ 多文件选择    │    │ 保存文件 → 创建 ImportJob      │    │                  │
-└──────────────┘    │   ↓                           │    │                  │
-                    │ Celery 异步任务:               │    │                  │
-                    │   ① 判断文件类型 (CSV/XLSX/PDF)│    │                  │
-                    │   ② CSV/XLSX → 解析器 →        │◀──▶│ API 轮询/WebSocket│
-                    │      写入 channels 表            │    │  (进度更新)       │
-                    │   ③ PDF → OCR 流水线 →         │    │                  │
-                    │      写入 boc 表                 │    │                  │
-                    │   ④ 去重 → 同步到 transactions  │    │                  │
-                    │   ⑤ 更新 ImportJob 状态         │    │                  │
-                    └──────────────────────────────┘    └──────────────────┘
-                                                              │
-                                                              ▼
-                                                    ┌──────────────────┐
-                                                    │ GET /api/transactions/ │
-                                                    │  (含筛选/排序/分页)    │
-                                                    │                      │
-                                                    │ GET /api/analysis/    │
-                                                    │  (聚合统计数据)        │
-                                                    └──────────────────┘
-```
-
----
-
-## 5. 前端架构
-
-### 5.1 组件树
-
-```
-<App>
-└── <AppLayout>
-    ├── <SideMenu>                         // 左侧手风琴菜单
-    │   ├── Menu.SubMenu "数据管理"
-    │   │   ├── Menu.Item "数据导入" → /import
-    │   │   ├── Menu.Item "支付宝账单" → /channels/alipay
-    │   │   ├── Menu.Item "微信账单" → /channels/wechat
-    │   │   └── Menu.Item "银行账单" → /channels/boc
-    │   └── Menu.SubMenu "分析"
-    │       ├── Menu.Item "概览仪表盘" → /dashboard
-    │       └── Menu.Item "详细分析" → /analysis
-    └── <main>                             // 右侧内容区（React Router）
-        ├── Route "/dashboard" → <DashboardPage>
-        │   ├── <SummaryCards />            // 总支出/收入/月均 卡片
-        │   └── <PlatformCharts />          // 月度趋势 + 平台对比
-        ├── Route "/import" → <ImportPage>
-        │   ├── <FileUploader />            // 拖拽上传 + 渠道选择
-        │   └── <ImportProgress />          // 异步任务进度条
-        ├── Route "/channels/:channel" → <ChannelPage>
-        │   └── <ChannelTable />            // TanStack Table（筛选/排序）
-        └── Route "/analysis" → <AnalysisPage>
-            ├── <SummaryCards />
-            └── <CategoryPieChart />        // 类别饼图 + 排名
-```
-
-### 5.2 路由设计
-
-| 路径 | 组件 | 说明 |
-|------|------|------|
-| `/` | 重定向 → `/dashboard` | 默认首页 |
-| `/dashboard` | `DashboardPage` | 概览仪表盘 |
-| `/import` | `ImportPage` | 数据导入 |
-| `/channels/alipay` | `ChannelPage` | 支付宝账单 |
-| `/channels/wechat` | `ChannelPage` | 微信账单 |
-| `/channels/boc` | `ChannelPage` | 银行账单 |
-| `/analysis` | `AnalysisPage` | 详细分析 |
-
-### 5.3 状态管理方案
-
-双层状态策略：
-
-| 状态类型 | 管理工具 | 内容 |
-|---------|---------|------|
-| **服务端状态** | TanStack Query | 交易数据、统计数据、渠道数据（自动缓存/重试/失效） |
-| **客户端状态** | Zustand | UI 状态：侧栏折叠、表格列显示偏好、筛选条件暂存 |
-
-**为什么不用 Redux？** 本项目状态以服务端数据为主，TanStack Query 的缓存和自动刷新机制比手写 Redux 中间件更适合。Zustand 仅需管理少量的 UI 状态，避免了 Redux 的样板代码。
-
----
-
-## 6. 数据库设计
-
-### 6.1 设计原则
-
-1. **渠道独立表**：支付宝、微信、银行各有独立的表，保留各渠道特有字段
-2. **统一交易表**：去重后写入 `transactions` 表，作为前端查询的唯一入口
-3. **SQLite 优先**：初期使用 SQLite，通过 Django ORM 保持 PostgreSQL 兼容
-4. **统一去重键**：`(time, amount, counterparty)` — 与现有逻辑保持一致
-
-### 6.2 表结构
-
-#### `alipay_transactions` / `wechat_transactions` / `boc_transactions`
-
-```sql
--- 支付宝（字段最少，渠道特有字段少）
-CREATE TABLE alipay_transactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    time          TEXT NOT NULL,        -- 交易时间
-    category      TEXT DEFAULT '',      -- 交易分类
-    counterparty  TEXT DEFAULT '',      -- 交易对方
-    description   TEXT DEFAULT '',      -- 商品说明
-    amount        REAL NOT NULL,        -- 金额（正数）
-    tx_type       TEXT DEFAULT '支出',  -- 支出/收入/不计收支
-    payment_method TEXT DEFAULT '',     -- 支付方式
-    created_at    TEXT DEFAULT (datetime('now')),
-    UNIQUE(time, amount, counterparty)
-);
-
--- 微信（字段与支付宝相同，但渠道标识为 wechat）
-CREATE TABLE wechat_transactions ( /* 同 alipay_transactions */ );
-
--- 银行（字段最多，含余额/币种/分行等）
-CREATE TABLE boc_transactions (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    time          TEXT NOT NULL,        -- 交易时间
-    category      TEXT DEFAULT '',      -- tx_name → 交易名称
-    counterparty  TEXT DEFAULT '',      -- 对方名称
-    description   TEXT DEFAULT '',      -- memo → 备注
-    amount        REAL NOT NULL,        -- 金额
-    tx_type       TEXT DEFAULT '支出',  -- 支出/收入
-    payment_method TEXT DEFAULT '',     -- channel → 渠道
-    balance       REAL DEFAULT 0,       -- 余额
-    currency      TEXT DEFAULT '',      -- 币种
-    branch        TEXT DEFAULT '',      -- 分行
-    cp_account    TEXT DEFAULT '',      -- 对方账号
-    cp_bank       TEXT DEFAULT '',      -- 对方银行
-    created_at    TEXT DEFAULT (datetime('now')),
-    UNIQUE(time, amount, counterparty)
-);
-```
-
-#### `transactions`（统一交易表，前端查询入口）
-
-```sql
-CREATE TABLE transactions (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    platform        TEXT NOT NULL,      -- 'alipay' | 'wechat' | 'bank'
-    time            TEXT NOT NULL,
-    category        TEXT DEFAULT '',
-    counterparty    TEXT DEFAULT '',
-    description     TEXT DEFAULT '',
-    amount          REAL NOT NULL,
-    tx_type         TEXT DEFAULT '支出',
-    payment_method  TEXT DEFAULT '',
-    balance         REAL DEFAULT 0,
-    currency        TEXT DEFAULT '',
-    branch          TEXT DEFAULT '',
-    cp_account      TEXT DEFAULT '',
-    cp_bank         TEXT DEFAULT '',
-    source_channel  TEXT NOT NULL,      -- 'alipay' | 'wechat' | 'boc'
-    source_id       INTEGER NOT NULL,   -- 渠道表外键 id
-    created_at      TEXT DEFAULT (datetime('now')),
-    row_hash        TEXT NOT NULL UNIQUE, -- MD5(time+amount+counterparty+platform)
-    -- 索引
-    FOREIGN KEY (source_channel, source_id) — 逻辑外键，SQLite 不支持但 Django ORM 可模拟
-);
-CREATE INDEX idx_transactions_platform ON transactions(platform);
-CREATE INDEX idx_transactions_time ON transactions(time);
-CREATE INDEX idx_transactions_amount ON transactions(amount);
-CREATE INDEX idx_transactions_tx_type ON transactions(tx_type);
-```
-
-**去重键 `row_hash`**：`MD5(f"{time}|{amount:.2f}|{counterparty}|{platform}")`，确保同一笔交易不会被重复导入。
-
-#### `tags` / `transaction_tags`（与现有结构一致）
-
-```sql
-CREATE TABLE tags (
-    id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE
-);
-
-CREATE TABLE transaction_tags (
-    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    tag_id         INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-    PRIMARY KEY (transaction_id, tag_id)
-);
-```
-
-#### `import_jobs` / `import_files`（新增，追踪导入状态）
-
-```sql
-CREATE TABLE import_jobs (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    status      TEXT DEFAULT 'pending',  -- pending/processing/completed/failed
-    total_files INTEGER DEFAULT 0,
-    processed   INTEGER DEFAULT 0,
-    created_at  TEXT DEFAULT (datetime('now')),
-    completed_at TEXT
-);
-
-CREATE TABLE import_files (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id      INTEGER NOT NULL REFERENCES import_jobs(id),
-    filename    TEXT NOT NULL,
-    file_type   TEXT NOT NULL,           -- 'alipay_csv' | 'wechat_xlsx' | 'boc_pdf' | 'boc_csv'
-    status      TEXT DEFAULT 'pending',  -- pending/processing/completed/failed
-    error_msg   TEXT,
-    created_at  TEXT DEFAULT (datetime('now'))
-);
-```
-
-### 6.3 ER 图
-
-```
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│alipay_tx     │    │wechat_tx     │    │boc_tx        │
-│ (渠道表)      │    │ (渠道表)      │    │ (渠道表)      │
-└──────┬───────┘    └──────┬───────┘    └──────┬───────┘
-       │                   │                   │
-       │   去重后同步        │                   │
-       └───────────────────┼───────────────────┘
-                           ▼
-                  ┌────────────────┐
-                  │  transactions  │
-                  │   (统一表)      │
-                  └───────┬────────┘
-                          │ M:N
-                  ┌───────┴────────┐
-                  │ transaction_   │
-                  │    tags        │
-                  └───────┬────────┘
-                          │
-                  ┌───────┴────────┐
-                  │     tags       │
-                  └────────────────┘
-
-┌──────────────┐
-│  import_jobs │
-└──────┬───────┘
-       │ 1:N
-┌──────┴───────┐
-│ import_files │
-└──────────────┘
-```
-
----
-
-## 7. API 接口设计
-
-### 7.1 接口总览
-
-| Method | Endpoint | 说明 | App |
-|--------|----------|------|-----|
-| `GET` | `/api/transactions/` | 统一交易列表（分页+筛选） | transactions |
-| `GET` | `/api/transactions/{id}/` | 单条交易详情 | transactions |
-| `DELETE` | `/api/transactions/{id}/` | 删除交易（级联删除渠道表） | transactions |
-| `GET` | `/api/channels/alipay/` | 支付宝渠道交易列表 | channels |
-| `GET` | `/api/channels/wechat/` | 微信渠道交易列表 | channels |
-| `GET` | `/api/channels/boc/` | 银行渠道交易列表 | channels |
-| `POST` | `/api/import/upload/` | 上传文件（支持多文件） | ingest |
-| `GET` | `/api/import/jobs/` | 导入任务列表 | ingest |
-| `GET` | `/api/import/jobs/{id}/` | 导入任务状态/进度 | ingest |
-| `WS` | `/ws/import/{job_id}/` | 导入进度实时推送（可选） | ingest |
-| `GET` | `/api/analysis/summary/` | 聚合摘要统计 | analysis |
-| `GET` | `/api/analysis/monthly/` | 月度趋势数据 | analysis |
-| `GET` | `/api/analysis/categories/` | 类别分布数据 | analysis |
-| `GET` | `/api/tags/` | 标签列表 | transactions |
-| `POST` | `/api/tags/` | 创建标签 | transactions |
-| `PUT` | `/api/tags/{id}/` | 更新标签 | transactions |
-| `DELETE` | `/api/tags/{id}/` | 删除标签 | transactions |
-| `POST` | `/api/transactions/{id}/tags/` | 设置交易标签 | transactions |
-| `POST` | `/api/transactions/batch-tags/` | 批量设置标签 | transactions |
-
-### 7.2 核心接口详情
-
-#### GET /api/transactions/
-
-查询参数：
-
-```
-?platform=alipay|wechat|bank    # 渠道筛选
-&tx_type=支出|收入              # 收支类型
-&time_after=2024-01-01          # 起始日期
-&time_before=2024-12-31         # 结束日期
-&amount_min=0                   # 最小金额
-&amount_max=1000                # 最大金额
-&category=餐饮                  # 分类筛选（模糊匹配）
-&counterparty=某某              # 对方筛选（模糊匹配）
-&tag_ids=1,2,3                  # 标签筛选（OR 逻辑）
-&search=关键词                  # 全局搜索（counterparty + description）
-&ordering=-time                 # 排序（-time 降序）
-&page=1                         # 分页页码
-&page_size=50                   # 每页条数（默认50，最大200）
-```
-
-响应：
-
-```json
-{
-  "count": 1234,
-  "next": "http://.../?page=2",
-  "previous": null,
-  "results": [
-    {
-      "id": 1,
-      "platform": "alipay",
-      "time": "2024-01-15 12:30:00",
-      "category": "餐饮美食",
-      "counterparty": "某某餐厅",
-      "description": "午餐消费",
-      "amount": 36.50,
-      "tx_type": "支出",
-      "payment_method": "花呗",
-      "balance": 0,
-      "currency": "",
-      "branch": "",
-      "cp_account": "",
-      "cp_bank": "",
-      "tags": [{"id": 1, "name": "餐饮"}],
-      "created_at": "2024-01-15T12:30:00Z"
-    }
-  ]
-}
-```
-
-#### POST /api/import/upload/
-
-请求：`multipart/form-data`
-
-```
-channel: "alipay" | "wechat" | "boc"  # 必选，指定渠道类型
-files: [file1.csv, file2.xlsx, ...]    # 多文件，最多 20 个
-```
-
-响应：
-
-```json
-{
-  "job_id": 42,
-  "status": "processing",
-  "total_files": 5,
-  "files": [
-    {"id": 101, "filename": "alipay_2024.csv", "status": "pending"},
-    {"id": 102, "filename": "wechat_2024.xlsx", "status": "pending"}
-  ]
-}
-```
-
-#### GET /api/analysis/summary/
-
-响应：
-
-```json
-{
-  "period": {"start": "2023-01", "end": "2024-12"},
-  "summary": {
-    "total_expense": 45678.90,
-    "total_income": 120000.00,
-    "total_count": 1234,
-    "monthly_avg": 1903.29,
-    "wechat_total": 15000.00,
-    "alipay_total": 20000.00,
-    "bank_total": 10678.90,
-    "wechat_count": 500,
-    "alipay_count": 600,
-    "bank_count": 134
-  },
-  "monthly": [
-    {"month": "2024-01", "expense": 3500.00, "count": 120,
-     "wechat": 1200.00, "alipay": 1800.00, "bank": 500.00}
-  ],
-  "categories": [
-    {"name": "餐饮", "amount": 8000.00, "count": 300, "pct": 17.5}
-  ],
-  "generated_at": "2024-01-15T12:30:00Z"
-}
-```
-
-### 7.3 数据写入流程
-
-```
-POST /api/import/upload/
-  │
-  ├─ 1. 创建 ImportJob (status=pending)
-  ├─ 2. 保存文件到 MEDIA_ROOT/uploads/{job_id}/
-  ├─ 3. 创建 ImportFile 记录
-  ├─ 4. 调用 Celery task: process_import(job_id)
-  └─ 5. 返回 job_id + 状态
-    
-Celery Task: process_import(job_id)
-  │
-  ├─ For each ImportFile:
-  │   ├─ CSV/XLSX: parse_file() → channel_tx INSERT
-  │   └─ PDF: run_ocr_pipeline() → CSV → channel_tx INSERT
-  │
-  ├─ 去重: 计算 row_hash, INSERT OR IGNORE into transactions
-  ├─ 更新 ImportJob 进度
-  └─ 更新 ImportJob.status = 'completed'
-```
-
----
-
-## 8. 异步任务方案
-
-### 8.1 方案选择
-
-| 方案 | 复杂度 | 可靠性 | 进度推送 | 选型 |
-|------|--------|--------|---------|------|
-| Celery + Redis | 中 | 高 | WebSocket/轮询 | ✅ **推荐** |
-| Django Q | 低 | 中 | 轮询 | ❌ 社区活跃度低 |
-| Dramatiq | 中 | 高 | 无内置 | ❌ 缺少 Django 集成 |
-| Threading (同步) | 低 | 低 | 无 | ❌ 阻塞请求 |
-
-**选择 Celery 的理由：**
-- Python 生态最成熟的异步任务队列
-- 内置重试、超时、任务链（Chain/Group）
-- Django 集成成熟（`django-celery-results`）
-- 支持任务优先级，OCR 任务可设为低优先级
-
-### 8.2 Celery 任务定义
+当前 `tests/conftest.py` 可能需要调整为 Django 测试配置：
 
 ```python
-# backend/apps/ingest/tasks.py
+# 选项 A: 将 tests/ 移到 backend/ 下，使用 Django 测试框架
+# backend/tests/test_csv_utils.py
 
-from celery import shared_task
-from celery.result import AsyncResult
-
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def process_import_file(self, import_file_id: int):
-    """处理单个导入文件（CSV/XLSX 解析）"""
-    # 1. 更新状态为 processing
-    # 2. 调用对应解析器
-    # 3. 写入渠道表
-    # 4. 同步到 transactions 表
-    # 5. 更新 ImportFile 状态
-
-@shared_task(bind=True, max_retries=1, time_limit=3600)
-def process_pdf_ocr(self, import_file_id: int):
-    """PDF → OCR → CSV → 入库（耗时任务，1小时超时）"""
-    # 1. 调用现有 OCR 流水线: pdf_to_images() → images_to_csv()
-    # 2. 解析生成的 CSV → boc_tx INSERT
-    # 3. 同步到 transactions 表
-
-@shared_task
-def process_import_job(job_id: int):
-    """编排导入任务：按文件类型分发到对应子任务"""
-    # 1. 获取 ImportJob 的文件列表
-    # 2. 对 PDF 文件分发 process_pdf_ocr
-    # 3. 对 CSV/XLSX 文件分发 process_import_file
-    # 4. 使用 Celery Chord 等待所有子任务完成
-    # 5. 更新 ImportJob 状态
+# 选项 B: 保持 tests/ 在根目录，通过 sys.path 添加 backend
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 ```
 
-### 8.3 进度推送方案
+**推荐选项 A**：将测试文件移至 `backend/tests/`，使用 Django 的 `TestCase` 和 pytest-django。理由是测试代码与被测代码在同一项目树下，import 路径自然正确。
 
-**推荐：前端轮询（简化实现）**
-
-```
-前端: GET /api/import/jobs/{id}/ (每 2 秒轮询)
-      ↓
-后端: 返回 ImportJob 的 processed/total_files 进度
-```
-
-**可选升级：WebSocket 推送**
+### 6.3 测试文件映射
 
 ```
-前端: 连接 /ws/import/{job_id}/
-      ↓
-Celery: task_postrun 信号 → Channels 推送进度更新
-      ↓
-前端: 接收实时进度 + 完成通知
+tests/unit/test_csv_utils.py      → backend/tests/unit/test_csv_utils.py
+tests/unit/test_tag_expr.py       → backend/tests/unit/test_tag_expr.py
+tests/integration/test_database.py → backend/tests/integration/test_models.py（重写）
+tests/conftest.py                 → backend/tests/conftest.py
 ```
-
-初期使用轮询方案，WebSocket 在后续迭代中添加。
-
-### 8.4 OCR 管线复用方案
-
-```
-现有代码: src/paycheck/ocr/
-  ├── engine.py      →  backend/apps/ocr_service/engine.py    (直接复制)
-  ├── pipeline.py    →  backend/apps/ocr_service/pipeline.py   (直接复制)
-  ├── pdf_render.py  →  backend/apps/ocr_service/pdf_render.py (直接复制)
-  └── layouts/       →  backend/apps/ocr_service/layouts/      (直接复制)
-
-依赖要求（在 backend/pyproject.toml 中新增）:
-  - paddleocr >= 3.6.0
-  - PyMuPDF
-  - opencv-python
-  - Pillow
-  - torch
-```
-
-**注意**：OCR 依赖较重（PaddleOCR + PyTorch ~2GB），建议在 Celery worker 独立的 Docker 容器中运行，与 Django 应用容器分开部署。
 
 ---
 
-## 9. 现有代码迁移策略
+## 7. 实施步骤
 
-### 9.1 迁移清单
-
-| 现有模块 | 迁移方式 | 目标位置 | 修改内容 |
-|---------|---------|---------|---------|
-| `core/models.py` | 改为 Django Model | `apps/transactions/models.py` | dataclass → `models.Model` |
-| `ingest/parsers/alipay.py` | 直接复用 | `apps/ingest/parsers/alipay.py` | 返回值从 `Transaction` dataclass 改为 `dict` |
-| `ingest/parsers/wechat.py` | 直接复用 | `apps/ingest/parsers/wechat.py` | 同上 |
-| `ingest/parsers/boc.py` | 直接复用 | `apps/ingest/parsers/boc.py` | 同上 |
-| `ingest/scanner.py` | 不再需要 | — | Web 上传替代目录扫描 |
-| `ingest/csv_utils.py` | 直接复用 | `apps/ingest/csv_utils.py` | 无修改 |
-| `ocr/engine.py` | 直接复用 | `apps/ocr_service/engine.py` | 无修改 |
-| `ocr/pipeline.py` | 直接复用 | `apps/ocr_service/pipeline.py` | 输出路径适配 |
-| `ocr/pdf_render.py` | 直接复用 | `apps/ocr_service/pdf_render.py` | 无修改 |
-| `ocr/layouts/` | 直接复用 | `apps/ocr_service/layouts/` | 无修改 |
-| `storage/database.py` | 重写 | Django ORM | 原生 SQL → ORM 查询 |
-| `core/tag_expr.py` | 保留 | `apps/transactions/tag_expr.py` | 无修改 |
-
-### 9.2 不需要迁移的模块
-
-| 模块 | 原因 |
-|------|------|
-| `gui/` (全部) | PySide6 GUI 被 React 前端替代 |
-| `analysis/` 中的图表生成逻辑 | 图表由前端 Recharts 渲染 |
-| `__main__.py` | Django 有自己的 manage.py |
-
-### 9.3 数据库迁移路径
-
-现有 `paycheck.db` 中的交易数据需迁移到新的 Django schema：
+### 总览
 
 ```
-① 导出: 现有 SQLite → JSON 中间格式
-② 清洗: platform 字段映射: "bank" → "boc"
-③ 导入: JSON → Django ORM bulk_create
-④ 验证: 对比总条数 + 汇总金额
+Step 1 ─────► Step 2 ─────► Step 3 ─────► Step 4 ─────► Step 5
+迁移          删除          版本号         测试          文档
+log.py        src/          统一切换       迁移 & 验证    刷新 & 提交
 ```
 
-可在 Django management command (`migrate_legacy_db`) 中实现一键迁移。
+### Step 1：迁移 log.py（~10 分钟）
+
+1. 复制 `src/paycheck/core/log.py` → `backend/config/logging.py`
+2. 修改 `_connect()` 中的日志目录为 `BASE_DIR / "log"`
+3. 更新 docstring 中的 import 示例
+4. 验证：`cd backend && uv run python -c "from config.logging import get_logger; print(get_logger())"`
+
+### Step 2：删除 src/ 目录（~5 分钟）
+
+1. `rm -rf src/`
+2. 验证 backend 无影响：`cd backend && uv run manage.py check`
+3. 提交：`git add -A && git commit -m "refactor: remove src/paycheck package, migrate log.py to backend/config/"`
+
+### Step 3：版本号统一（~10 分钟）
+
+1. 根 `pyproject.toml`：`version = "1.0.1"`，`package = false`
+2. `backend/pyproject.toml`：`version = "1.0.1"`
+3. `README.md`：版本徽章 `1.0.0` → `1.0.1`
+4. 提交：`git commit -m "chore: bump version to 1.0.1 across all manifests"`
+
+### Step 4：测试迁移（~15 分钟）
+
+1. 将 `tests/` 移至 `backend/tests/`
+2. 修正 import 路径
+3. 运行测试：`cd backend && uv run pytest`
+4. 提交：`git commit -m "test: migrate tests from paycheck.* to backend.* imports"`
+
+### Step 5：文档刷新（~10 分钟）
+
+1. 更新 README.md 项目结构图
+2. 更新 DESIGN.md 版本号和说明
+3. 提交：`git commit -m "docs: refresh README and DESIGN for post-migration structure"`
+
+### 实施总耗时估算
+
+| 步骤 | 内容 | 预估 |
+|---|---|---|
+| Step 1 | log.py 迁移 | 10 min |
+| Step 2 | 删除 src/ | 5 min |
+| Step 3 | 版本号统一 | 10 min |
+| Step 4 | 测试迁移 | 15 min |
+| Step 5 | 文档刷新 | 10 min |
+| **合计** | | **~50 min** |
 
 ---
 
-## 10. 核心决策记录（ADR）
+## 8. 核心决策记录（ADR）
 
-### ADR-001: 渠道独立表 vs 单表 + JSON 字段
+### ADR-005: 根 pyproject.toml 处置
 
-**背景**：三个渠道的字段结构不同（银行有余额/币种/分行等 13 个字段，支付宝/微信只有 8 个）。
+**背景**：根 `pyproject.toml` 当前定义了一个可安装的 Python 包，迁移后将不再有 `src/` 目录。
 
 **选项**：
-- A. 渠道独立表（alipay_tx, wechat_tx, boc_tx）+ 统一视图 transactions
-- B. 单表 + JSON 扩展字段（所有渠道存同一张表，渠道特有字段放 JSON）
+- A. 删除根 `pyproject.toml`，仅保留 `backend/pyproject.toml`
+- B. 保留根 `pyproject.toml`，改为 workspace 配置
 
-**决策**：选择 **A（渠道独立表 + 统一视图）**
-
-**理由**：
-- 渠道独立表保持数据纯净，不对渠道特有字段做裁剪
-- JSON 字段无法建立索引，查询效率差
-- 统一 transactions 表为前端提供一致的查询接口
-- 新增渠道时只需新建一张表 + 一条同步规则，不影响现有结构
-
-### ADR-002: Celery vs 同步线程
-
-**决策**：选择 **Celery + Redis**
+**决策**：选择 **B（保留并改为 workspace 配置）**
 
 **理由**：
-- PDF OCR 可能耗时数十分钟，必须异步处理
-- Celery 提供任务重试、超时控制、进度追踪
-- 方便后续扩展（定时清理临时文件、自动备份等）
-- 开销可控：Redis 额外占用 ~30MB 内存
+- 保留根 `pyproject.toml` 作为 monorepo 的顶层配置锚点，对 IDE 和工具链友好
+- `[tool.uv] workspace = true` 声明 workspace 关系，保持未来扩展性
+- 版本号在根配置中统一管理，`backend/pyproject.toml` 同步
+- 如果删除，uv 工具链可能将 `backend/` 误识别为独立项目而非 monorepo 子项目
 
-### ADR-003: TanStack Table vs AG Grid
+### ADR-006: log.py 放置位置
 
-**决策**：选择 **TanStack Table**
+**背景**：`core/log.py` 是通用工具，需在后端项目中找一个合适位置。
 
-**理由**：
-- 无头设计：完全控制渲染，与 Ant Design 集成无冲突
-- 免费 MIT 许可（AG Grid 社区版功能受限）
-- 8.x 版本内置筛选/排序/分页/列拖拽
-- 包体积小（~10KB gzipped vs AG Grid ~200KB）
+**选项**：
+- A. `backend/config/logging.py`（Django 配置目录）
+- B. `backend/apps/core/`（新建 app）
+- C. `backend/utils/logging.py`（工具目录）
 
-### ADR-004: SQLite 起步 vs 直接上 PostgreSQL
-
-**决策**：**SQLite 起步，通过 Django ORM 保持 PostgreSQL 兼容**
+**决策**：选择 **A（`backend/config/logging.py`）**
 
 **理由**：
-- 个人使用场景，数据量 < 10 万条/年，SQLite 可支撑 10 年以上
-- 零运维成本：无需安装/配置数据库服务
-- Docker Compose 可一键切换 PostgreSQL（仅需改 DATABASE_URL）
-- Django ORM 屏蔽 95% 的数据库差异
+- 日志属于基础设施/配置层，与 settings、celery 同级合理
+- 避免为单一文件创建完整 Django app（选项 B 过度工程）
+- 避免引入非 Django 惯例的 `utils/` 目录（选项 C 不符合 Django 惯例）
+- `config/` 目录现有文件（settings、urls、celery、wsgi、asgi）均为配置/基础设施，logging 自然属于此层
+
+### ADR-007: 测试目录迁移
+
+**背景**：当前 `tests/` 在根目录，import `paycheck.*`。迁移后需修正。
+
+**选项**：
+- A. 将 `tests/` 移到 `backend/tests/`，使用 Django 测试框架
+- B. 保持 `tests/` 在根目录，通过 `sys.path` hack 修正 import
+
+**决策**：选择 **A（移到 backend/tests/）**
+
+**理由**：
+- `backend/` 是唯一 Python 项目，测试应与其在一起
+- Django 测试框架（pytest-django）天然需要 tests 在 Django 项目内
+- `sys.path` hack 脆弱，IDE 支持差
+- 未来前端也可以有自己的 `frontend/__tests__/`
 
 ---
 
-## 11. 实施阶段划分
+## 9. 风险与回滚
 
-### 第一阶段：后端核心（2-3 周）
+### 9.1 风险评估
 
-```
-1. 初始化 Django 项目结构
-2. 创建 channels app：3 张渠道表 + DRF ViewSet
-3. 创建 transactions app：统一表 + 标签表 + 去重逻辑
-4. 迁移现有解析器到 ingest app
-5. 文件上传 API
-6. Celery 集成 + OCR 任务
-7. 分析 API（聚合统计）
-```
+| 风险 | 影响 | 概率 | 缓解措施 |
+|---|---|---|---|
+| 某处仍有 `import paycheck.*` 的隐藏引用 | 该模块 ImportError | 低 | Step 2 前全局 grep 验证 |
+| log.py 迁移后 Django 日志配置冲突 | 日志重复输出 | 低 | 保留独立调用接口，不与 Django LOGGING dict 强制整合 |
+| 测试迁移后用例失败 | 测试红灯 | 低 | Step 4 运行全量测试验证 |
+| 第三方工具/脚本依赖 `src/paycheck/` | 工具链断裂 | 极低 | 检查 CI 配置和 scripts |
 
-### 第二阶段：前端核心（2-3 周）
+### 9.2 回滚方案
 
-```
-1. Vite + React + TypeScript 项目初始化
-2. Ant Design 布局 + 手风琴菜单
-3. 仪表盘页面（摘要卡片 + 图表）
-4. 渠道账单页面（TanStack Table）
-5. 数据导入页面（拖拽上传 + 进度）
-6. 标签管理交互
-7. API 客户端 + TanStack Query 集成
+若迁移出现问题，通过 git revert 回滚：
+
+```bash
+git revert <step2-commit>  # 恢复 src/ 目录
+git revert <step1-commit>  # 恢复 log.py
 ```
 
-### 第三阶段：集成与优化（1-2 周）
-
-```
-1. 端到端流程联调
-2. 现有数据迁移工具
-3. Docker Compose 开发环境
-4. 性能优化（查询索引、分页）
-5. 错误处理 + 用户提示
-```
+所有变更是**纯删除 + 纯移动**，不涉及逻辑修改，回滚安全。
 
 ---
 
-## 12. 附录：可选方案对比
-
-### 方案 A：Django + React（✅ 推荐）
-
-- **后端**：Django + DRF + Celery + SQLite
-- **前端**：React + TypeScript + Ant Design + TanStack Table
-- **优点**：Django ORM 查询能力强，Ant Design Table 开箱即用
-- **缺点**：初期需同时维护 Python 和 Node.js 环境
-
-### 方案 B：FastAPI + React
-
-- **后端**：FastAPI + SQLAlchemy + Celery + SQLite
-- **前端**：同方案 A
-- **优点**：异步原生支持，API 文档自动生成
-- **缺点**：SQLAlchemy 复杂查询代码量大，缺少 Django Admin
-
-### 方案 C：Next.js 全栈
-
-- **后端**：Next.js API Routes + Prisma + SQLite
-- **前端**：Next.js + React Server Components
-- **优点**：单一语言/项目，部署简单
-- **缺点**：OCR 必须通过子进程调用 Python，增加运维复杂度
-
-### 推荐结论
-
-**方案 A（Django + React）** 是平衡性最佳的选择：
-- 现有 Python 代码（解析器 + OCR）可直接复用
-- Django ORM 对聚合统计查询有天然优势
-- Ant Design 组件库完美匹配数据密集型应用的 UI 需求
-- 后续扩展到 PostgreSQL 零代码修改
-
----
-
-> **文档结束**。本设计将作为后续开发的指导基线，重大变更需更新对应的 ADR 记录。
+> **文档结束**。本文档作为 TCY-37 的 STAGE_DESIGN 产出物，覆盖核心包迁移路径、版本号更新方案和文档刷新策略。
+>
+> 实施由后续 STAGE_IMPLEMENT 阶段执行。
