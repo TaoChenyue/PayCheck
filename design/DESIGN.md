@@ -145,7 +145,6 @@ PayCheck/                          # 仓库根目录（Monorepo）
 │   │   ├── analysis/              # 统计分析
 │   │   │   ├── views.py           # 聚合查询 API
 │   │   │   ├── urls.py
-│   │   │   └── stats.py           # 复用现有统计逻辑
 │   │   └── ocr_service/           # OCR 服务封装
 │   │       ├── tasks.py           # Celery OCR 任务
 │   │       ├── engine.py          # 复用原 ocr/engine.py
@@ -737,7 +736,6 @@ Celery: task_postrun 信号 → Channels 推送进度更新
 | 现有模块 | 迁移方式 | 目标位置 | 修改内容 |
 |---------|---------|---------|---------|
 | `core/models.py` | 改为 Django Model | `apps/transactions/models.py` | dataclass → `models.Model` |
-| `core/constants.py` | 保留为常量模块 | `apps/transactions/constants.py` | 无实质修改 |
 | `ingest/parsers/alipay.py` | 直接复用 | `apps/ingest/parsers/alipay.py` | 返回值从 `Transaction` dataclass 改为 `dict` |
 | `ingest/parsers/wechat.py` | 直接复用 | `apps/ingest/parsers/wechat.py` | 同上 |
 | `ingest/parsers/boc.py` | 直接复用 | `apps/ingest/parsers/boc.py` | 同上 |
@@ -748,7 +746,6 @@ Celery: task_postrun 信号 → Channels 推送进度更新
 | `ocr/pdf_render.py` | 直接复用 | `apps/ocr_service/pdf_render.py` | 无修改 |
 | `ocr/layouts/` | 直接复用 | `apps/ocr_service/layouts/` | 无修改 |
 | `storage/database.py` | 重写 | Django ORM | 原生 SQL → ORM 查询 |
-| `analysis/stats.py` | 部分复用 | `apps/analysis/stats.py` | 内存计算 → ORM 聚合查询 |
 | `core/tag_expr.py` | 保留 | `apps/transactions/tag_expr.py` | 无修改 |
 
 ### 9.2 不需要迁移的模块

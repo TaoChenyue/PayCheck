@@ -7,7 +7,7 @@ export interface Tag {
 
 export interface Transaction {
   id: number;
-  platform: 'alipay' | 'wechat' | 'bank';
+  platform: 'alipay' | 'wechat' | 'boc';
   time: string;
   category: string;
   counterparty: string;
@@ -67,7 +67,7 @@ export interface ChannelTx {
 
 export type FileType = 'alipay_csv' | 'wechat_xlsx' | 'boc_pdf' | 'boc_csv';
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
-export type ChannelType = 'alipay' | 'wechat' | 'bank';
+export type ChannelType = 'alipay' | 'wechat' | 'boc';
 
 export interface ImportFile {
   id: number;

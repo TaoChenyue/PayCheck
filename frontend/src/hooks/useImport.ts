@@ -23,9 +23,7 @@ async function uploadFiles(channel: ChannelType, files: File[]): Promise<ImportU
   const formData = new FormData();
   formData.append('channel', channel);
   files.forEach((f) => formData.append('files', f));
-  const { data } = await apiClient.post('/import/upload/', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  const { data } = await apiClient.post('/import/upload/', formData);
   return data;
 }
 

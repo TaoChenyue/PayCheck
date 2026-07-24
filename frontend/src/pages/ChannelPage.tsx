@@ -18,10 +18,10 @@ const CHANNEL_LABELS: Record<string, string> = {
 const CHANNEL_PLATFORM: Record<string, ChannelType> = {
   alipay: 'alipay',
   wechat: 'wechat',
-  bank: 'bank',
+  boc: 'boc',
 };
 
-const VALID_CHANNELS = ['alipay', 'wechat', 'bank'] as const;
+const VALID_CHANNELS = ['alipay', 'wechat', 'boc'] as const;
 
 // ── component ──
 
@@ -99,7 +99,7 @@ export default function ChannelPage() {
         onPageChange={handlePageChange}
         onSearch={handleSearch}
         onSort={handleSort}
-        channel={channel as 'alipay' | 'wechat' | 'bank'}
+        channel={channel as 'alipay' | 'wechat' | 'boc'}
       />
     </div>
   );

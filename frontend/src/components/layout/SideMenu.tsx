@@ -42,7 +42,7 @@ const menuItems: MenuProps['items'] = [
         label: '微信账单',
       },
       {
-        key: '/channels/bank',
+        key: '/channels/boc',
         icon: <BankOutlined />,
         label: '银行账单',
       },
