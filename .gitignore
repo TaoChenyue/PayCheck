@@ -22,3 +22,9 @@ uv.lock
 .omo/
 docs/superpowers/
 uv.lock
+
+# Playwright MCP runtime
+.playwright-mcp/
+
+# Temp test data
+test_*.csv
