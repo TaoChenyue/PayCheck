@@ -99,7 +99,7 @@ function PlatformCharts() {
   const platformData = [
     { name: '微信', amount: summary.wechat_total, color: PLATFORM_COLORS.wechat },
     { name: '支付宝', amount: summary.alipay_total, color: PLATFORM_COLORS.alipay },
-    { name: '银行', amount: summary.bank_total, color: PLATFORM_COLORS.bank },
+    { name: '银行', amount: summary.boc_total, color: PLATFORM_COLORS.bank },
   ];
 
   return (
@@ -139,7 +139,7 @@ function PlatformCharts() {
                 />
                 <Line
                   type="monotone"
-                  dataKey="bank"
+                  dataKey="boc"
                   name="银行"
                   stroke={PLATFORM_COLORS.bank}
                   strokeWidth={2}

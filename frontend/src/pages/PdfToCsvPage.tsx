@@ -35,7 +35,7 @@ const { Title, Text, Paragraph } = Typography;
 // ── Constants ──
 
 const BANK_OPTIONS: { value: ChannelType; label: string }[] = [
-  { value: 'bank', label: '中国银行 (BOC)' },
+  { value: 'boc', label: '中国银行 (BOC)' },
 ];
 
 const STATUS_CONFIG: Record<JobStatus, { color: string; icon: React.ReactNode; label: string }> = {
@@ -69,7 +69,7 @@ function getStatusTag(status: JobStatus) {
 export default function PdfToCsvPage() {
   const [stage, setStage] = useState<PageStage>('select');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
-  const [bankType, setBankType] = useState<ChannelType>('bank');
+  const [bankType, setBankType] = useState<ChannelType>('boc');
   const [jobId, setJobId] = useState<number | null>(null);
   const [refetchInterval, setRefetchInterval] = useState<number | false>(false);
 

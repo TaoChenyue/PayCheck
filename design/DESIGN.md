@@ -232,7 +232,7 @@ PayCheck/                          # 仓库根目录（Monorepo）
 
 - **transactions**：统一的交易记录视图。包含去重逻辑（与现有 `time + amount + counterparty` 去重一致），提供 RESTful CRUD API 和标签管理 API。前端的数据展示和筛选均走此 app。
 
-- **analysis**：聚合统计，从 `transactions` 表查询。复用现有 `stats.py` 的计算逻辑，但数据源从内存列表变为 Django ORM 查询。
+- **analysis**：聚合统计，从 `transactions` 表查询。统计逻辑直接在 `views.py` 中通过 Django ORM 聚合查询实现，使用 `SummaryView`、`MonthlyView`、`CategoriesView` 三个 APIView 暴露 REST 端点。
 
 - **ocr_service**：对现有 `src/paycheck/ocr/` 目录的直接封装。Celery 任务中通过 `subprocess` 或直接 `import` 调用现有 OCR 流水线。
 

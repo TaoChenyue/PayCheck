@@ -109,10 +109,10 @@ export interface SummaryData {
     monthly_avg: number;
     wechat_total: number;
     alipay_total: number;
-    bank_total: number;
+    boc_total: number;
     wechat_count: number;
     alipay_count: number;
-    bank_count: number;
+    boc_count: number;
   };
   monthly: MonthlyItem[];
   categories: CategoryItem[];
@@ -125,7 +125,7 @@ export interface MonthlyItem {
   count: number;
   wechat: number;
   alipay: number;
-  bank: number;
+  boc: number;
 }
 
 export interface CategoryItem {
