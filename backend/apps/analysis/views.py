@@ -49,7 +49,7 @@ class SummaryView(APIView):
         monthly_qs = (
             expense_txns.exclude(time="")
             .annotate(month=Substr("time", 1, 7))
-            .filter(month__length__gte=7)
+            .exclude(month="")
             .values("month")
             .annotate(
                 expense=Sum("amount"),
@@ -134,7 +134,7 @@ class MonthlyView(APIView):
         monthly_qs = (
             txns.exclude(time="")
             .annotate(month=Substr("time", 1, 7))
-            .filter(month__length__gte=7)
+            .exclude(month="")
             .values("month")
             .annotate(expense=Sum("amount"), count=Count("id"))
             .order_by("month")
