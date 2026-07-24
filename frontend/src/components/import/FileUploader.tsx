@@ -13,19 +13,19 @@ const { Text } = Typography;
 const CHANNEL_OPTIONS: { value: ChannelType; label: string }[] = [
   { value: 'alipay', label: '支付宝' },
   { value: 'wechat', label: '微信' },
-  { value: 'boc', label: '中国银行' },
+  { value: 'bank', label: '中国银行' },
 ];
 
 const CHANNEL_ACCEPT: Record<ChannelType, string> = {
   alipay: '.csv',
   wechat: '.xlsx,.xls',
-  boc: '.pdf,.csv',
+  bank: '.pdf,.csv',
 };
 
 const CHANNEL_HINTS: Record<ChannelType, string> = {
   alipay: '支持 .csv 格式的支付宝账单文件',
   wechat: '支持 .xlsx / .xls 格式的微信账单文件',
-  boc: '支持 .pdf / .csv 格式的中国银行流水文件',
+  bank: '支持 .pdf / .csv 格式的中国银行流水文件',
 };
 
 // ── Props ──

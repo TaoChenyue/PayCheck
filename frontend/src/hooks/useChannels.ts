@@ -5,7 +5,7 @@ import type { ChannelTx, ChannelType, PaginatedResponse } from '@/types';
 const CHANNEL_URLS: Record<ChannelType, string> = {
   alipay: '/channels/alipay/',
   wechat: '/channels/wechat/',
-  boc: '/channels/boc/',
+  bank: '/channels/boc/',
 };
 
 async function fetchChannelTxs(
