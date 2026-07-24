@@ -114,7 +114,8 @@ PayCheck/
 │   │   │   ├── DashboardPage   # 仪表盘首页
 │   │   │   ├── ChannelPage     # 渠道数据表（通用，参数化渠道）
 │   │   │   ├── ImportPage      # 文件导入页
-│   │   │   └── AnalysisPage    # 统计分析页
+│   │   │   ├── AnalysisPage    # 统计分析页
+│   │   │   └── PdfToCsvPage    # PDF 转 CSV 工具页
 │   │   ├── hooks/              # 自定义 Hooks
 │   │   ├── stores/             # Zustand 状态
 │   │   └── types/              # TypeScript 类型定义
@@ -242,15 +243,18 @@ npm run dev
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/channels/` | 渠道列表 |
-| GET | `/api/channels/{id}/` | 渠道详情 |
-| GET | `/api/transactions/` | 交易列表（支持筛选/排序/分页） |
-| POST | `/api/ingest/upload/` | 上传账单文件 |
-| POST | `/api/ingest/import/` | 触发导入任务 |
-| GET | `/api/ingest/tasks/{id}/` | 查询异步任务状态 |
+| GET | `/api/channels/alipay/` | 支付宝交易列表 |
+| GET | `/api/channels/wechat/` | 微信交易列表 |
+| GET | `/api/channels/boc/` | 中国银行交易列表 |
+| GET | `/api/channels/{channel}/{id}/` | 单条交易详情 |
+| GET | `/api/transactions/` | 通用交易列表（支持筛选/排序/搜索） |
+| GET | `/api/tags/` | 标签列表 |
+| POST | `/api/import/upload/` | 上传账单文件 |
+| GET | `/api/import/jobs/` | 导入任务列表 |
+| GET | `/api/import/jobs/{id}/` | 查询导入任务状态 |
 | GET | `/api/analysis/summary/` | 汇总统计数据 |
 | GET | `/api/analysis/monthly/` | 月度趋势数据 |
-| GET | `/api/analysis/category/` | 类别分布数据 |
+| GET | `/api/analysis/categories/` | 类别分布数据 |
 
 ---
 
