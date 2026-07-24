@@ -67,7 +67,7 @@ export interface ChannelTx {
 
 export type FileType = 'alipay_csv' | 'wechat_xlsx' | 'boc_pdf' | 'boc_csv';
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
-export type ChannelType = 'alipay' | 'wechat' | 'boc';
+export type ChannelType = 'alipay' | 'wechat' | 'boc' | 'bank';
 
 export interface ImportFile {
   id: number;

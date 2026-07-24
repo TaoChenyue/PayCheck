@@ -18,7 +18,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 const CHANNEL_PLATFORM: Record<string, ChannelType> = {
   alipay: 'alipay',
   wechat: 'wechat',
-  boc: 'boc',
+  boc: 'bank',
 };
 
 const VALID_CHANNELS = ['alipay', 'wechat', 'boc'] as const;
