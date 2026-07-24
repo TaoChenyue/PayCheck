@@ -48,19 +48,14 @@
 │     React 前端         │     │        Django 后端                │
 │  (Vite + Ant Design)  │◄───►│  (DRF + Celery + SQLite)         │
 │  localhost:5173       │ API │  localhost:8000                  │
-└───────────────────────┘     └──────────────────────────────────┘
-                                       │
-                                       ▼
-                              ┌─────────────────┐
-                              │     Redis        │
-                              │  (Celery Broker) │
-                              └─────────────────┘
-                                       │
-                                       ▼
-                              ┌─────────────────┐
-                              │  Celery Worker   │
-                              │  (PDF OCR 异步)  │
-                              └─────────────────┘
+└───────────────────────┘     └──────────────┬───────────────────┘
+                                             │
+                                             ▼
+                                    ┌─────────────────┐
+                                    │  Celery Worker   │
+                                    │  (SQLite Broker) │
+                                    │  (PDF OCR 异步)  │
+                                    └─────────────────┘
 ```
 
 ### 后端
@@ -70,8 +65,7 @@
 | Django 5.1 | Web 框架 |
 | Django REST Framework 3.15 | REST API |
 | Celery 5.4 | 异步任务队列（PDF OCR） |
-| Redis 7.x | Celery broker + 缓存 |
-| SQLite 3.x | 数据库（零运维，可无缝切换 PostgreSQL） |
+| SQLite 3.x | 数据库 + Celery broker（零运维，可无缝切换 PostgreSQL） |
 | PaddleOCR | 银行 PDF 流水 OCR 识别 |
 
 ### 前端
@@ -137,7 +131,6 @@ PayCheck/
 
 - **Python**: 3.10 ~ 3.11（PaddlePaddle 兼容性要求）
 - **Node.js**: 18+（前端构建）
-- **Redis**: 7.x（Celery broker，必需）
 - **GPU**（推荐）: NVIDIA GPU + CUDA 12.6，用于加速 OCR 推理
 - **Package Manager**: [uv](https://docs.astral.sh/uv/)（Python）+ npm（Node.js）
 
@@ -166,20 +159,7 @@ git clone https://github.com/TaoChenyue/PayCheck.git
 cd PayCheck
 ```
 
-### 3. 启动 Redis
-
-```bash
-# macOS (Homebrew)
-brew install redis && brew services start redis
-
-# Linux
-sudo apt install redis-server && sudo systemctl start redis
-
-# Windows
-# 使用 WSL 或下载 Windows 版 Redis: https://github.com/tporadowski/redis/releases
-```
-
-### 4. 安装并启动后端
+### 3. 安装并启动后端
 
 ```bash
 cd backend
@@ -196,14 +176,14 @@ uv run manage.py runserver
 
 后端运行在 http://localhost:8000
 
-### 5. 启动 Celery Worker（另开终端）
+### 4. 启动 Celery Worker（另开终端）
 
 ```bash
 cd backend
 uv run celery -A config worker --loglevel=info --pool=solo
 ```
 
-### 6. 安装并启动前端
+### 5. 安装并启动前端
 
 ```bash
 cd frontend
@@ -217,7 +197,7 @@ npm run dev
 
 前端运行在 http://localhost:5173
 
-### 7. 打开浏览器
+### 6. 打开浏览器
 
 访问 **http://localhost:5173** 即可使用。
 
