@@ -6,7 +6,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.10%20|%203.11-blue?logo=python" alt="Python">
-  <img src="https://img.shields.io/badge/version-0.5.0-blueviolet" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-blueviolet" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
   <img src="https://img.shields.io/badge/GPU-CUDA%2012.6-orange?logo=nvidia" alt="CUDA">
 </p>
