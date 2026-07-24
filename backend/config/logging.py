@@ -1,10 +1,13 @@
-"""Django 日志配置模块
+"""Django 日志配置模块 — 由 ``src/paycheck/core/log.py`` 迁移而来。
 
-提供 Django 环境的日志配置与工具函数。
+提供 Django ``LOGGING`` 配置字典（由 settings.py 自动加载）以及
+日志工具函数：``get_logger()``、``log_time()``（上下文管理器）、
+``log_execution_time()``（装饰器）。
 
-用法:
-    # settings.py 中引入 LOGGING 配置
-    from config.logging import LOGGING  # noqa: F401
+用法::
+
+    # settings.py 中自动引入 LOGGING 配置
+    from config.logging import LOGGING
 
     # 工具函数
     from config.logging import get_logger, log_time, log_execution_time
@@ -18,6 +21,11 @@
 
     with log_time("OCR 识别"):
         result = do_ocr()
+
+行为:
+    - 文件日志：自动写入 ``log/paycheck.log``，按 10MB×5 份轮转
+    - 控制台：DEBUG 模式下 paycheck logger 同时输出到 stderr
+    - 自动压制 paddle/PIL/matplotlib/urllib3 等第三方库噪声
 """
 
 from __future__ import annotations
@@ -32,29 +40,25 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
-# ── 日志文件配置 ──────────────────────────────────────────────
+# ── 目录与常量 ────────────────────────────────────────────────
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+_DEFAULT_LOG_DIR = os.path.join(BASE_DIR, "log")
+_DEFAULT_LOG_FILE = "paycheck.log"
+
 # 单个日志文件最大 10MB，保留 5 份备份
 _LOG_MAX_BYTES = 10 * 1024 * 1024
 _LOG_BACKUP_COUNT = 5
-_DEFAULT_LOG_DIR = "log"
-_DEFAULT_LOG_FILE = "paycheck.log"
+
+# 确保日志目录存在
+os.makedirs(_DEFAULT_LOG_DIR, exist_ok=True)
+
+_is_debug = os.environ.get("DJANGO_DEBUG", "True").lower() in ("true", "1", "yes")
 
 
 # =========================================================================
 # Django LOGGING 配置字典
 # =========================================================================
-
-def _build_file_handler(log_dir: str, log_file: str) -> dict:
-    """构建文件 handler 配置字典。"""
-    return {
-        "class": "logging.handlers.RotatingFileHandler",
-        "filename": os.path.join(log_dir, log_file),
-        "maxBytes": _LOG_MAX_BYTES,
-        "backupCount": _LOG_BACKUP_COUNT,
-        "encoding": "utf-8",
-        "formatter": "verbose_file",
-    }
-
 
 LOGGING: dict = {
     "version": 1,
@@ -74,30 +78,37 @@ LOGGING: dict = {
             "style": "{",
         },
     },
-    "filters": {},
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
+        "file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(_DEFAULT_LOG_DIR, _DEFAULT_LOG_FILE),
+            "maxBytes": _LOG_MAX_BYTES,
+            "backupCount": _LOG_BACKUP_COUNT,
+            "encoding": "utf-8",
+            "formatter": "verbose_file",
+        },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["console", "file"],
         "level": "INFO",
     },
     "loggers": {
         "django": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "django.server": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
         },
         "paycheck": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"] if _is_debug else ["file"],
             "level": "DEBUG",
             "propagate": False,
         },
@@ -153,7 +164,7 @@ LOGGING: dict = {
             "propagate": False,
         },
         "celery": {
-            "handlers": ["console"],
+            "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False,
         },
@@ -165,10 +176,10 @@ def enable_file_logging(
     log_dir: str = _DEFAULT_LOG_DIR,
     log_file: str = _DEFAULT_LOG_FILE,
 ) -> None:
-    """启用文件日志（RotatingFileHandler）。
+    """启用自定义路径的文件日志（RotatingFileHandler）。
 
-    在 manage.py 或 AppConfig.ready() 中调用，为 root 和 paycheck
-    logger 添加文件 handler。
+    当默认 LOGGING 配置中的日志路径不满足需求时（如 CI 环境），
+    在 manage.py 或 AppConfig.ready() 中调用此函数覆盖。
 
     Args:
         log_dir: 日志目录路径
@@ -328,3 +339,11 @@ def log_execution_time(func=None, *, level: int = logging.DEBUG):
     if func is None:
         return decorator
     return decorator(func)
+
+
+# =========================================================================
+# 模块加载时自动压制第三方库噪声
+# =========================================================================
+
+# 在 settings.py import 本模块时立即生效，无需手动调用。
+suppress_noisy_loggers()
