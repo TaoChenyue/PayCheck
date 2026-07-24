@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">📊 PayCheck</h1>
-  <p align="center"><strong>个人账单统计工具</strong></p>
-  <p align="center">聚合微信 · 支付宝 · 银行三渠道账单，自动剔除内部转账，图形界面一站式管理</p>
+  <p align="center"><strong>个人账单统计工具 — 前后端分离 Web 应用</strong></p>
+  <p align="center">聚合微信 · 支付宝 · 中国银行三渠道账单，自动剔除内部转账，Web 界面一站式管理</p>
 </p>
 
 <p align="center">
@@ -16,234 +16,299 @@
 ## 📋 目录
 
 - [简介](#简介)
+- [技术架构](#技术架构)
+- [项目结构](#项目结构)
 - [前置依赖](#前置依赖)
-- [安装](#安装)
 - [快速开始](#快速开始)
-- [数据流](#数据流)
-- [核心能力](#核心能力)
-  - [多平台账单解析](#多平台账单解析)
-  - [银行流水 OCR](#银行流水-ocr)
-  - [内部转账过滤](#内部转账过滤)
-  - [分析维度](#分析维度)
-- [故障排查](#故障排查)
-- [依赖](#依赖)
+- [功能特性](#功能特性)
+- [API 接口](#api-接口)
+- [开发指南](#开发指南)
 - [许可](#许可)
 
 ---
 
 ## 简介
 
-**PayCheck** 是一款个人账单聚合分析工具。它将分散在微信、支付宝、中国银行（BOC）等多个渠道的账单汇总到统一管线下，经过 **PDF 渲染 → OCR 识别 → 结构化解析 → 聚合统计** 流程，在 PySide6 图形界面中完成导入、查看与分析。
+**PayCheck** 是一款个人账单聚合分析 Web 应用。它将分散在微信、支付宝、中国银行（BOC）等多个渠道的账单汇总到统一管线下，提供 Web 界面完成导入、查看与分析。
 
 核心特性：
 
-- **多源聚合** — 微信 `.xlsx`、支付宝 `.csv`、银行 `.pdf` / `.csv` 统一处理
-- **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，支持表格自动检测与裁剪
+- **多源聚合** — 微信 `.xlsx`、支付宝 `.csv`、银行 `.pdf` 统一导入
+- **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，Celery 异步处理
 - **智能过滤** — 自动剔除"充值/提现/零钱"等内部转账，还原真实消费
-- **可视化分析** — 摘要卡片 + 分渠道可筛选表格，含月度趋势、平台对比、类别分布
+- **Web 界面** — React 单页应用，左侧手风琴菜单，响应式布局
+- **分渠道管理** — 支付宝、微信、中国银行三个独立数据表，支持筛选排序和列配置
+
+---
+
+## 技术架构
+
+```
+┌───────────────────────┐     ┌──────────────────────────────────┐
+│     React 前端         │     │        Django 后端                │
+│  (Vite + Ant Design)  │◄───►│  (DRF + Celery + SQLite)         │
+│  localhost:5173       │ API │  localhost:8000                  │
+└───────────────────────┘     └──────────────────────────────────┘
+                                       │
+                                       ▼
+                              ┌─────────────────┐
+                              │     Redis        │
+                              │  (Celery Broker) │
+                              └─────────────────┘
+                                       │
+                                       ▼
+                              ┌─────────────────┐
+                              │  Celery Worker   │
+                              │  (PDF OCR 异步)  │
+                              └─────────────────┘
+```
+
+### 后端
+
+| 技术 | 用途 |
+|------|------|
+| Django 5.1 | Web 框架 |
+| Django REST Framework 3.15 | REST API |
+| Celery 5.4 | 异步任务队列（PDF OCR） |
+| Redis 7.x | Celery broker + 缓存 |
+| SQLite 3.x | 数据库（零运维，可无缝切换 PostgreSQL） |
+| PaddleOCR | 银行 PDF 流水 OCR 识别 |
+
+### 前端
+
+| 技术 | 用途 |
+|------|------|
+| React 19 | UI 框架 |
+| TypeScript 6 | 类型安全 |
+| Vite 8 | 构建工具 |
+| Ant Design 6 | 组件库（表格/菜单/表单） |
+| TanStack Query 5 | 服务端状态管理 |
+| TanStack Table 8 | 表格筛选/排序/列配置 |
+| React Router 7 | SPA 路由 |
+| Recharts 3 | 图表（饼图/柱状图/折线图） |
+| Zustand 5 | 客户端状态管理 |
+
+---
+
+## 项目结构
+
+```
+PayCheck/
+├── backend/                    # Django 后端
+│   ├── apps/                   # 业务应用
+│   │   ├── channels/           # 账单渠道管理
+│   │   ├── transactions/       # 交易数据模型
+│   │   ├── ingest/             # 文件导入 & 解析器
+│   │   ├── analysis/           # 统计分析
+│   │   └── ocr_service/        # OCR 异步服务
+│   ├── config/                 # Django 配置
+│   │   ├── settings.py
+│   │   ├── urls.py
+│   │   └── celery.py           # Celery 配置
+│   ├── manage.py               # Django 管理入口
+│   └── pyproject.toml
+├── frontend/                   # React 前端
+│   ├── src/
+│   │   ├── api/                # API 客户端
+│   │   ├── components/         # 通用组件 & AppLayout
+│   │   ├── pages/              # 页面组件
+│   │   │   ├── DashboardPage   # 仪表盘首页
+│   │   │   ├── ChannelPage     # 渠道数据表（通用，参数化渠道）
+│   │   │   ├── ImportPage      # 文件导入页
+│   │   │   └── AnalysisPage    # 统计分析页
+│   │   ├── hooks/              # 自定义 Hooks
+│   │   ├── stores/             # Zustand 状态
+│   │   └── types/              # TypeScript 类型定义
+│   ├── vite.config.ts
+│   └── package.json
+├── src/paycheck/               # Python 核心包（解析器/OCR/存储）
+│   ├── ingest/parsers/         # 账单解析器（支付宝/微信/BOC）
+│   ├── ocr/                    # PaddleOCR 识别管线
+│   ├── analysis/               # 统计分析
+│   └── storage/                # SQLite 存储层
+├── design/                     # 架构设计文档
+│   └── DESIGN.md
+└── pyproject.toml              # Python 根项目配置
+```
 
 ---
 
 ## 前置依赖
 
-- **操作系统**: Windows / macOS / Linux（需图形桌面环境）
 - **Python**: 3.10 ~ 3.11（PaddlePaddle 兼容性要求）
+- **Node.js**: 18+（前端构建）
+- **Redis**: 7.x（Celery broker，必需）
 - **GPU**（推荐）: NVIDIA GPU + CUDA 12.6，用于加速 OCR 推理
-- **Package Manager**: [uv](https://docs.astral.sh/uv/)（推荐）或 pip
+- **Package Manager**: [uv](https://docs.astral.sh/uv/)（Python）+ npm（Node.js）
 
-> 无 GPU 也可运行（安装时选择 `uv sync --extra cpu`），OCR 速度会明显降低但不影响功能。
-
----
-
-## 安装
-
-### 1. 安装 uv（如未安装）
-
-```bash
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
-
-### 2. 克隆并安装依赖
-
-```bash
-git clone <repo-url>
-cd paycheck
-
-# GPU 用户（NVIDIA + CUDA 12.6）
-uv sync --extra gpu
-
-# CPU-only 用户（无 NVIDIA GPU）
-uv sync --extra cpu
-```
-
-- `uv sync --extra gpu`：从自定义索引拉取 PaddlePaddle GPU 版（CUDA 12.6），OCR 推理加速
-- `uv sync --extra cpu`：拉取 PaddlePaddle CPU 版，无需 GPU，OCR 速度较慢但不影响功能
-
-### 3. 验证安装
-
-```bash
-uv run paycheck
-```
-
-启动后应看到 PySide6 图形界面（导入 / 交易明细两个标签页）。
+> 无 GPU 也可运行，OCR 速度会明显降低但不影响功能。
 
 ---
 
 ## 快速开始
 
-### 启动 GUI
+### 1. 安装 uv 和 Node.js
 
 ```bash
-uv run paycheck
+# Windows (PowerShell) — uv
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# macOS / Linux — uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Node.js: https://nodejs.org/ (推荐 18 LTS 或更高)
 ```
 
-程序将打开 PySide6 图形界面，包含两个标签页：
+### 2. 克隆仓库
 
-#### 📥 导入
-
-一站式导入所有账单文件：
-
-1. **PDF → CSV（可选）** — 选择银行 PDF 流水文件，选择银行类型（默认 BOC），点击「开始转换 PDF→CSV」完成 OCR 识别，生成 CSV 文件
-2. **数据源** — 分别浏览选择微信 `.xlsx`、支付宝 `.csv`、银行 `.csv` 文件
-3. 点击 **「导入并合并」** 将所有交易写入数据库
-
-> 账单文件可直接通过 GUI 浏览选择，无强制目录结构要求。
-
-#### 📊 交易明细
-
-查看与分析已导入的数据：
-
-- **摘要卡片** — 总支出 / 总收入 / 月均支出 / 月均收入 / 各平台消费统计
-- **分渠道表格** — 微信、支付宝、银行三个标签页，每列支持文本/金额范围/下拉筛选
-- **标签系统** — 为交易打标签，支持标签表达式筛选（如 `(餐饮 | 交通) & !报销`）
-- **快捷键** — 选中行按 `Ctrl+T` 批量打标签
-
-### 准备账单文件
-
-推荐按平台分目录管理，便于批量导入：
-
+```bash
+git clone https://github.com/TaoChenyue/PayCheck.git
+cd PayCheck
 ```
-<input_dir>/
-├── wechat/          ← 微信支付 (.xlsx)
-│   └── *.xlsx
-├── ant/             ← 支付宝 (.csv)
-│   └── *.csv
-└── boc/             ← 中国银行 (.pdf / .csv)
-    └── *.pdf
+
+### 3. 启动 Redis
+
+```bash
+# macOS (Homebrew)
+brew install redis && brew services start redis
+
+# Linux
+sudo apt install redis-server && sudo systemctl start redis
+
+# Windows
+# 使用 WSL 或下载 Windows 版 Redis: https://github.com/tporadowski/redis/releases
 ```
+
+### 4. 安装并启动后端
+
+```bash
+cd backend
+
+# 安装依赖
+uv sync
+
+# 数据库迁移
+uv run manage.py migrate
+
+# 启动 Django 开发服务器
+uv run manage.py runserver
+```
+
+后端运行在 http://localhost:8000
+
+### 5. 启动 Celery Worker（另开终端）
+
+```bash
+cd backend
+uv run celery -A config worker --loglevel=info --pool=solo
+```
+
+### 6. 安装并启动前端
+
+```bash
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动 Vite 开发服务器
+npm run dev
+```
+
+前端运行在 http://localhost:5173
+
+### 7. 打开浏览器
+
+访问 **http://localhost:5173** 即可使用。
 
 ---
 
-## 数据流
-
-以下管道已完全集成到 GUI 中（导入页的「开始转换 PDF→CSV」覆盖前两阶段，「导入并合并」覆盖第三阶段），用户无需手动执行中间命令。
-
-三阶段管道，渲染 / OCR / 分析完全解耦：
-
-```
-第一阶段: pdf2image               第二阶段: image2csv             第三阶段: analyse
-┌──────────────────────────┐    ┌──────────────────────────┐    ┌──────────────────────────────┐
-│ <input_dir>/boc/*.pdf    │    │ <input_dir>/boc/          │    │ <input_dir>/                  │
-│       ↓                  │    │  *_p*.png 图片           │    │ ├── wechat/*.xlsx           │
-│  PDF → 图片渲染          │ ──→│       ↓                  │    │ ├── ant/*.csv               │
-│  + 表格裁剪              │    │  OCR → Layout → CSV      │    │ ├── boc/*.csv               │
-│       ↓                  │    │       ↓                  │    │       ↓                      │
-│  *_p*.png 图片           │    │  boc/*.csv (输出)       │ ──→│  CSV/XLSX → Transaction     │
-└──────────────────────────┘    └──────────────────────────┘    │       ↓                      │
-                                                                  │  聚合统计 → 摘要卡片 / 表格  │
-                                                                  └──────────────────────────────┘
-
-```
-
-### 处理管线
-
-| 步骤 | 函数 | 说明 |
-|---|---|---|
-| ① | `pdf_to_images()` | PDF 逐页渲染 → 亮度分析裁剪表格 → PNG 图片 |
-| ② | `images_to_csv()` | 图片 → PaddleOCR → 布局结构化 → CSV 写入 |
-| ③ | `scan_directory()` | 按子目录名（wechat/ant/boc）自动归类文件 |
-| ④ | `parse_file()` | 根据平台调用对应解析器：CSV/XLSX → Transaction 列表 |
-| ⑤ | `aggregate()` | 过滤内部转账 → 多维度聚合统计 |
-| ⑥ | `_update_summary()` / `_render_table()` | 更新摘要卡片与分渠道表格 |
-
-
-
-
-## 核心能力
+## 功能特性
 
 ### 多平台账单解析
 
-| 平台 | 文件格式 | 自动检测 | 编码处理 |
-|---|---|---|---|
-| 微信支付 | `.xlsx` | 子目录 `wechat/` | openpyxl 直接读取 |
-| 支付宝 | `.csv` | 子目录 `ant/` | GBK → UTF-8 自动探测 |
-| 中国银行（BOC） | `.pdf` / `.csv` | 子目录 `boc/` | UTF-16 LE / UTF-8 BOM 自动探测 |
+| 平台 | 文件格式 | 导入方式 | 编码处理 |
+|------|---------|---------|---------|
+| 支付宝 | `.csv` | Web 上传 | GBK → UTF-8 自动探测 |
+| 微信支付 | `.xlsx` | Web 上传 | openpyxl 直接读取 |
+| 中国银行 | `.pdf` | Web 上传 → Celery 异步 OCR | UTF-16 LE / UTF-8 自动探测 |
 
 ### 银行流水 OCR
 
-- **PaddleOCR** 中文识别引擎 — 惰性加载、全局单例，避免重复初始化
-- **亮度分析法** — 自动检测表格边界并精确裁剪，消除无关背景
-- **逐页容错** — 任一页 OCR 失败即终止并报错，避免生成残缺数据
-- **布局注册表** — 新增银行只需实现 `BankLayout` 接口 + 注册，不改现有代码
+- **PaddleOCR** 中文识别引擎 — Celery 异步任务，不阻塞前端
+- **亮度分析法** — 自动检测表格边界并精确裁剪
+- **进度反馈** — 前端实时显示处理进度
+- **布局注册表** — 新增银行只需实现 `BankLayout` 接口并注册
 
 ### 内部转账过滤
 
-自动识别并剔除不影响总资产的内部资金流动，确保消费统计反映真实支出：
+自动识别并剔除不影响总资产的内部资金流动：
 
 | 平台 | 判定规则 |
-|---|---|
+|------|---------|
 | 支付宝 | `tx_type == "不计收支"` |
 | 微信 | category 含"充值"/"提现"/"零钱" |
 
-内部转账金额独立展示于平台统计中，消费统计仅基于真实外部交易。
+### 前端功能
 
-### 分析维度
-
-- **总支出 / 总收入 / 月均支出**
-- **各平台消费统计与对比**
-- **月度趋势** — 可切换平台查看
-- **消费类别分布** — 饼图 + 条形图 + 排名列表
+- **仪表盘** — 总支出 / 总收入 / 月均支出 / 各平台消费统计
+- **渠道数据表** — 支付宝 / 微信 / 中国银行三个独立视图，支持筛选、排序、列配置
+- **导入中心** — 多文件上传，异步处理，进度实时显示
+- **统计分析** — 月度趋势 / 平台对比 / 类别分布图表
 
 ---
 
-## 扩展：新增银行（以 ICBC 为例）
+## API 接口
 
-三步完成，**不修改现有代码**：
-
-1. **`ocr/layouts/icbc.py`** — 实现 `IcbcLayout(BankLayout)`，定义列坐标、行分组、转 Transaction
-2. **`ocr/layouts/__init__.py`** — 注册 `register_layout("icbc", IcbcLayout)`
-3. **`ingest/parsers/icbc.py`** — 解析 ICBC 格式 CSV 为 Transaction
-
-注册后，启动 GUI（`uv run paycheck`），在 **导入** 页的银行类型下拉框中即可选择 `ICBC`。然后通过「开始转换 PDF→CSV」和「导入并合并」按钮完成处理。
-
----
-
-## 故障排查
-
-| 问题 | 排查方向 |
-|---|---|
-| `PaddleOCR` 初始化失败 | 确认安装时选择了正确版本（`--extra gpu` 需 CUDA 12.6）；GPU 显存不足时可改用 `uv sync --extra cpu` 回退 CPU |
-| OCR 识别结果乱码 | 确认 PDF 为可渲染的扫描件（非图片嵌入型 PDF）；检查 `boc/` 目录下 PNG 图片是否裁剪正确 |
-| CSV 编码错误 | 支付宝默认 GBK，银行默认 UTF-16 LE，工具会自动探测；如仍失败，手动转为 UTF-8 再试 |
-| 微信 XLSX 解析失败 | 确认微信导出的为 `.xlsx` 格式（非 `.csv`）；检查文件是否被加密或损坏 |
-| 交易明细无数据显示 | 确认已通过「导入并合并」成功导入账单文件；检查数据库是否正常 |
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/channels/` | 渠道列表 |
+| GET | `/api/channels/{id}/` | 渠道详情 |
+| GET | `/api/transactions/` | 交易列表（支持筛选/排序/分页） |
+| POST | `/api/ingest/upload/` | 上传账单文件 |
+| POST | `/api/ingest/import/` | 触发导入任务 |
+| GET | `/api/ingest/tasks/{id}/` | 查询异步任务状态 |
+| GET | `/api/analysis/summary/` | 汇总统计数据 |
+| GET | `/api/analysis/monthly/` | 月度趋势数据 |
+| GET | `/api/analysis/category/` | 类别分布数据 |
 
 ---
 
-## 依赖
+## 开发指南
 
-- Python 3.10–3.11
-- PaddleOCR ≥ 3.6.0 + PaddlePaddle（中文 OCR 引擎，可选 CPU/GPU 版）
-- PyMuPDF（PDF 渲染）
-- Pillow（图像处理）
-- openpyxl（微信 XLSX 解析）
-- opencv-python（图像处理）
-- torch（PaddleOCR 底层）
-- PySide6（图形界面）
+### 后端
+
+```bash
+cd backend
+uv run manage.py runserver       # 开发服务器
+uv run manage.py makemigrations  # 生成迁移
+uv run manage.py migrate         # 执行迁移
+uv run manage.py shell           # Django shell
+uv run manage.py test            # 运行测试
+```
+
+### 前端
+
+```bash
+cd frontend
+npm run dev      # 开发服务器（HMR）
+npm run build    # 生产构建
+npm run lint     # 代码检查
+npm run preview  # 预览生产构建
+```
+
+### 新增银行支持
+
+1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
+2. `backend/apps/ingest/parsers/` — 实现解析器
+3. 注册布局并更新渠道配置
+
+### Git 规范
+
+- `feat/xxx` — 新功能分支
+- `fix/xxx` — 修复分支
+- 小步提交，保持提交历史清晰
+- Worktree 放在 `.worktrees/`，已在 `.git/info/exclude` 忽略
 
 ---
 

@@ -1,32 +1,16 @@
-"""PayCheck - 个人账单统计工具 (PySide6 GUI)"""
+"""PayCheck - 个人账单统计工具 (Django + React 前后端分离)
 
-import os
-import sys
-
-# 静默 Qt 字体 OpenType 警告
-os.environ["QT_LOGGING_RULES"] = "qt.text.font.db=false"
-
-from PySide6.QtWidgets import QApplication
-from paycheck.core.log import setup_logging
-from paycheck.gui.main_window import MainWindow
-from paycheck.gui.theme import ThemeManager
+启动方式:
+  - 后端: cd backend && uv run manage.py runserver
+  - 前端: cd frontend && npm run dev
+"""
 
 
 def main():
-    setup_logging(verbose=False)
-    app = QApplication(sys.argv)
-    app.setApplicationName("PayCheck")
-
-    # 主题管理 — 在创建窗口前加载并应用
-    theme_mgr = ThemeManager()
-    theme_mgr.load_preference()
-    theme_mgr.apply(app)
-
-    window = MainWindow(theme_mgr=theme_mgr)
-    window.resize(1100, 800)
-    window.show()
-
-    sys.exit(app.exec())
+    print("PayCheck v1.0.0")
+    print("请分别启动后端和前端服务：")
+    print("  后端: cd backend && uv run manage.py runserver")
+    print("  前端: cd frontend && npm run dev")
 
 
 if __name__ == "__main__":
