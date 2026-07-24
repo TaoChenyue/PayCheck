@@ -33,6 +33,9 @@ export function useImportJobs() {
   return useQuery({
     queryKey: ['importJobs'],
     queryFn: fetchJobs,
+    staleTime: 10_000,     // 10s — import jobs change frequently during processing
+    gcTime: 5 * 60_000,
+    retry: 2,
   });
 }
 
@@ -45,6 +48,9 @@ export function useImportJob(id: number, { enabled = true, refetchInterval }: {
     queryFn: () => fetchJob(id),
     enabled,
     refetchInterval,
+    staleTime: 0,           // always fresh during polling
+    gcTime: 10 * 60_000,
+    retry: 2,
   });
 }
 

@@ -111,7 +111,7 @@ def parse_boc_csv(filepath: str) -> List[dict]:
         cp_bank_str = values[col_map.get(FIELD_CP_BANK, -1)].strip() if col_map.get(FIELD_CP_BANK) is not None and col_map[FIELD_CP_BANK] < len(values) else ""
 
         transactions.append({
-            "platform": "bank",
+            "platform": "boc",
             "time": full_time,
             "category": values[col_map.get(BANK_COL_TX_NAME, -1)].strip()
             if col_map.get(BANK_COL_TX_NAME) is not None and col_map[BANK_COL_TX_NAME] < len(values) else "",

@@ -36,7 +36,7 @@ interface FileUploaderProps {
 
 // ── Component ──
 
-export default function FileUploader(_props: FileUploaderProps) {
+export default function FileUploader({ onUploadSuccess }: FileUploaderProps) {
   const [channel, setChannel] = useState<ChannelType>('alipay');
   const [fileList, setFileList] = useState<UploadFile[]>([]);
 
@@ -55,15 +55,22 @@ export default function FileUploader(_props: FileUploaderProps) {
     setFileList((prev) => prev.filter((f) => f.uid !== file.uid));
   }, []);
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     const files: File[] = fileList
       .map((f) => f.originFileObj)
       .filter((f): f is NonNullable<typeof f> => f != null);
 
     if (files.length === 0) return;
 
-    uploadMutation.mutate({ channel, files });
-  }, [channel, fileList, uploadMutation]);
+    try {
+      const result = await uploadMutation.mutateAsync({ channel, files });
+      if (result && onUploadSuccess) {
+        onUploadSuccess(result);
+      }
+    } catch {
+      // Error handled by API client interceptor
+    }
+  }, [channel, fileList, uploadMutation, onUploadSuccess]);
 
   const beforeUpload: UploadProps['beforeUpload'] = useCallback(() => false, []);
 

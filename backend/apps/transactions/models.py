@@ -42,6 +42,9 @@ class Transaction(models.Model):
             models.Index(fields=["amount"]),
             models.Index(fields=["tx_type"]),
             models.Index(fields=["counterparty"]),
+            models.Index(fields=["category"]),
+            models.Index(fields=["-time", "platform"]),
+            models.Index(fields=["-time", "tx_type"]),
         ]
 
     def __str__(self):

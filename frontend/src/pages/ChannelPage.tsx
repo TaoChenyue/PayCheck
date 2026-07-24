@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Typography } from 'antd';
 import { useTransactions } from '@/hooks/useTransactions';
 import ChannelTable from '@/components/tables/ChannelTable';
+import EmptyState from '@/components/common/EmptyState';
 import type { TransactionQueryParams, ChannelType } from '@/types';
 
 const { Title } = Typography;
@@ -92,15 +93,22 @@ export default function ChannelPage() {
       <Title level={3} style={{ marginBottom: 24 }}>
         {title}
       </Title>
-      <ChannelTable
-        data={transactions}
-        loading={isLoading}
-        pagination={{ page, pageSize, total }}
-        onPageChange={handlePageChange}
-        onSearch={handleSearch}
-        onSort={handleSort}
-        channel={channel as 'alipay' | 'wechat' | 'boc'}
-      />
+      {!isLoading && total === 0 && !debouncedSearch ? (
+        <EmptyState
+          description={`暂无${CHANNEL_LABELS[channel ?? ''] ?? '渠道'}账单数据，请先导入账单文件。`}
+        />
+      ) : (
+        <ChannelTable
+          data={transactions}
+          loading={isLoading}
+          pagination={{ page, pageSize, total }}
+          onPageChange={handlePageChange}
+          onSearch={handleSearch}
+          onSort={handleSort}
+          channel={channel as 'alipay' | 'wechat' | 'boc'}
+          enableVirtual={pageSize >= 100}
+        />
+      )}
     </div>
   );
 }

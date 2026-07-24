@@ -52,6 +52,9 @@ export function useTransactions(params: TransactionQueryParams) {
     queryKey: ['transactions', params],
     queryFn: () => fetchTransactions(params),
     placeholderData: (prev) => prev,
+    staleTime: 30_000,    // 30s before refetch — data is static until new import
+    gcTime: 5 * 60_000,   // 5min garbage collection
+    retry: 2,
   });
 }
 
@@ -60,6 +63,9 @@ export function useTransaction(id: number) {
     queryKey: ['transactions', id],
     queryFn: () => fetchTransaction(id),
     enabled: !!id,
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
+    retry: 2,
   });
 }
 

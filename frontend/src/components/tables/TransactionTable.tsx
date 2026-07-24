@@ -123,6 +123,8 @@ interface TransactionTableProps {
   onSearch: (search: string) => void;
   onSort: (field: string, direction: 'asc' | 'desc') => void;
   isBank?: boolean;
+  /** Enable virtual scrolling for large datasets (pageSize >= 100) */
+  enableVirtual?: boolean;
 }
 
 // ── component ──
@@ -135,6 +137,7 @@ export default function TransactionTable({
   onSearch,
   onSort,
   isBank = false,
+  enableVirtual = false,
 }: TransactionTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [searchValue, setSearchValue] = useState('');
@@ -281,11 +284,14 @@ export default function TransactionTable({
           pageSize: pagination.pageSize,
           total: pagination.total,
           showSizeChanger: true,
+          pageSizeOptions: ['20', '50', '100', '200'],
           showTotal: (total: number) => `共 ${total} 条`,
           onChange: onPageChange,
         }}
-        scroll={{ x: 'max-content' }}
+        scroll={{ x: 'max-content', y: enableVirtual ? 600 : undefined }}
+        virtual={enableVirtual}
         size="middle"
+        rowKey="key"
       />
     </div>
   );
