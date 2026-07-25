@@ -169,7 +169,7 @@ grep -r "from paycheck\." backend/  # 应无输出（已验证）
 **为什么放在 `config/logging.py` 而非 `apps/core/`？**
 - `config/` 是 Django 项目的配置目录，日志配置属于基础设施层
 - 避免创建 `apps/core/` 这个仅有单文件的 app
-- 保持 `config/` 目录的职责内聚（settings、urls、celery、wsgi、logging）
+- 保持 `config/` 目录的职责内聚（settings、urls、wsgi、logging）
 
 **迁移后的使用方式**：
 ```python
@@ -299,8 +299,10 @@ version = "1.0.1"  # 从 0.1.0 同步升级
 │   ├── config/                 # Django 配置
 │   │   ├── settings.py
 │   │   ├── urls.py
-│   │   ├── celery.py           # Celery 配置
-│   │   └── logging.py          # 日志配置（文件轮转 + 控制台）
+│   │   ├── logging.py          # 日志配置（文件轮转 + 控制台）
+│   │   ├── exception_handler.py
+│   │   ├── asgi.py
+│   │   └── wsgi.py
 │   ├── manage.py
 │   └── pyproject.toml
 ```
@@ -314,18 +316,7 @@ version = "1.0.1"  # 从 0.1.0 同步升级
 
 #### 开发指南更新
 
-删除对 `src/paycheck/` 的引用，统一指向 `backend/`：
-
-```diff
-- ### 新增银行支持
-- 1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
-- 2. `backend/apps/ingest/parsers/` — 实现解析器
-- 3. 注册布局并更新渠道配置
-+ ### 新增银行支持
-+ 1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
-+ 2. `backend/apps/ingest/parsers/` — 实现解析器（返回 `List[dict]`）
-+ 3. 注册布局并更新渠道配置
-```
+删除对 `src/paycheck/` 的引用，统一指向 `backend/`。同时移除了"新增银行支持"章节（该内容已由 OCR 布局接口文档覆盖，无需在 README 中重复）。
 
 ### 5.2 DESIGN.md 变更（本次更新）
 
@@ -475,10 +466,10 @@ log.py        src/          统一切换       迁移 & 验证    刷新 & 提�
 **决策**：选择 **A（`backend/config/logging.py`）**
 
 **理由**：
-- 日志属于基础设施/配置层，与 settings、celery 同级合理
+- 日志属于基础设施/配置层，与 settings、urls 同级合理
 - 避免为单一文件创建完整 Django app（选项 B 过度工程）
 - 避免引入非 Django 惯例的 `utils/` 目录（选项 C 不符合 Django 惯例）
-- `config/` 目录现有文件（settings、urls、celery、wsgi、asgi）均为配置/基础设施，logging 自然属于此层
+- `config/` 目录现有文件（settings、urls、wsgi、asgi、exception_handler）均为配置/基础设施，logging 自然属于此层
 
 ### ADR-007: 测试目录迁移
 
