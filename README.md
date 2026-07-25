@@ -203,7 +203,7 @@ npm run dev
 - **PaddleOCR** 中文识别引擎 — ThreadPoolExecutor 异步任务，不阻塞前端
 - **亮度分析法** — 自动检测表格边界并精确裁剪
 - **进度反馈** — 前端实时显示处理进度
-- **布局注册表** — 新增银行只需实现 `BankLayout` 接口并注册
+- **布局注册表** — 支持 `BankLayout` 接口扩展
 
 ### 内部转账过滤
 
@@ -266,12 +266,6 @@ npm run build    # 生产构建
 npm run lint     # 代码检查
 npm run preview  # 预览生产构建
 ```
-
-### 新增银行支持
-
-1. `backend/apps/ocr_service/layouts/` — 实现 `BankLayout` 接口
-2. `backend/apps/ingest/parsers/` — 实现解析器
-3. 注册布局并更新渠道配置
 
 ### Git 规范
 
