@@ -1,7 +1,7 @@
 """
 Django settings for PayCheck backend.
 
-Uses SQLite for development, DRF for REST API, Celery for async tasks.
+Uses SQLite for development, DRF for REST API, ThreadPoolExecutor for async tasks.
 """
 
 import os
@@ -28,7 +28,6 @@ INSTALLED_APPS = [
     # Third-party
     "rest_framework",
     "corsheaders",
-    "django_celery_results",
     "django_filters",
     # Local apps
     "apps.channels",
@@ -105,26 +104,6 @@ REST_FRAMEWORK = {
     ],
     "EXCEPTION_HANDLER": "config.exception_handler.custom_exception_handler",
 }
-
-# ── Celery ─────────────────────────────────────────────────
-
-CELERY_BROKER_URL = os.environ.get(
-    "CELERY_BROKER_URL",
-    "sqla+sqlite:///" + str(BASE_DIR / "db.sqlite3"),
-)
-CELERY_BROKER_TRANSPORT_OPTIONS = {
-    "polling_interval": 0.5,
-}
-CELERY_RESULT_BACKEND = "django-db"
-CELERY_RESULT_EXTENDED = True
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 3600  # 1 hour max
-CELERY_TASK_SOFT_TIME_LIMIT = 3300  # 55 min soft
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
-CELERY_ACCEPT_CONTENT = ["json"]
-CELERY_TASK_SERIALIZER = "json"
-CELERY_RESULT_SERIALIZER = "json"
-CELERY_TIMEZONE = "Asia/Shanghai"
 
 # ── CORS ───────────────────────────────────────────────────
 

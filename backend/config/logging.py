@@ -163,11 +163,6 @@ LOGGING: dict = {
             "level": "WARNING",
             "propagate": False,
         },
-        "celery": {
-            "handlers": ["console", "file"],
-            "level": "INFO",
-            "propagate": False,
-        },
     },
 }
 

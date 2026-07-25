@@ -1,3 +1,2 @@
-from .celery import app as celery_app
-
-__all__ = ("celery_app",)
+# This file intentionally left empty.
+# Celery app import removed — tasks now run via ThreadPoolExecutor.

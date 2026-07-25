@@ -11,6 +11,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from apps.ingest.models import ImportJob, ImportFile
 from apps.ingest.serializers import ImportJobSerializer
 from apps.ingest.tasks import process_import_job
+from apps.ingest.executor import get_executor
 
 
 class ImportUploadView(APIView):
@@ -94,8 +95,8 @@ class ImportUploadView(APIView):
             )
             import_files.append(import_file)
 
-        # 启动 Celery 异步处理
-        process_import_job.delay(job.id)
+        # 启动异步处理
+        get_executor().submit(process_import_job, job.id)
 
         return Response(
             {
