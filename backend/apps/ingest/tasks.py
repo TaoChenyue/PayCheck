@@ -1,4 +1,4 @@
-"""数据导入 Celery 异步任务
+"""数据导入异步任务（去 Celery 化）
 
 处理文件上传 → 解析 → 渠道表写入 → 统一交易表同步 的完整流程。
 """
@@ -7,7 +7,6 @@ import hashlib
 import os
 import tempfile
 
-from celery import shared_task
 from django.db import IntegrityError
 from django.utils import timezone
 
@@ -90,59 +89,68 @@ def _sync_to_transactions(tx_dicts, platform, source_model_label):
     return created, skipped
 
 
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def process_import_file(self, import_file_id):
-    """Process a single import file: parse → channel table → transactions sync."""
-    try:
-        import_file = ImportFile.objects.get(id=import_file_id)
-    except ImportFile.DoesNotExist:
-        return {"error": f"ImportFile {import_file_id} not found"}
-
+def _process_import_file_once(import_file_id: int) -> dict:
+    """单次执行文件解析（内部函数，不含重试）"""
+    import_file = ImportFile.objects.get(id=import_file_id)
     import_file.status = "processing"
     import_file.save(update_fields=["status"])
 
-    try:
-        file_path = import_file.filename  # stored as full path from upload
+    file_path = import_file.filename
 
-        if import_file.file_type == "alipay_csv":
-            txns = parse_alipay_csv(file_path)
-            platform = "alipay"
-        elif import_file.file_type == "wechat_xlsx":
-            txns = parse_wechat_xlsx(file_path)
-            platform = "wechat"
-        elif import_file.file_type in ("boc_csv", "boc_pdf"):
-            # boc_pdf should have been converted to CSV by OCR task first
-            txns = parse_boc_csv(file_path)
-            platform = "boc"
-        else:
-            raise ValueError(f"Unknown file type: {import_file.file_type}")
+    if import_file.file_type == "alipay_csv":
+        txns = parse_alipay_csv(file_path)
+        platform = "alipay"
+    elif import_file.file_type == "wechat_xlsx":
+        txns = parse_wechat_xlsx(file_path)
+        platform = "wechat"
+    elif import_file.file_type in ("boc_csv", "boc_pdf"):
+        txns = parse_boc_csv(file_path)
+        platform = "boc"
+    else:
+        raise ValueError(f"Unknown file type: {import_file.file_type}")
 
-        created, skipped = _sync_to_transactions(
-            txns, platform, import_file.file_type
-        )
+    created, skipped = _sync_to_transactions(txns, platform, import_file.file_type)
 
-        import_file.status = "completed"
-        import_file.save(update_fields=["status"])
+    import_file.status = "completed"
+    import_file.save(update_fields=["status"])
 
-        return {"created": created, "skipped": skipped}
-
-    except Exception as exc:
-        import_file.status = "failed"
-        import_file.error_msg = str(exc)
-        import_file.save(update_fields=["status", "error_msg"])
-        raise self.retry(exc=exc)
+    return {"created": created, "skipped": skipped}
 
 
-@shared_task(bind=True, max_retries=1, time_limit=3600)
-def process_pdf_ocr(self, import_file_id):
-    """OCR processing for BOC PDF: PDF → CSV → parse → sync."""
+def process_import_file(import_file_id: int) -> dict:
+    """处理单个导入文件：解析 → 渠道表 → 交易表（同步）
+
+    简单重试策略：max_retries=1，失败即标记 failed。
+    """
+    max_retries = 1
+
+    for attempt in range(max_retries + 1):
+        try:
+            return _process_import_file_once(import_file_id)
+        except Exception as exc:
+            if attempt < max_retries:
+                continue
+            # 最后一次也失败了
+            try:
+                import_file = ImportFile.objects.get(id=import_file_id)
+                import_file.status = "failed"
+                import_file.error_msg = str(exc)
+                import_file.save(update_fields=["status", "error_msg"])
+            except ImportFile.DoesNotExist:
+                pass
+            raise
+
+    return {"error": "max_retries exceeded"}
+
+
+def process_pdf_ocr(import_file_id: int) -> dict:
+    """OCR 处理 BOC PDF：PDF → CSV → 解析 → 入库"""
     import_file = ImportFile.objects.get(id=import_file_id)
     import_file.status = "processing"
     import_file.save(update_fields=["status"])
 
     try:
         from apps.ocr_service.pipeline import pdf_to_csv
-        import tempfile as tmpfile
 
         pdf_path = import_file.filename
         output_dir = os.path.dirname(pdf_path)
@@ -152,11 +160,9 @@ def process_pdf_ocr(self, import_file_id):
         )
 
         result = pdf_to_csv(pdf_path, "boc", output_path=output_path)
-
         if result != 0:
             raise RuntimeError("OCR pipeline failed")
 
-        # Now parse the generated CSV
         txns = parse_boc_csv(output_path)
         created, skipped = _sync_to_transactions(txns, "boc", "boc_pdf")
 
@@ -172,15 +178,8 @@ def process_pdf_ocr(self, import_file_id):
         raise
 
 
-@shared_task
-def process_import_job(job_id):
-    """Orchestrate import job: dispatch sub-tasks, update progress.
-
-    Uses Celery chord to avoid deadlock — subtasks run in parallel,
-    and the chord callback updates job status when all complete.
-    """
-    from celery import chord
-
+def process_import_job(job_id: int) -> dict:
+    """编排导入任务：并行分发子任务，全部完成后更新 Job 状态"""
     try:
         job = ImportJob.objects.get(id=job_id)
     except ImportJob.DoesNotExist:
@@ -190,30 +189,29 @@ def process_import_job(job_id):
     job.save(update_fields=["status"])
 
     import_files = job.files.all()
-    subtasks = []
-
-    for import_file in import_files:
-        if import_file.file_type == "boc_pdf":
-            subtask = process_pdf_ocr.s(import_file.id)
-        else:
-            subtask = process_import_file.s(import_file.id)
-        subtasks.append(subtask)
-
-    if not subtasks:
+    if not import_files:
         job.status = "completed"
         job.completed_at = timezone.now()
         job.save(update_fields=["status", "completed_at"])
         return {"total": 0, "processed": 0}
 
-    # Chord: run all subtasks in parallel, then call _on_import_job_complete
-    chord(subtasks)(_on_import_job_complete.s(job_id))
+    # 构建任务列表
+    from apps.ingest.executor import run_parallel
 
-    return {"job_id": job_id, "status": "processing", "total_files": len(subtasks)}
+    def make_task(import_file):
+        if import_file.file_type == "boc_pdf":
+            return lambda fid=import_file.id: process_pdf_ocr(fid)
+        else:
+            return lambda fid=import_file.id: process_import_file(fid)
+
+    tasks = [make_task(f) for f in import_files]
+    run_parallel(tasks, callback=_on_import_job_complete, callback_args=(job_id,))
+
+    return {"job_id": job_id, "status": "processing", "total_files": len(tasks)}
 
 
-@shared_task
-def _on_import_job_complete(results, job_id):
-    """Chord callback: update ImportJob status after all subtasks complete."""
+def _on_import_job_complete(results: list, job_id: int) -> None:
+    """所有子任务完成后的回调：更新 ImportJob 状态"""
     try:
         job = ImportJob.objects.get(id=job_id)
     except ImportJob.DoesNotExist:
