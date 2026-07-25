@@ -34,7 +34,7 @@
 核心特性：
 
 - **多源聚合** — 微信 `.xlsx`、支付宝 `.csv`、银行 `.pdf` 统一导入
-- **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，Celery 异步处理
+- **自动 OCR** — 基于 PaddleOCR 的银行流水 PDF 识别管线，ThreadPoolExecutor 异步处理
 - **智能过滤** — 自动剔除"充值/提现/零钱"等内部转账，还原真实消费
 - **Web 界面** — React 单页应用，左侧手风琴菜单，响应式布局
 - **分渠道管理** — 支付宝、微信、中国银行三个独立数据表，支持筛选排序和列配置
@@ -46,16 +46,9 @@
 ```
 ┌───────────────────────┐     ┌──────────────────────────────────┐
 │     React 前端         │     │        Django 后端                │
-│  (Vite + Ant Design)  │◄───►│  (DRF + Celery + SQLite)         │
+│  (Vite + Ant Design)  │◄───►│  (DRF + ThreadPoolExecutor + SQLite)         │
 │  localhost:5173       │ API │  localhost:8000                  │
-└───────────────────────┘     └──────────────┬───────────────────┘
-                                             │
-                                             ▼
-                                    ┌─────────────────┐
-                                    │  Celery Worker   │
-                                    │  (SQLite Broker) │
-                                    │  (PDF OCR 异步)  │
-                                    └─────────────────┘
+└───────────────────────┘     └──────────────────────────────────┘
 ```
 
 ### 后端
@@ -64,8 +57,7 @@
 |------|------|
 | Django 5.1 | Web 框架 |
 | Django REST Framework 3.15 | REST API |
-| Celery 5.4 | 异步任务队列（PDF OCR） |
-| SQLite 3.x | 数据库 + Celery broker（零运维，可无缝切换 PostgreSQL） |
+| SQLite 3.x | 数据库（零运维，可无缝切换 PostgreSQL） |
 | PaddleOCR | 银行 PDF 流水 OCR 识别 |
 
 ### 前端
@@ -98,7 +90,6 @@ PayCheck/
 │   ├── config/                 # Django 配置
 │   │   ├── settings.py
 │   │   ├── urls.py
-│   │   ├── celery.py           # Celery 配置
 │   │   ├── logging.py          # 日志配置（RotatingFileHandler）
 │   │   └── exception_handler.py
 │   ├── tests/                  # 测试（pytest + Django）
@@ -177,14 +168,7 @@ uv run manage.py runserver
 
 后端运行在 http://localhost:8000
 
-### 4. 启动 Celery Worker（另开终端）
-
-```bash
-cd backend
-uv run celery -A config worker --loglevel=info --pool=solo
-```
-
-### 5. 安装并启动前端
+### 4. 安装并启动前端
 
 ```bash
 cd frontend
@@ -198,7 +182,7 @@ npm run dev
 
 前端运行在 http://localhost:5173
 
-### 6. 打开浏览器
+### 5. 打开浏览器
 
 访问 **http://localhost:5173** 即可使用。
 
@@ -212,11 +196,11 @@ npm run dev
 |------|---------|---------|---------|
 | 支付宝 | `.csv` | Web 上传 | GBK → UTF-8 自动探测 |
 | 微信支付 | `.xlsx` | Web 上传 | openpyxl 直接读取 |
-| 中国银行 | `.pdf` | Web 上传 → Celery 异步 OCR | UTF-16 LE / UTF-8 自动探测 |
+| 中国银行 | `.pdf` | Web 上传 → ThreadPoolExecutor 异步 OCR | UTF-16 LE / UTF-8 自动探测 |
 
 ### 银行流水 OCR
 
-- **PaddleOCR** 中文识别引擎 — Celery 异步任务，不阻塞前端
+- **PaddleOCR** 中文识别引擎 — ThreadPoolExecutor 异步任务，不阻塞前端
 - **亮度分析法** — 自动检测表格边界并精确裁剪
 - **进度反馈** — 前端实时显示处理进度
 - **布局注册表** — 新增银行只需实现 `BankLayout` 接口并注册
