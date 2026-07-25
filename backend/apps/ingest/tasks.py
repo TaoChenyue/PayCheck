@@ -5,7 +5,6 @@
 
 import hashlib
 import os
-import tempfile
 
 from django.db import IntegrityError
 from django.utils import timezone
