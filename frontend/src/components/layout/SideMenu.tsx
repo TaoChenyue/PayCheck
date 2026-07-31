@@ -9,9 +9,10 @@ import {
   WechatOutlined,
   DashboardOutlined,
   PieChartOutlined,
+  FilePdfOutlined,
 } from '@ant-design/icons';
 function getOpenKeys(pathname: string): string[] {
-  if (pathname === '/import' || pathname.startsWith('/channels')) {
+  if (pathname === '/import' || pathname === '/pdf-to-csv' || pathname.startsWith('/channels')) {
     return ['/data'];
   }
   if (pathname === '/dashboard' || pathname === '/analysis') {
@@ -30,6 +31,11 @@ const menuItems: MenuProps['items'] = [
         key: '/import',
         icon: <ImportOutlined />,
         label: '数据导入',
+      },
+      {
+        key: '/pdf-to-csv',
+        icon: <FilePdfOutlined />,
+        label: 'PDF 转 CSV',
       },
       {
         key: '/channels/alipay',
