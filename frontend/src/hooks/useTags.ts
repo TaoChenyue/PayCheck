@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/api/client';
 import type { Tag, PaginatedResponse } from '@/types';
 
-const TAGS_URL = '/transactions/tags/';
+const TAGS_URL = '/tags/';
 
 async function fetchTags(): Promise<PaginatedResponse<Tag>> {
   const { data } = await apiClient.get(TAGS_URL, { params: { page_size: 200 } });
