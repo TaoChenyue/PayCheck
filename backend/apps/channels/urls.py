@@ -1,12 +1,4 @@
-"""渠道管理 URL 路由"""
+"""渠道管理 URL 路由。
 
-from rest_framework.routers import DefaultRouter
-
-from apps.channels.views import AlipayTxViewSet, WechatTxViewSet, BocTxViewSet
-
-router = DefaultRouter()
-router.register(r"alipay", AlipayTxViewSet, basename="alipay")
-router.register(r"wechat", WechatTxViewSet, basename="wechat")
-router.register(r"boc", BocTxViewSet, basename="boc")
-
-urlpatterns = router.urls
+ADR-008 决策：路由注册已移除。models + admin 保留。
+"""
