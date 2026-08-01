@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '@/api/client';
 import type {
   Transaction,
-  TransactionWrite,
   TransactionQueryParams,
   BatchTagsRequest,
   BatchTagsResponse,
@@ -18,16 +17,6 @@ async function fetchTransactions(params: TransactionQueryParams): Promise<Pagina
 
 async function fetchTransaction(id: number): Promise<Transaction> {
   const { data } = await apiClient.get(`${TRANSACTIONS_URL}${id}/`);
-  return data;
-}
-
-async function createTransaction(tx: TransactionWrite): Promise<Transaction> {
-  const { data } = await apiClient.post(TRANSACTIONS_URL, tx);
-  return data;
-}
-
-async function updateTransaction(id: number, tx: Partial<TransactionWrite>): Promise<Transaction> {
-  const { data } = await apiClient.patch(`${TRANSACTIONS_URL}${id}/`, tx);
   return data;
 }
 
@@ -66,22 +55,6 @@ export function useTransaction(id: number) {
     staleTime: 60_000,
     gcTime: 10 * 60_000,
     retry: 2,
-  });
-}
-
-export function useCreateTransaction() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: createTransaction,
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['transactions'] }); },
-  });
-}
-
-export function useUpdateTransaction() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, data }: { id: number; data: Partial<TransactionWrite> }) => updateTransaction(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['transactions'] }); },
   });
 }
 

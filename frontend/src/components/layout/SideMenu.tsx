@@ -10,6 +10,7 @@ import {
   DashboardOutlined,
   PieChartOutlined,
   FilePdfOutlined,
+  TagsOutlined,
 } from '@ant-design/icons';
 function getOpenKeys(pathname: string): string[] {
   if (pathname === '/import' || pathname.startsWith('/import/') || pathname.startsWith('/channels')) {
@@ -51,6 +52,11 @@ const menuItems: MenuProps['items'] = [
         key: '/channels/boc',
         icon: <BankOutlined />,
         label: '银行账单',
+      },
+      {
+        key: '/tags',
+        icon: <TagsOutlined />,
+        label: '标签管理',
       },
     ],
   },
