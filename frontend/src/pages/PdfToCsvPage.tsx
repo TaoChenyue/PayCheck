@@ -51,9 +51,9 @@ type PageStage = 'select' | 'uploading' | 'converting' | 'done';
 
 // ── Helpers ──
 
-// TODO: 后端缺少文件下载端点（ImportJobViewSet 仅有 list/retrieve，无 download action）。
-// 需要后端在 apps/ingest/views.py 中添加文件下载视图并在 urls.py 注册后，前端再启用下载按钮。
-// 参考端点格式：`/api/import/files/${fileId}/download/`
+function getDownloadUrl(fileId: number): string {
+  return `/api/import/files/${fileId}/download/`;
+}
 
 function getStatusTag(status: JobStatus) {
   const config = STATUS_CONFIG[status];
@@ -386,8 +386,8 @@ export default function PdfToCsvPage() {
                                 type="link"
                                 size="small"
                                 icon={<DownloadOutlined />}
-                                disabled
-                                title="后端下载端点暂未实现"
+                                href={getDownloadUrl(file.id)}
+                                target="_blank"
                               >
                                 下载 CSV
                               </Button>
