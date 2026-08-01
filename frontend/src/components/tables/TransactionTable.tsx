@@ -22,7 +22,6 @@ import {
   Select,
   Popover,
   message,
-  Divider,
 } from 'antd';
 import type { MenuProps } from 'antd';
 import {
