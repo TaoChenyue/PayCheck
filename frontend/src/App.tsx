@@ -29,7 +29,7 @@ export default function App() {
               <Route path="/channels/:channel" element={<ChannelPage />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/analysis" element={<AnalysisPage />} />
-              <Route path="/pdf-to-csv" element={<PdfToCsvPage />} />
+              <Route path="/import/pdf-to-csv" element={<PdfToCsvPage />} />
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Route>
           </Routes>

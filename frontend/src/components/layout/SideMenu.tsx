@@ -12,7 +12,7 @@ import {
   FilePdfOutlined,
 } from '@ant-design/icons';
 function getOpenKeys(pathname: string): string[] {
-  if (pathname === '/import' || pathname === '/pdf-to-csv' || pathname.startsWith('/channels')) {
+  if (pathname === '/import' || pathname.startsWith('/import/') || pathname.startsWith('/channels')) {
     return ['/data'];
   }
   if (pathname === '/dashboard' || pathname === '/analysis') {
@@ -33,7 +33,7 @@ const menuItems: MenuProps['items'] = [
         label: '数据导入',
       },
       {
-        key: '/pdf-to-csv',
+        key: '/import/pdf-to-csv',
         icon: <FilePdfOutlined />,
         label: 'PDF 转 CSV',
       },

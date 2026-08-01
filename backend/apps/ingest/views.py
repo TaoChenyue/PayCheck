@@ -3,6 +3,7 @@
 import os
 
 from django.conf import settings
+from django.http import FileResponse, Http404
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -121,3 +122,42 @@ class ImportJobViewSet(ReadOnlyModelViewSet):
 
     queryset = ImportJob.objects.prefetch_related("files").all()
     serializer_class = ImportJobSerializer
+
+
+class ImportFileDownloadView(APIView):
+    """文件下载接口
+
+    GET /api/import/files/{id}/download/
+    返回 CSV 文件。对于 boc_pdf 类型，返回 OCR 生成的 CSV 文件；
+    对于其他类型，返回原始上传文件。
+    """
+
+    def get(self, request, file_id):
+        try:
+            import_file = ImportFile.objects.get(id=file_id)
+        except ImportFile.DoesNotExist:
+            raise Http404("Import file not found")
+
+        file_path = import_file.filename
+
+        # For BOC PDF files, return the OCR-generated CSV
+        if import_file.file_type == "boc_pdf":
+            output_dir = os.path.dirname(file_path)
+            csv_path = os.path.join(
+                output_dir,
+                f"{os.path.splitext(os.path.basename(file_path))[0]}.csv",
+            )
+            if os.path.exists(csv_path):
+                file_path = csv_path
+            else:
+                raise Http404("Converted CSV file not found")
+
+        if not os.path.exists(file_path):
+            raise Http404("File not found on disk")
+
+        filename = os.path.basename(file_path)
+        response = FileResponse(open(file_path, "rb"), content_type="text/csv")
+        response["Content-Disposition"] = (
+            f'attachment; filename="{filename}"'
+        )
+        return response
