@@ -361,15 +361,6 @@ python manage.py migrate_legacy_db [--db-path <path>] [--dry-run]
 
 ## API 接口
 
-### 渠道数据
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/channels/alipay/` | 支付宝交易列表 |
-| GET | `/api/channels/wechat/` | 微信交易列表 |
-| GET | `/api/channels/boc/` | 中国银行交易列表 |
-| GET | `/api/channels/{channel}/{id}/` | 单条交易详情 |
-
 ### 统一交易
 
 | 方法 | 路径 | 说明 |
