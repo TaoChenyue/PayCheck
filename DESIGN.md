@@ -1,9 +1,9 @@
-# PayCheck 去除 Celery Broker 依赖设计方案
+# boc-pdf2csv Python 包架构设计
 
 > **作者**: 架构师
-> **日期**: 2026-07-26
+> **日期**: 2026-08-03
 > **版本**: 1.0
-> **关联 Issue**: TCY-52
+> **关联 Issue**: TCY-77, TCY-78
 
 ---
 
@@ -11,12 +11,14 @@
 
 1. [背景与目标](#1-背景与目标)
 2. [现状分析](#2-现状分析)
-3. [方案对比](#3-方案对比)
-4. [推荐方案：ThreadPoolExecutor + 数据库任务追踪](#4-推荐方案threadpoolexecutor--数据库任务追踪)
-5. [详细设计](#5-详细设计)
-6. [实施步骤](#6-实施步骤)
-7. [核心决策记录（ADR）](#7-核心决策记录adr)
-8. [风险与回滚](#8-风险与回滚)
+3. [架构方案](#3-架构方案)
+4. [项目结构](#4-项目结构)
+5. [CLI 设计](#5-cli-设计)
+6. [核心数据流](#6-核心数据流)
+7. [模块设计](#7-模块设计)
+8. [依赖清单](#8-依赖清单)
+9. [迁移策略](#9-迁移策略)
+10. [ADR](#10-核心决策记录adr)
 
 ---
 
@@ -24,672 +26,726 @@
 
 ### 1.1 问题陈述
 
-PayCheck 项目当前使用 Celery 作为异步任务队列，即使已将 Broker 从 Redis 切换为 SQLAlchemy+SQLite（ADR-005），用户仍需：
+PayCheck 项目经过多轮迭代，已演变为 Django + React 全栈 Web 应用，包含：
 
-1. 安装 `celery`、`sqlalchemy`、`django-celery-results` 等额外依赖
-2. 在启动 Django 开发服务器之外，**另开终端启动 Celery Worker**
-3. 理解 Celery 的配置项（broker_url、result_backend、transport_options 等）
+- **4 个 Django App**（ingest, transactions, channels, analysis）
+- **React SPA 前端**（~30 个组件文件）
+- **Celery + ThreadPoolExecutor 双异步体系**
+- **3 个渠道解析器**（Alipay, WeChat, BOC）
+- **标签系统、高级筛选、统计分析、CSV 导入导出**
 
-对于一个**个人账单统计工具**而言，这套基础设施过于重量级，增加了用户的学习和部署成本。
+项目臃肿，但用户的核心诉求只有一点：**把中国银行导出的 PDF 对账单转成 CSV 文件**。
 
 ### 1.2 目标
 
-1. **去除 Celery 依赖**：从 `pyproject.toml` 中移除 `celery`、`sqlalchemy`、`django-celery-results`
-2. **消除独立 Worker 进程**：用户只需启动 Django 服务器即可使用全部功能
-3. **保持异步能力**：文件解析和 OCR 仍异步执行，不阻塞 HTTP 请求
-4. **保留任务状态追踪**：前端仍可通过 API 查询导入进度
-5. **功能无退化**：导入流程（上传→解析→入库→状态更新）完全保留
+1. **精简化**：从全栈 Web 应用精简为单一 Python CLI 包
+2. **包名**：`boc-pdf2csv`
+3. **项目形式**：`uv` 管理的 Python 项目
+4. **CLI 命令**：`boc-pdf2csv <input_dir> [options]`
+5. **功能**：输入一个文件夹（内含中国银行 PDF），输出一个合并后的 CSV 文件
+6. **无 Web 依赖**：完全去除 Django / DRF / Celery / React
+7. **零数据库**：不依赖任何数据库，纯文件输入输出
+
+### 1.3 非目标
+
+- 不支持微信、支付宝账单
+- 不支持 Web 界面
+- 不支持标签、筛选、统计分析
+- 不支持增量更新或数据库持久化
+- 不保留 BankLayout 插件体系（仅 BOC 硬编码）
 
 ---
 
 ## 2. 现状分析
 
-### 2.1 Celery 使用全景
+### 2.1 当前架构（精简前）
 
 ```
-用户上传文件
-    │
-    ▼
-ImportUploadView (views.py:98)
-    │  process_import_job.delay(job.id)
-    ▼
-┌─────────────────────────────────────────────────────┐
-│  Celery Worker (独立进程)                             │
-│                                                       │
-│  process_import_job (tasks.py:175)                    │
-│    │  chord([subtask1, subtask2, ...])                │
-│    │                                                  │
-│    ├── process_import_file (tasks.py:93)              │
-│    │     parse_alipay_csv / parse_wechat_xlsx         │
-│    │     / parse_boc_csv                               │
-│    │     → channel table → Transaction (with dedup)   │
-│    │                                                  │
-│    └── process_pdf_ocr (tasks.py:136)                 │
-│          pdf_to_csv() → parse_boc_csv()                │
-│          → channel table → Transaction                │
-│                                                       │
-│    _on_import_job_complete (tasks.py:214)             │
-│      chord callback: update ImportJob status          │
-└─────────────────────────────────────────────────────┘
+PayCheck/
+├── pyproject.toml              # 根包（mixed deps, package=false）
+├── backend/
+│   ├── pyproject.toml          # 后端独立包
+│   └── apps/
+│       ├── ingest/             # 导入 → parsers/{alipay, wechat, boc}
+│       ├── ocr_service/        # OCR 管线
+│       │   ├── engine.py       # PaddleOCR 封装
+│       │   ├── pipeline.py     # pdf_to_csv / images_to_csv
+│       │   ├── pdf_render.py   # PDF → 图片渲染
+│       │   └── layouts/        # BankLayout 抽象 + BocLayout
+│       ├── transactions/       # 交易模型、标签、筛选、常量
+│       ├── channels/           # 渠道分表管理
+│       └── analysis/           # 统计分析
+├── frontend/                   # React SPA (~30 组件)
+├── PayCheck/                   # 旧项目副本
+└── DESIGN.md                   # 历史设计文档
 ```
 
-### 2.2 涉及文件清单
+### 2.2 BOC PDF→CSV 核心管线（需保留的代码）
 
-| 文件 | 角色 | 变更类型 |
-|------|------|---------|
-| `backend/config/celery.py` | Celery app 实例化 | **删除** |
-| `backend/config/__init__.py` | `from .celery import app` | **删除该行** |
-| `backend/config/settings.py` | CELERY_* 配置项（L109-127） | **删除** |
-| `backend/config/logging.py` | celery logger（L166-170） | **删除** |
-| `backend/apps/ingest/tasks.py` | 4 个 Celery 任务 | **重构为普通函数 + executor** |
-| `backend/apps/ingest/views.py` | `process_import_job.delay()` 调用 | **改为 executor 调用** |
-| `backend/pyproject.toml` | celery/sqlalchemy/django-celery-results 依赖 | **移除** |
-| `README.md` | Celery Worker 启动说明 | **删除 Worker 章节** |
-
-### 2.3 任务特征分析
-
-| 任务 | 类型 | 典型耗时 | 可并行 | 需要重试 |
-|------|------|---------|--------|---------|
-| `process_import_file` (CSV/XLSX) | I/O 密集 | < 5 秒 | ✅ 多文件并行 | ⚠️ 偶尔（文件损坏） |
-| `process_pdf_ocr` | CPU 密集 | 30 秒 ~ 数分钟 | ✅ 多文件并行 | ⚠️ 偶尔（OCR 失败） |
-| `process_import_job` | 编排层 | < 1 秒 | — | — |
-| `_on_import_job_complete` | 回调 | < 1 秒 | — | — |
-
-**关键洞察**：
-- 所有任务都通过 Django ORM 操作 SQLite，已经有天然的持久化层
-- ImportJob/ImportFile 模型已有 `status` 字段追踪进度
-- Chord 模式（并行子任务 → 汇总回调）用 `ThreadPoolExecutor` 即可等价替代
-- 任务量小（个人使用，单次最多 20 个文件），不需要分布式队列
-
-### 2.4 依赖影响
-
-```toml
-# 当前 backend/pyproject.toml 中需移除的依赖
-"celery>=5.4,<6.0",                  # ~2 MB
-"sqlalchemy>=2.0,<3.0",             # ~10 MB（仅用于 broker transport）
-"django-celery-results>=2.5,<3.0",  # ~50 KB
+```
+PDF 文件
+  │
+  ▼
+pdf_render.py          PyMuPDF 渲染 PDF → PNG 图片（多进程）
+  │  pdf_to_images()
+  │  render_page_cropped()   ── 亮度分析裁剪表格区域
+  ▼
+engine.py              PaddleOCR 识别图片中的文字
+  │  process_image()
+  │  OCRItem {text, cx, cy}
+  ▼
+layouts/boc.py         BOC 列坐标 → 行分组 → 交易结构化
+  │  COLUMNS_3X (12 列定义 @ 3.0× scale)
+  │  group_items_to_rows()
+  │  to_transactions()
+  ▼
+pipeline.py            ★ 编排层：组合上述阶段
+  │  pdf_to_csv(pdf_path, layout_name, scale, output_path)
+  │  images_to_csv(image_paths, layout_name, scale, output_path)
+  ▼
+CSV 文件
 ```
 
-移除后共计减少约 **12 MB** 依赖体积，更重要的是消除概念复杂度。
+### 2.3 涉及文件清单
+
+| 文件 | 行数 | 角色 | 变更类型 |
+|------|------|------|----------|
+| `ocr_service/layouts/boc.py` | 105 | BOC 列坐标 + 交易结构化 | **适配**（简化，去除 Django 依赖） |
+| `ocr_service/layouts/base.py` | 219 | BankLayout 抽象、Row、OCRItem、行分组 | **合并**（与 boc 合并为单文件） |
+| `ocr_service/layouts/__init__.py` | 41 | 布局注册表 | **删除**（硬编码 BOC，无需注册） |
+| `ocr_service/engine.py` | 113 | PaddleOCR 封装 | **保留**（仅改 import 路径） |
+| `ocr_service/pipeline.py` | 276 | 管线编排 + CSV 写出 | **适配**（去除 Django import，改 CLI 化） |
+| `ocr_service/pdf_render.py` | 136 | PDF → 图片渲染 | **保留**（仅改 import 路径） |
+| `ingest/parsers/boc.py` | 134 | 解析 CSV 为 dict（Django 适配层） | **删除**（CLI 直接写 CSV，不需要回读） |
+| `ingest/csv_utils.py` | 28 | CSV 行解析器 | **删除**（pipeline 已有 `_esc_csv`） |
+| 其他全部文件 | — | Django/React/Celery/Alipay/WeChat | **删除** |
+
+**保留/适配核心代码约 850 行，删除约 20,000+ 行。**
 
 ---
 
-## 3. 方案对比
+## 3. 架构方案
 
-### 方案 A：保持现状，不修改
+### 方案 A：保持现状，仅加 CLI 入口（不推荐）
 
-**描述**：继续使用 Celery + SQLAlchemy broker。
+Django 项目内新增 `manage.py boc2csv` 命令。
 
 | 维度 | 评价 |
 |------|------|
-| 部署复杂度 | ❌ 需启动两个进程（Django + Celery Worker） |
-| 依赖体积 | ❌ +12 MB（celery + sqlalchemy + django-celery-results） |
-| 可靠性 | ✅ 成熟的任务队列，支持持久化和重试 |
-| 实现成本 | ✅ 零改动 |
+| 实现成本 | ✅ 最低（~30 行新增） |
+| 部署复杂度 | ❌ 仍需安装 Django + 全部依赖 |
+| 依赖体积 | ❌ ~500 MB（含 Django 生态） |
+| 可分发性 | ❌ 无法作为独立 pip 包发布 |
 
-**结论**：不满足用户"简化部署"的核心诉求。
+### 方案 B：独立 Python 包 + 硬编码 BOC（⭐ 推荐）
 
----
-
-### 方案 B：同步执行
-
-**描述**：在 HTTP 请求中直接调用解析/OCR 函数，去掉所有异步逻辑。
+创建全新 `boc-pdf2csv` 包，从现有代码中提取 BOC OCR 管线，去除所有 Django/Web/数据库依赖。
 
 | 维度 | 评价 |
 |------|------|
-| 部署复杂度 | ✅ 单进程，最简单 |
-| 用户体验 | ❌ OCR 任务（数分钟）会导致 HTTP 超时 |
-| 并发能力 | ❌ 多个文件串行处理，前端完全阻塞 |
-| 实现成本 | ✅ ~50 行改动 |
+| 实现成本 | ⚠️ 中等（提取 + 适配 ~850 行） |
+| 部署复杂度 | ✅ `uv tool install` 或 `pip install` 即可 |
+| 依赖体积 | ✅ 仅 OCR 必要依赖（~4-6 GB 含模型，但纯 Python 包体积小） |
+| 可分发性 | ✅ 独立 pip 包，可发布到 PyPI |
+| CLI 体验 | ✅ `boc-pdf2csv ./pdfs/ -o output.csv` |
 
-**结论**：OCR 任务的阻塞问题无法接受，不适用于 PDF 导入场景。
+### 方案 C：保留 BankLayout 插件体系（过度设计）
 
----
-
-### 方案 C：轻量级异步库（Huey / django-q / django-background-tasks）
-
-**描述**：用更轻量的 Celery 替代品。
+保留抽象基类 + 注册表，支持未来扩展其他银行。
 
 | 维度 | 评价 |
 |------|------|
-| 部署复杂度 | ⚠️ 仍需独立 Worker 进程 |
-| 依赖体积 | ✅ 比 Celery 轻（~1-2 MB） |
-| 功能匹配 | ⚠️ Huey 支持 SQLite，但 chord 语义弱于 Celery |
-| 生态成熟度 | ✅ Huey 维护活跃，django-q 已停止更新 |
+| 扩展性 | ✅ 新增银行只需实现 BankLayout |
+| 复杂度 | ❌ 为"可能"的需求引入 200+ 行抽象层 |
+| 维护成本 | ❌ 需要维护抽象接口兼容性 |
 
-**结论**：仍然需要独立进程，未从根本上解决问题。
-
----
-
-### 方案 D：ThreadPoolExecutor + 数据库任务追踪（⭐ 推荐）
-
-**描述**：使用 Python 标准库 `concurrent.futures.ThreadPoolExecutor` 在 Django 进程内异步执行任务，通过 ImportJob/ImportFile 已有的 `status` 字段追踪进度。
-
-| 维度 | 评价 |
-|------|------|
-| 部署复杂度 | ✅ 单进程，零额外进程 |
-| 依赖体积 | ✅ 零新增依赖（标准库） |
-| 可靠性 | ⚠️ 进程重启时未完成任务丢失（可接受——个人工具，重新上传即可） |
-| 并发能力 | ✅ 多文件并行处理 |
-| 进度追踪 | ✅ 复用 ImportFile/ImportJob.status，前端 API 不变 |
-| 实现成本 | ⚠️ ~200 行改动（tasks.py 重构 + executor 模块新增） |
-
-**结论**：最契合 PayCheck 的定位和约束。
+**结论**：选择 **方案 B**。方案 C 在未来确实需要支持第二个银行时再重构，成本可控。
 
 ---
 
-### 3.5 方案对比总结
+## 4. 项目结构
 
-| | A: 保持现状 | B: 同步执行 | C: 轻量库 | **D: ThreadPoolExecutor** |
-|---|---|---|---|---|
-| 部署进程数 | 2 | 1 | 2 | **1** |
-| 新增依赖 | 无 | 无 | +1-2 MB | **0** |
-| OCR 不阻塞 | ✅ | ❌ | ✅ | **✅** |
-| 多文件并行 | ✅ | ❌ | ✅ | **✅** |
-| 进度可查询 | ✅ | ❌ | ✅ | **✅** |
-| 任务持久化 | ✅ | N/A | ✅ | **⚠️ 进程内** |
-| 实现成本 | 0 | 低 | 中 | **中** |
+### 4.1 目录树
+
+```
+boc-pdf2csv/
+├── pyproject.toml              # uv 项目配置（含 CLI 入口点）
+├── README.md                   # 使用说明
+├── DESIGN.md                   # 本文档
+├── LICENSE                     # MIT
+├── src/
+│   └── boc_pdf2csv/
+│       ├── __init__.py         # 空
+│       ├── __main__.py         # `python -m boc_pdf2csv` 入口（委托给 cli）
+│       ├── cli.py              # ★ CLI 参数解析 + main()
+│       ├── engine.py           # PaddleOCR 引擎封装（从 ocr_service/engine.py 提取）
+│       ├── layout.py           # BOC 布局：列坐标、行分组、交易结构化（合并 base.py + boc.py）
+│       ├── pdf_render.py       # PDF → 图片渲染（从 ocr_service/pdf_render.py 提取）
+│       └── pipeline.py         # 管线编排：PDF → 图片 → OCR → CSV（从 pipeline.py 提取）
+├── tests/
+│   ├── __init__.py
+│   └── test_pipeline.py        # 端到端测试
+└── sample/                     # 开发用示例 PDF
+    └── README.md
+```
+
+### 4.2 模块职责
+
+| 模块 | 职责 | 来源 | 行数（估） |
+|------|------|------|-----------|
+| `cli.py` | argparse CLI，参数校验，调用 pipeline | 新建 | ~60 |
+| `__main__.py` | `python -m boc_pdf2csv` 入口 | 新建 | ~5 |
+| `engine.py` | PaddleOCR 单例 + warmup + process_image | `ocr_service/engine.py` | ~90 |
+| `layout.py` | BOC 列定义、OCRItem/Row 数据结构、行分组、交易转换 | `layouts/base.py` + `boc.py` | ~240 |
+| `pdf_render.py` | PDF→裁剪 PNG 渲染（多进程并行） | `ocr_service/pdf_render.py` | ~110 |
+| `pipeline.py` | 两阶段管线 + CSV 写出 + 批量 PDF 合并 | `ocr_service/pipeline.py` | ~200 |
+
+**总代码量：约 700 行纯业务逻辑，无框架膨胀。**
+
+### 4.3 模块依赖图
+
+```
+cli.py
+  └── pipeline.py
+        ├── pdf_render.py
+        │     └── layout.py (find_table_bounds)
+        ├── engine.py
+        │     └── paddleocr (外部)
+        └── layout.py
+              └── (纯 Python，无外部依赖)
+```
+
+**依赖方向单一，无循环。** pipeline 是唯一的编排点，cli 只依赖 pipeline。
 
 ---
 
-## 4. 推荐方案：ThreadPoolExecutor + 数据库任务追踪
+## 5. CLI 设计
 
-### 4.1 架构变更
+### 5.1 命令签名
 
 ```
-改造前                                  改造后
-───────                                 ───────
-
-Django (runserver)                      Django (runserver)
-    │                                       │
-    │ upload                               │ upload
-    ▼                                      ▼
-ImportUploadView                       ImportUploadView
-    │                                       │
-    │ process_import_job.delay()           │ import_executor.submit()
-    ▼                                      ▼
-┌──────────────┐                      ┌──────────────────────┐
-│ Celery       │                      │ ThreadPoolExecutor   │
-│ Worker       │                      │ (max_workers=4)      │
-│ (独立进程)    │                      │ (Django 进程内)       │
-│              │                      │                      │
-│ Redis/SQLite │                      │ process_import_job() │
-│ Broker       │                      │   │                  │
-└──────────────┘                      │   ├── Thread 1:      │
-                                      │   │  parse CSV       │
-                                      │   ├── Thread 2:      │
-                                      │   │  parse XLSX      │
-                                      │   ├── Thread 3:      │
-                                      │   │  OCR PDF         │
-                                      │   └── callback:      │
-                                      │      update job      │
-                                      └──────────────────────┘
-
-用户操作:                               用户操作:
-  terminal 1: python manage.py runserver  terminal 1: python manage.py runserver
-  terminal 2: celery -A config worker     ✅ 只需一个终端！
+boc-pdf2csv <input_dir> [-o <output.csv>] [--scale <float>] [--timeout <minutes>] [--verbose]
 ```
 
-### 4.2 核心设计决策
+### 5.2 参数说明
 
-#### 4.2.1 执行器生命周期
+| 参数 | 类型 | 必需 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| `input_dir` | PATH | ✅ 是 | — | 包含中国银行 PDF 文件的目录路径 |
+| `-o, --output` | PATH | 否 | `<input_dir>/output.csv` | 输出 CSV 文件路径 |
+| `--scale` | float | 否 | `3.0` | PDF 渲染缩放倍率（影响 OCR 精度和速度） |
+| `--timeout` | int | 否 | `60` | 单文件处理超时（分钟），超时后跳过继续 |
+| `-v, --verbose` | flag | 否 | `false` | 启用详细日志（DEBUG 级别输出到控制台） |
 
-**决策**：使用模块级单例 `ThreadPoolExecutor`，在 Django AppConfig.ready() 中初始化，在 AppConfig 中通过 `atexit` 注册优雅关闭。
+### 5.3 输入规范
 
-**理由**：
-- 单例避免每次上传都创建/销毁线程池
-- `atexit` 确保 Django 关闭时线程池等待任务完成（或超时）
-- `max_workers=4` 足够个人使用（单次最多 20 个文件，4 并发充分）
+- `input_dir` 必须存在且为目录
+- 递归查找目录中所有 `.pdf` 文件（大小写不敏感）
+- 每个 PDF 被视为中国银行导出的流水单
+- 跳过非 PDF 文件，给出 warning
+- 若目录内无 PDF 文件，报错退出
 
-#### 4.2.2 任务函数去 Celery 化
+### 5.4 输出规范
 
-**决策**：将 `@shared_task` 装饰器改为普通 Python 函数，移除 `self.retry()`、`bind=True` 等 Celery 特有模式。
+- 输出 CSV 文件包含以下列（与现有 BOC 布局一致）：
 
-**重试策略变更**：
-```
-Celery:   max_retries=3, default_retry_delay=60, 自动指数退避
-新方案:   max_retries=1, 在函数内部 while 循环实现简单重试，失败即标记 failed
-```
-
-**理由**：
-- 当前任务的重试主要处理临时性错误（如文件被占用）
-- PayCheck 是交互式工具，用户看到失败后可手动重新上传
-- 简化重试逻辑，降低复杂度
-
-#### 4.2.3 Chord 替代方案
-
-**决策**：用 `ThreadPoolExecutor.submit()` + `as_completed()` 替代 Celery chord。
-
-```python
-# Celery chord（改造前）
-from celery import chord
-subtasks = [process_import_file.s(f.id) for f in import_files]
-chord(subtasks)(_on_import_job_complete.s(job_id))
-
-# ThreadPoolExecutor（改造后）
-from concurrent.futures import as_completed
-futures = {
-    executor.submit(process_import_file, f.id): f.id
-    for f in import_files
-}
-results = []
-for future in as_completed(futures):
-    results.append(future.result())
-_on_import_job_complete(results, job_id)
+```csv
+date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name,currency,branch,cp_account,cp_bank
 ```
 
-**理由**：
-- `as_completed` 语义完全覆盖 chord 的"并行执行 + 全部完成后回调"
-- 代码更直观，无 Celery 魔法
-- 一个文件失败不影响其他文件继续处理
-
-#### 4.2.4 进度追踪
-
-**决策**：保持 ImportJob/ImportFile 的 `status` 字段更新逻辑不变，前端通过现有的 API 轮询即可。
-
-**API 不变**：`GET /api/import/jobs/{id}/` 返回 job 状态和文件列表。
-
----
-
-## 5. 详细设计
-
-### 5.1 新增模块：`backend/apps/ingest/executor.py`
-
-```python
-"""线程池执行器 — 替代 Celery 的异步任务调度
-
-单例 ThreadPoolExecutor，在 Django 进程内执行导入任务。
-"""
-
-import atexit
-import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Callable, List
-
-logger = logging.getLogger("paycheck.ingest.executor")
-
-# 模块级单例
-_executor: ThreadPoolExecutor | None = None
-MAX_WORKERS = 4
-
-
-def get_executor() -> ThreadPoolExecutor:
-    """获取全局线程池（懒初始化 + atexit 优雅关闭）"""
-    global _executor
-    if _executor is None:
-        _executor = ThreadPoolExecutor(
-            max_workers=MAX_WORKERS,
-            thread_name_prefix="ingest-",
-        )
-        atexit.register(_shutdown)
-        logger.info("ThreadPoolExecutor initialized (max_workers=%d)", MAX_WORKERS)
-    return _executor
-
-
-def _shutdown(wait: bool = True, timeout: float = 30.0) -> None:
-    """atexit 回调：优雅关闭线程池"""
-    global _executor
-    if _executor is not None:
-        logger.info("Shutting down ThreadPoolExecutor...")
-        _executor.shutdown(wait=wait, cancel_futures=not wait)
-        if wait:
-            logger.info("ThreadPoolExecutor shut down.")
-        _executor = None
-
-
-def run_parallel(
-    tasks: List[Callable],
-    callback: Callable | None = None,
-    callback_args: tuple | None = None,
-) -> List:
-    """并行执行多个任务，全部完成后调用回调（等价 Celery chord）
-
-    Args:
-        tasks: 无参 callable 列表
-        callback: 全部完成后调用的回调函数，接收 (results_list, *callback_args)
-        callback_args: 传递给回调的额外位置参数
-
-    Returns:
-        每个任务的返回值列表（保持与 tasks 相同的顺序）
-    """
-    executor = get_executor()
-    future_to_idx = {
-        executor.submit(task): idx
-        for idx, task in enumerate(tasks)
-    }
-
-    # 收集结果，保持原始顺序
-    results: List = [None] * len(tasks)
-    errors: List[Exception] = []
-
-    for future in as_completed(future_to_idx):
-        idx = future_to_idx[future]
-        try:
-            results[idx] = future.result()
-        except Exception as exc:
-            logger.exception("Task %d failed: %s", idx, exc)
-            results[idx] = exc
-            errors.append(exc)
-
-    # 回调（即使部分任务失败也执行）
-    if callback is not None:
-        args = callback_args or ()
-        callback(results, *args)
-
-    return results
-```
-
-### 5.2 重构：`backend/apps/ingest/tasks.py`
-
-将 `@shared_task` 装饰器移除，`self.retry()` 替换为简单的内部重试循环：
-
-```python
-"""数据导入异步任务（去 Celery 化）
-
-处理文件上传 → 解析 → 渠道表写入 → 统一交易表同步 的完整流程。
-"""
-
-import hashlib
-import os
-
-from django.db import IntegrityError
-from django.utils import timezone
-
-from apps.ingest.models import ImportJob, ImportFile
-from apps.ingest.parsers.alipay import parse_alipay_csv
-from apps.ingest.parsers.wechat import parse_wechat_xlsx
-from apps.ingest.parsers.boc import parse_boc_csv
-from apps.channels.models import AlipayTx, WechatTx, BocTx
-from apps.transactions.models import Transaction
-
-# ── _compute_row_hash 和 _sync_to_transactions 保持不变 ──
-# （与当前 tasks.py 完全一致，此处省略以节省篇幅）
-
-
-def process_import_file(import_file_id: int) -> dict:
-    """处理单个导入文件：解析 → 渠道表 → 交易表（同步）"""
-    max_retries = 1
-    last_error = None
-
-    for attempt in range(max_retries + 1):
-        try:
-            return _process_import_file_once(import_file_id)
-        except Exception as exc:
-            last_error = exc
-            if attempt < max_retries:
-                continue
-            # 最后一次也失败了
-            try:
-                import_file = ImportFile.objects.get(id=import_file_id)
-                import_file.status = "failed"
-                import_file.error_msg = str(exc)
-                import_file.save(update_fields=["status", "error_msg"])
-            except ImportFile.DoesNotExist:
-                pass
-            raise
-
-    return {"error": str(last_error)}
-
-
-def _process_import_file_once(import_file_id: int) -> dict:
-    """单次执行文件解析（内部函数，不含重试）"""
-    import_file = ImportFile.objects.get(id=import_file_id)
-    import_file.status = "processing"
-    import_file.save(update_fields=["status"])
-
-    file_path = import_file.filename
-
-    if import_file.file_type == "alipay_csv":
-        txns = parse_alipay_csv(file_path)
-        platform = "alipay"
-    elif import_file.file_type == "wechat_xlsx":
-        txns = parse_wechat_xlsx(file_path)
-        platform = "wechat"
-    elif import_file.file_type in ("boc_csv", "boc_pdf"):
-        txns = parse_boc_csv(file_path)
-        platform = "boc"
-    else:
-        raise ValueError(f"Unknown file type: {import_file.file_type}")
-
-    created, skipped = _sync_to_transactions(txns, platform, import_file.file_type)
-
-    import_file.status = "completed"
-    import_file.save(update_fields=["status"])
-
-    return {"created": created, "skipped": skipped}
-
-
-def process_pdf_ocr(import_file_id: int) -> dict:
-    """OCR 处理 BOC PDF：PDF → CSV → 解析 → 入库"""
-    import_file = ImportFile.objects.get(id=import_file_id)
-    import_file.status = "processing"
-    import_file.save(update_fields=["status"])
-
-    try:
-        from apps.ocr_service.pipeline import pdf_to_csv
-
-        pdf_path = import_file.filename
-        output_dir = os.path.dirname(pdf_path)
-        output_path = os.path.join(
-            output_dir,
-            f"{os.path.splitext(os.path.basename(pdf_path))[0]}.csv",
-        )
-
-        result = pdf_to_csv(pdf_path, "boc", output_path=output_path)
-        if result != 0:
-            raise RuntimeError("OCR pipeline failed")
-
-        txns = parse_boc_csv(output_path)
-        created, skipped = _sync_to_transactions(txns, "boc", "boc_pdf")
-
-        import_file.status = "completed"
-        import_file.save(update_fields=["status"])
-
-        return {"created": created, "skipped": skipped}
-
-    except Exception as exc:
-        import_file.status = "failed"
-        import_file.error_msg = str(exc)
-        import_file.save(update_fields=["status", "error_msg"])
-        raise
-
-
-def process_import_job(job_id: int) -> dict:
-    """编排导入任务：并行分发子任务，全部完成后更新 Job 状态"""
-    try:
-        job = ImportJob.objects.get(id=job_id)
-    except ImportJob.DoesNotExist:
-        return {"error": f"ImportJob {job_id} not found"}
-
-    job.status = "processing"
-    job.save(update_fields=["status"])
-
-    import_files = job.files.all()
-    if not import_files:
-        job.status = "completed"
-        job.completed_at = timezone.now()
-        job.save(update_fields=["status", "completed_at"])
-        return {"total": 0, "processed": 0}
-
-    # 构建任务列表
-    from apps.ingest.executor import run_parallel
-
-    def make_task(import_file):
-        if import_file.file_type == "boc_pdf":
-            return lambda fid=import_file.id: process_pdf_ocr(fid)
-        else:
-            return lambda fid=import_file.id: process_import_file(fid)
-
-    tasks = [make_task(f) for f in import_files]
-    run_parallel(tasks, callback=_on_import_job_complete, callback_args=(job_id,))
-
-    return {"job_id": job_id, "status": "processing", "total_files": len(tasks)}
-
-
-def _on_import_job_complete(results: list, job_id: int) -> None:
-    """所有子任务完成后的回调：更新 ImportJob 状态"""
-    try:
-        job = ImportJob.objects.get(id=job_id)
-    except ImportJob.DoesNotExist:
-        return
-
-    job.status = "completed"
-    job.processed = job.total_files
-    job.completed_at = timezone.now()
-    job.save(update_fields=["status", "processed", "completed_at"])
-```
-
-### 5.3 修改：`backend/apps/ingest/views.py`
-
-仅需修改第 98 行的调用方式：
-
-```diff
-- from apps.ingest.tasks import process_import_job
-+ from apps.ingest.tasks import process_import_job
-+ from apps.ingest.executor import get_executor
-
-  # 启动 Celery 异步处理
-- process_import_job.delay(job.id)
-+ get_executor().submit(process_import_job, job.id)
-```
-
-### 5.4 删除清单
-
-| 文件 | 操作 | 内容 |
-|------|------|------|
-| `backend/config/celery.py` | **删除整个文件** | Celery app 定义 |
-| `backend/config/__init__.py` | **删除 L1-3** | `from .celery import app` |
-| `backend/config/settings.py` | **删除 L109-127** | CELERY_* 全部配置 |
-| `backend/config/settings.py` | **修改 L31** | 移除 `"django_celery_results"` from INSTALLED_APPS |
-| `backend/config/settings.py` | **修改 L2** | 更新 docstring |
-| `backend/config/logging.py` | **删除 L166-170** | celery logger 配置 |
-| `backend/pyproject.toml` | **删除** | `celery`、`sqlalchemy`、`django-celery-results` 三个依赖 |
-| `README.md` | **修改** | 删除 Celery Worker 启动章节、架构图中移除 Celery 框 |
-
----
-
-## 6. 实施步骤
-
-```
-Phase 1 ───────► Phase 2 ────────► Phase 3 ────────► Phase 4
-新建 executor   重构 tasks.py     清理 Celery 配置    文档 & 验证
-(30 min)        (45 min)          (20 min)           (15 min)
-```
-
-### Phase 1：新建 executor 模块
-1. 创建 `backend/apps/ingest/executor.py`
-2. 实现 `get_executor()`、`run_parallel()`、`_shutdown()`
-3. 单元测试验证线程池创建和并行执行
-
-### Phase 2：重构 tasks.py
-1. 移除所有 `@shared_task` 装饰器、`bind=True`、`self.retry()`
-2. 将 `process_import_file`、`process_pdf_ocr`、`process_import_job`、`_on_import_job_complete` 改为普通函数
-3. 在 `process_import_job` 中用 `run_parallel()` 替代 `celery.chord()`
-4. 保持 `_compute_row_hash`、`_sync_to_transactions` 不变
-
-### Phase 3：清理 Celery 配置
-1. 修改 `views.py`：`delay()` → `get_executor().submit()`
-2. 删除 `config/celery.py`
-3. 修改 `config/__init__.py`
-4. 修改 `config/settings.py`（删除 CELERY 配置块 + INSTALLED_APPS）
-5. 修改 `config/logging.py`（删除 celery logger）
-6. 修改 `pyproject.toml`（移除 3 个依赖）
-7. 运行 `uv sync` 清理依赖
-8. 运行 `uv run manage.py check` 验证 Django 配置
-
-### Phase 4：文档与验证
-1. 更新 README.md：移除 Celery Worker 启动步骤
-2. 端到端测试：上传各类型文件，验证解析和状态更新
-3. 提交 commit
-
----
-
-## 7. 核心决策记录（ADR）
-
-### ADR-008：去除 Celery，改用 ThreadPoolExecutor
-
-**背景**：PayCheck 使用 Celery 处理文件导入和 OCR 的异步任务，需要独立的 Worker 进程和额外的 Python 依赖（celery、sqlalchemy、django-celery-results），增加了个人用户的部署复杂度。
-
-**选项**：
-- A. 保持 Celery + SQLAlchemy broker（现状）
-- B. 改为同步执行
-- C. 换用 Huey / django-q 等轻量库
-- D. 使用 `concurrent.futures.ThreadPoolExecutor`（Python 标准库）
-
-**决策**：选择 **D（ThreadPoolExecutor + 数据库任务追踪）**
-
-**理由**：
-1. **零依赖**：`ThreadPoolExecutor` 是 Python 3 标准库，无需安装任何额外包
-2. **单进程部署**：任务在 Django 进程内执行，用户只需 `python manage.py runserver`
-3. **功能匹配**：PayCheck 是个人工具（单用户、SQLite、最多 20 文件/次），不需要分布式队列的特性
-4. **API 不变**：ImportJob/ImportFile 的 `status` 字段天然支持进度追踪，前端无需改动
-5. **实现简单**：~200 行改动，Chord 语义用 `as_completed()` 等价替代
-
-**代价**：
-- 进程重启时未完成任务丢失（个人工具可接受——用户重新上传即可）
-- 无内置的指数退避重试（可在函数内部简单实现）
-- 不适用于未来可能的多 Worker 横向扩展（PayCheck 的定位不需要）
-
-### ADR-009：max_workers=4 的线程池规模
-
-**背景**：ThreadPoolExecutor 需要设定最大工作线程数。
-
-**决策**：`max_workers=4`
-
-**理由**：
-- PayCheck 是个人桌面工具，CPU 核心数通常 ≥ 4
-- 单次最多上传 20 个文件，4 并发可在 5 轮内处理完毕
-- OCR 任务虽 CPU 密集，但在个人使用场景下一次只做一个 PDF，线程争抢不是瓶颈
-- 4 个线程不会对 SQLite（WAL 模式）造成显著的写锁竞争
-
----
-
-## 8. 风险与回滚
-
-### 8.1 风险评估
-
-| 风险 | 影响 | 概率 | 缓解措施 |
-|------|------|------|---------|
-| OCR 时 Django 进程崩溃导致任务丢失 | 用户需重新上传 | 低 | ImportFile.status=failed 记录错误信息，用户可重试 |
-| 线程内 Django ORM 连接问题 | 任务执行失败 | 低 | 每个线程使用独立 DB 连接（Django 默认线程安全） |
-| 大量并发上传导致线程池耗尽 | 新任务排队等待 | 低 | 个人工具，并发场景极少 |
-| `atexit` 在某些退出方式（kill -9）不触发 | 少量数据未写入 | 极低 | SQLite WAL 模式已大幅降低数据丢失风险 |
-
-### 8.2 回滚方案
-
-若方案 D 出现问题，回滚路径：
+- **编码**：UTF-8 with BOM（兼容 Excel 直接打开）
+- **金额格式**：正数（`tx_type` 列区分"收入""支出"）
+- **多 PDF 合并**：所有 PDF 的交易记录合并到同一个 CSV，按日期+时间排序
+- **去重**：同一 PDF 内不重复，不同 PDF 间不去重（用户可能确实有重复记录）
+
+### 5.5 使用示例
 
 ```bash
-# 恢复 Celery 配置文件和依赖
-git revert <commit-hash>
+# 基本用法
+boc-pdf2csv ./2026年账单/
 
-# 重新安装 Celery 依赖
-cd backend && uv sync
+# 指定输出文件
+boc-pdf2csv ./pdfs/ -o ./result/2026-merged.csv
+
+# 高精度 OCR（4K 渲染）
+boc-pdf2csv ./pdfs/ --scale 4.0 -o ./output.csv
+
+# 调试模式
+boc-pdf2csv ./pdfs/ -v
 ```
 
-改动集中在 6 个文件中，且 tasks.py 的核心逻辑（解析、同步）保持不变，仅移除装饰器和 chord 调用，回滚安全。
+### 5.6 退出码
+
+| 退出码 | 含义 |
+|--------|------|
+| 0 | 全部成功 |
+| 1 | 部分 PDF 处理失败（剩余的已输出） |
+| 2 | 全部失败 / 输入错误 |
+
+### 5.7 进度输出
+
+```
+$ boc-pdf2csv ./pdfs/
+[1/3] 202401流水.pdf ... 24 条交易 ✓
+[2/3] 202402流水.pdf ... 31 条交易 ✓
+[3/3] 202403流水.pdf ... ✗ OCR 识别失败（跳过）
+完成: 55 条交易 → ./pdfs/output.csv
+部分失败 (1/3)，退出码 1
+```
 
 ---
 
-### 8.3 SQLite 线程安全说明
+## 6. 核心数据流
 
-Django 默认对每个线程使用独立的数据库连接，SQLite 在 WAL 模式下支持并发读和有限并发写。当前 `settings.py` 已配置：
+### 6.1 整体流程
+
+```
+                 ┌──────────────┐
+                 │   cli.py     │
+                 │  argparse    │
+                 │  glob PDFs   │
+                 └──────┬───────┘
+                        │  List[pdf_path]
+                        ▼
+                 ┌──────────────┐
+                 │ pipeline.py  │
+                 │  process_    │
+                 │  directory() │
+                 └──────┬───────┘
+                        │  for each PDF:
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+   ┌────────────┐ ┌────────────┐ ┌────────────┐
+   │ PDF #1     │ │ PDF #2     │ │ PDF #3     │
+   │ ↓          │ │ ↓          │ │ ↓          │
+   │ pdf_to_csv │ │ pdf_to_csv │ │ pdf_to_csv │
+   └─────┬──────┘ └─────┬──────┘ └─────┬──────┘
+         │ CSV string     │             │
+         └────────┬───────┘─────────────┘
+                  │  合并 + 排序
+                  ▼
+         ┌────────────────┐
+         │  output.csv    │
+         │  UTF-8 BOM     │
+         └────────────────┘
+```
+
+### 6.2 单 PDF 处理细节（`pdf_to_csv`）
+
+```
+PDF 文件
+  │
+  ▼
+┌─────────────────────────────────────┐
+│ 阶段一：PDF → 图片（pdf_render.py）  │
+│                                     │
+│  fitz.open(pdf)                     │
+│    │                                │
+│    │ for each page (多进程并行):      │
+│    ▼                                │
+│  page.get_pixmap(matrix=3.0×)       │
+│    │  → PIL Image (RGB)             │
+│    ▼                                │
+│  find_table_bounds()                │
+│    │  亮度分析法检测表格区域           │
+│    │  → (top, bottom, left, right)   │
+│    ▼                                │
+│  img.crop(bbox) → p{N}.png          │
+│                                     │
+│  输出: List[image_path] (按页码排序)  │
+└──────────────┬──────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────┐
+│ 阶段二：图片 → OCR → CSV             │
+│                                     │
+│  for each page image:               │
+│    │                                │
+│    ▼                                │
+│  engine.process_image(img)          │
+│    │  PaddleOCR.predict()            │
+│    │  → List[OCRItem]               │
+│    │     {text, cx, cy, score}       │
+│    ▼                                │
+│  layout.group_rows(items, scale)     │
+│    │  ① 按列坐标分配文字到字段        │
+│    │  ② 按 Y 坐标分组为行             │
+│    │  → List[Row]                   │
+│    ▼                                │
+│  layout.to_transactions(rows)       │
+│    │  ③ BOC 列格式 → dict            │
+│    │  ④ amount 分正负 → 收/支        │
+│    │  → List[dict]                  │
+│    ▼                                │
+│  _write_csv(page_results)           │
+│    │  按页序写出 13 列 CSV            │
+│    ▼                                │
+│  CSV 字符串                         │
+└─────────────────────────────────────┘
+```
+
+### 6.3 BOC 列坐标体系（3.0× scale 基准）
+
+```
+┌──────────┬──────────┬────────┬────────┬────────┬──────────┬────────┬──────────┬────────┬──────────┬──────────┬──────────┐
+│ 记账日期  │ 记账时间  │  币别  │  金额   │  余额   │ 交易名称  │  渠道  │ 网点名称  │  附言  │ 对方账户名│对方卡号/ │对方开户行 │
+│  0-202   │ 202-380  │380-553 │553-737 │737-923 │ 923-1093 │1093-  │ 1266-    │1469-   │ 1689-    │ 账号     │ 2250-    │
+│          │          │        │        │        │          │ 1266   │ 1469     │ 1689   │ 1909     │1909-2180 │ 9999     │
+└──────────┴──────────┴────────┴────────┴────────┴──────────┴────────┴──────────┴────────┴──────────┴──────────┴──────────┘
+```
+
+列坐标硬编码在 `layout.py` 中，对应中国银行 2024-2026 年的账单格式。如未来银行改版，只需更新此坐标表。
+
+### 6.4 数据转换规则
+
+| OCR 原始值 | 转换逻辑 | 输出字段 |
+|------------|----------|----------|
+| 金额（负值/正值） | `raw_amount < 0 → tx_type="支出", amount=abs(raw_amount)` | `tx_type`, `amount` |
+| 日期+时间 | `f"{date} {time}".strip()` | `date`, `time`, `dateTime`（组合后不再单独输出） |
+| 空白字段 | 保持空字符串 | 各字段 |
+| OCR 识别失败的行 | 跳过（行中 date 或 amount 为空） | — |
+| OCR 置信度 < 0.3 | 过滤 | — |
+
+---
+
+## 7. 模块设计
+
+### 7.1 `cli.py` — CLI 入口
 
 ```python
-"OPTIONS": {
-    "timeout": 20,          # 写锁等待 20 秒
-    "init_command": (
-        "PRAGMA journal_mode=WAL;"
-        "PRAGMA synchronous=NORMAL;"
-        "PRAGMA foreign_keys=ON;"
-    ),
-}
+"""boc-pdf2csv CLI — 中国银行 PDF 对账单转 CSV"""
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+from boc_pdf2csv.pipeline import process_directory
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="boc-pdf2csv",
+        description="将中国银行 PDF 对账单转换为 CSV 文件",
+    )
+    parser.add_argument("input_dir", type=Path, help="包含中国银行 PDF 文件的目录")
+    parser.add_argument("-o", "--output", type=Path, default=None, help="输出 CSV 路径")
+    parser.add_argument("--scale", type=float, default=3.0, help="PDF 渲染倍率")
+    parser.add_argument("--timeout", type=int, default=60, help="单文件超时（分钟）")
+    parser.add_argument("-v", "--verbose", action="store_true", help="详细日志")
+    args = parser.parse_args()
+    # ... 参数校验 + 调用 process_directory()
 ```
 
-这些配置足以支持 4 个线程的并发写入。若遇到 `database is locked` 错误，可将 `timeout` 调高至 30 秒。
+### 7.2 `engine.py` — OCR 引擎（从现有代码提取，适配 import 路径）
+
+变化点：
+- 去掉 `from apps.ocr_service.layouts.base import OCRItem`，改为 `from boc_pdf2csv.layout import OCRItem`
+- 保持 `PaddleOCR(lang='ch')` 配置不变
+- 保持 0.3 置信度阈值
+
+### 7.3 `layout.py` — BOC 布局（合并 base.py + boc.py）
+
+变化点：
+- `OCRItem`、`Row` dataclass 从 `base.py` 迁入
+- `find_table_bounds()`、`group_items_to_rows()` 从 `base.py` 迁入
+- `COLUMNS_3X` 列定义 + `BocLayout.to_transactions()` 从 `boc.py` 迁入
+- **去除 BankLayout 抽象类**：不需要多态，直接用函数
+- 去除 PIL/numpy import（仅 `find_table_bounds` 需要，保留）
+- 简化日志：`logging.getLogger("boc_pdf2csv.layout")`
+
+### 7.4 `pdf_render.py` — PDF 渲染（从现有代码提取）
+
+变化点：
+- 改 import：`from apps.ocr_service.layouts.base import find_table_bounds` → `from boc_pdf2csv.layout import find_table_bounds`
+- 简化日志
+- 保持多进程并行渲染逻辑
+
+### 7.5 `pipeline.py` — 管线编排
+
+核心变化：
+- 新增 `process_directory()` 函数：遍历目录 → 批量 `pdf_to_csv()` → 合并 → 写入
+- `pdf_to_csv()` 和 `images_to_csv()` 保持现有逻辑，改 import 路径
+- `_write_csv()` 添加 UTF-8 BOM 支持（`﻿`）
+- `_esc_csv()` 保持不变
+- 去除 `from tqdm import tqdm` 依赖（保留，CLI 工具需要进度条）
+
+### 7.6 `__main__.py`
+
+```python
+"""python -m boc_pdf2csv 入口"""
+from boc_pdf2csv.cli import main
+main()
+```
 
 ---
 
-> **文档结束**。本文档作为 TCY-52 的 STAGE_DESIGN 产出物，覆盖去除 Celery Broker 的架构方案、替代方案对比和详细实施设计。
+## 8. 依赖清单
+
+### 8.1 `pyproject.toml`
+
+```toml
+[project]
+name = "boc-pdf2csv"
+version = "1.0.0"
+description = "中国银行 PDF 对账单转 CSV 工具"
+requires-python = ">=3.10, <3.14"
+dependencies = [
+    "paddleocr>=3.6.0",
+    "PyMuPDF>=1.23.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0",
+    "torch>=2.0.0",
+    "tqdm>=4.60.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+# CPU 用户
+cpu = ["paddlepaddle>=2.6.0"]
+# GPU 用户 (CUDA 12.6)
+gpu = ["paddlepaddle-gpu>=2.6.0"]
+
+[project.scripts]
+boc-pdf2csv = "boc_pdf2csv.cli:main"
+
+[tool.uv]
+package = true
+
+[[tool.uv.index]]
+name = "paddle-cpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cpu/"
+explicit = true
+
+[[tool.uv.index]]
+name = "paddle-gpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle = { index = "paddle-cpu" }
+paddlepaddle-gpu = { index = "paddle-gpu" }
+```
+
+### 8.2 依赖对比（精简前 vs 精简后）
+
+| 类别 | 精简前（paycheck-backend） | 精简后（boc-pdf2csv） |
+|------|--------------------------|----------------------|
+| **Web 框架** | django, djangorestframework, django-cors-headers, django-filter | — |
+| **异步队列** | celery, sqlalchemy, django-celery-results | — |
+| **表格处理** | openpyxl | — |
+| **OCR 核心** | paddleocr, paddlepaddle, PyMuPDF, opencv-python, Pillow, torch, tqdm | ✅ 全部保留 |
+| **新增** | — | numpy（显式声明） |
+| **总包数** | ~15 | 6（+ paddlepaddle CPU/GPU 二选一） |
+
+**依赖从 ~15 个缩减到 ~6 个，去除所有 Web/数据库/异步队列依赖。**
+
+### 8.3 运行时依赖体积估算
+
+| 组件 | 大小 |
+|------|------|
+| `boc-pdf2csv` 包本身 | < 100 KB |
+| PyMuPDF | ~60 MB |
+| opencv-python | ~30 MB |
+| PaddlePaddle (CPU) | ~400 MB |
+| PaddleOCR | ~10 MB |
+| PyTorch (CPU) | ~150 MB |
+| PaddleOCR 模型（首次运行自动下载） | ~100 MB |
+| **总计** | **~750 MB** |
+
+PaddlePaddle + PyTorch 是体积大头，但这是 OCR 的硬性成本，精简前也是这个量级。
+
+---
+
+## 9. 迁移策略
+
+### 9.1 迁移原则
+
+- **提取而非重写**：从现有代码中提取核心逻辑，保持已验证的 OCR 配置和列坐标
+- **最小化接口变更**：`process_image()`、`pdf_to_images()`、`pdf_to_csv()` 的函数签名尽量不变
+- **import 路径系统化替换**：`apps.ocr_service.*` → `boc_pdf2csv.*`
+- **硬编码替代抽象**：BankLayout 抽象 → 直接使用 BOC 函数
+
+### 9.2 文件映射
+
+| 源文件 | 目标文件 | 操作 |
+|--------|----------|------|
+| `backend/apps/ocr_service/engine.py` | `src/boc_pdf2csv/engine.py` | 提取 + import 替换 |
+| `backend/apps/ocr_service/layouts/base.py` | `src/boc_pdf2csv/layout.py` | 合并 + 去抽象化 |
+| `backend/apps/ocr_service/layouts/boc.py` | （同上） | 合并到 layout.py |
+| `backend/apps/ocr_service/layouts/__init__.py` | — | 删除 |
+| `backend/apps/ocr_service/pipeline.py` | `src/boc_pdf2csv/pipeline.py` | 提取 + 新增 process_directory() |
+| `backend/apps/ocr_service/pdf_render.py` | `src/boc_pdf2csv/pdf_render.py` | 提取 + import 替换 |
+| `backend/apps/ingest/parsers/boc.py` | — | 删除（CLI 不需要回读 CSV） |
+| `backend/apps/ingest/csv_utils.py` | — | 删除 |
+| — | `src/boc_pdf2csv/cli.py` | 新建 |
+| — | `src/boc_pdf2csv/__main__.py` | 新建 |
+| `pyproject.toml` | `pyproject.toml` | 重写 |
+| — | `README.md` | 新建 |
+
+### 9.3 代码适配要点
+
+#### `layout.py` 适配
+
+```python
+# 删除前（base.py）：
+class BankLayout(ABC):
+    @abstractmethod
+    def name(self) -> str: ...
+    @abstractmethod
+    def columns(self) -> List[Tuple[str, int, int]]: ...
+    @abstractmethod
+    def to_transactions(self, rows: List[Row]) -> List[dict]: ...
+
+class BocLayout(BankLayout):
+    @property
+    def name(self) -> str:
+        return "boc"
+    @property
+    def columns(self) -> List[Tuple[str, int, int]]:
+        return COLUMNS_3X
+    def to_transactions(self, rows: List[Row]) -> List[dict]: ...
+
+# 适配后（layout.py）：
+COLUMNS = COLUMNS_3X  # 直接导出列定义
+# OCRItem, Row 保持不变
+# find_table_bounds, group_items_to_rows 改为模块级函数
+# to_transactions 改为模块级函数
+def rows_to_transactions(rows: List[Row]) -> List[dict]:
+    """BOC 行 → 交易记录"""
+    # 原 BocLayout.to_transactions() 逻辑
+```
+
+#### `pipeline.py` 适配
+
+```python
+# 删除前：
+from apps.ocr_service.layouts import get_layout
+layout = get_layout(layout_name)  # 参数化选择银行
+rows = layout.group_rows(items, scale)
+txns = layout.to_transactions(rows)
+
+# 适配后：
+from boc_pdf2csv.layout import group_items_to_rows, rows_to_transactions
+rows = group_items_to_rows(items, scale, COLUMNS)  # 硬编码 BOC
+txns = rows_to_transactions(rows)
+```
+
+### 9.4 实施步骤
+
+```
+Phase 1                Phase 2              Phase 3              Phase 4
+新建项目骨架          提取核心模块          测试 & 文档           发布
+(15 min)              (45 min)              (30 min)             (15 min)
+```
+
+**Phase 1：新建项目骨架**
+1. 创建目录结构 `src/boc_pdf2csv/`
+2. 编写 `pyproject.toml`
+3. 编写 `cli.py` 框架（argparse）
+4. `uv sync` 初始化虚拟环境
+
+**Phase 2：提取核心模块**
+1. `engine.py`：从 `ocr_service/engine.py` 复制 + 改 import
+2. `layout.py`：合并 `base.py` 的 Row/OCRItem/分组逻辑 + `boc.py` 的列定义/to_transactions
+3. `pdf_render.py`：从 `ocr_service/pdf_render.py` 复制 + 改 import
+4. `pipeline.py`：从 `ocr_service/pipeline.py` 复制 + 改 import + 新增 process_directory()
+5. 确认 `uv run boc-pdf2csv --help` 正常
+
+**Phase 3：测试 & 文档**
+1. 编写 `README.md`（安装说明 + 使用示例）
+2. 用示例 PDF 端到端测试
+3. 边界情况测试（空目录、非 PDF 文件、损坏的 PDF）
+
+**Phase 4：发布**
+1. git commit + push
+2. 可选：发布到 PyPI（`uv publish`）
+3. 验证 `uv tool install boc-pdf2csv` 或 `pip install boc-pdf2csv`
+
+### 9.5 删除清单
+
+新仓库 `boc-pdf2csv` 仅包含上述文件。原 PayCheck 仓库保持不变，两者独立维护。
+
+如需在原仓库中清理，删除以下内容：
+- `backend/`（除 `ocr_service/` 和 `ingest/csv_utils.py` 外）
+- `frontend/`
+- `PayCheck/`
+- `design/`
+- `pyproject.toml`（根）
+- 所有 Django/Celery/React 相关配置
+
+---
+
+## 10. 核心决策记录（ADR）
+
+### ADR-001：硬编码 BOC 布局，取消 BankLayout 插件体系
+
+**背景**：当前代码有 `BankLayout` 抽象基类和布局注册表，支持多银行扩展。
+
+**决策**：去除 BankLayout 抽象，直接在 `layout.py` 中硬编码 BOC 列定义和处理函数。
+
+**理由**：
+1. YAGNI — 目前只需要 BOC，没有第二个银行的需求
+2. 减少 ~200 行抽象代码（ABC、注册表、属性访问器）
+3. 若未来需要支持第二家银行（如 ICBC），届时再抽象化，成本可控（BOC 列坐标是最宝贵的资产，抽象不会改变它）
+4. CLI 工具不需要 `layout_name` 参数
+
+**代价**：未来新增银行需重构 layout.py。
+
+---
+
+### ADR-002：不保留 parse_boc_csv 函数
+
+**背景**：现有 `ingest/parsers/boc.py` 提供了 `parse_boc_csv()` 用于将 pipeline 生成的 CSV 回读为 dict 列表（用于写入 Django 数据库）。
+
+**决策**：不纳入 `boc-pdf2csv` 包。
+
+**理由**：
+1. CLI 工具直接输出 CSV 给用户，不需要回读
+2. `parse_boc_csv` 的 dict 结构是 Django 模型适配层，脱离 Django 无意义
+3. pipeline 内部的 `_write_csv` 已经完成 CSV 序列化，不需要额外的解析层
+
+---
+
+### ADR-003：多 PDF 合并到单一 CSV，不去重
+
+**背景**：用户可能把一个月的多份 PDF 放在同一目录。
+
+**决策**：所有 PDF 交易记录合并到一个 CSV，按日期+时间排序，不去重。
+
+**理由**：
+1. 若去重，误剔除的风险（两笔相同金额的真实交易 → 丢失一笔）远大于重复的风险
+2. 用户可在 Excel 中自行去重
+3. 不同 PDF 通常是不同时段，交易日期不同，自然不重复
+
+---
+
+### ADR-004：UTF-8 with BOM 作为 CSV 输出编码
+
+**背景**：CSV 文件需要在 Excel 中直接打开。
+
+**决策**：输出 UTF-8 with BOM（`﻿` 前缀）。
+
+**理由**：
+1. Excel 对无 BOM 的 UTF-8 CSV 会错误解释中文字符
+2. BOM 是一个字符的开销，换来零配置的 Excel 兼容性
+3. 中国银行账单用户以中文 Windows + Excel 为主
+
+---
+
+### ADR-005：max_workers 默认值
+
+**背景**：`pdf_render.py` 使用多进程渲染 PDF 页面。
+
+**决策**：`max_workers = min(os.cpu_count() or 4, 10)`，与现有代码保持一致。
+
+**理由**：
+1. PDF 渲染是 I/O + CPU 混合，多进程有真实加速
+2. 上限 10 避免在高端服务器上过度并行导致内存压力
+3. 单份 BOC 账单通常 1-3 页，并行收益有限但保留代码不变
+
+---
+
+> **文档结束**。本文档作为 TCY-78 的 STAGE_DESIGN 产出物，覆盖 `boc-pdf2csv` 包的完整架构设计。
 >
-> 实施由后续 STAGE_IMPLEMENT 阶段执行。
+> 实施由后续 CODE 阶段执行。
