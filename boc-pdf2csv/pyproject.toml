@@ -1,0 +1,42 @@
+[project]
+name = "boc-pdf2csv"
+version = "1.0.0"
+description = "中国银行 PDF 对账单 → CSV 转换工具"
+requires-python = ">=3.10, <3.14"
+dependencies = [
+    "paddleocr>=3.6.0",
+    "paddlepaddle>=2.6.0",
+    "PyMuPDF>=1.23.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "tqdm>=4.60.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+gpu = ["paddlepaddle-gpu>=2.6.0"]
+
+[project.scripts]
+boc-pdf2csv = "boc_pdf2csv.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[[tool.uv.index]]
+name = "paddle-cpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cpu/"
+explicit = true
+
+[[tool.uv.index]]
+name = "paddle-gpu"
+url = "https://www.paddlepaddle.org.cn/packages/stable/cu126/"
+explicit = true
+
+[tool.uv.sources]
+paddlepaddle = { index = "paddle-cpu" }
+paddlepaddle-gpu = { index = "paddle-gpu" }
