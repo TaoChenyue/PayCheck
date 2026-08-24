@@ -1,27 +1,31 @@
 [project]
-name = "paycheck"
-version = "1.0.1"
-description = "个人账单统计工具 — Django + React 前后端分离"
+name = "boc-pdf2csv"
+version = "1.0.0"
+description = "中国银行 PDF 对账单 → CSV 转换工具"
 requires-python = ">=3.10, <3.14"
 dependencies = [
-    "opencv-python",
-    "openpyxl",
-    "paddleocr",
-    "Pillow",
-    "PyMuPDF",
-    "torch",
-    "tqdm",
+    "paddleocr>=3.6.0",
+    "paddlepaddle>=2.6.0",
+    "PyMuPDF>=1.23.0",
+    "opencv-python>=4.8.0",
+    "Pillow>=10.0",
+    "numpy>=1.24",
+    "tqdm>=4.60.0",
+    "torch>=2.0.0",
 ]
 
 [project.optional-dependencies]
-# CPU 用户: uv sync --extra cpu
-cpu = ["paddlepaddle>=2.6.0"]
-# GPU 用户 (CUDA 12.6): uv sync --extra gpu
 gpu = ["paddlepaddle-gpu>=2.6.0"]
 
+[project.scripts]
+boc-pdf2csv = "boc_pdf2csv.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.uv]
-package = false
+package = true
 
 [[tool.uv.index]]
 name = "paddle-cpu"
