@@ -61,7 +61,7 @@ def write_csv(
         CSV 内容字符串
     """
     csv_buf = io.StringIO()
-    csv_buf.write("﻿")  # UTF-8 BOM
+    csv_buf.write("﻿")  # UTF-8 BOM（写入文件时需用 utf-8 而非 utf-8-sig，避免双 BOM）
     csv_buf.write(",".join(CSV_HEADER) + "\n")
 
     for t in transactions:
@@ -86,7 +86,7 @@ def write_csv(
     csv_buf.close()
 
     if output_path:
-        with open(output_path, "w", encoding="utf-8-sig") as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             f.write(csv_content)
         log.info("已写入: %s", output_path)
 
