@@ -137,3 +137,34 @@ src/boc_pdf2csv/
 ## 许可证
 
 [MIT](LICENSE)
+
+
+---
+
+## 账单工作台（paycheck-workbench）
+
+本地 Web 工具：BOC / 支付宝 / 微信三源账单的 HTML 展示 + SQLite 导入（Python 标准库 HTTP 服务，无 Web 框架）。
+
+```bash
+# 启动（默认库文件 D:\Data\PayCheck\paycheck.db，端口 8765）
+paycheck-workbench
+# 自定义库文件与端口，并自动打开浏览器
+paycheck-workbench --db ./my.db --port 8765 --open
+# 或通过模块运行
+python -m paycheck_workbench
+```
+
+功能：
+
+- 三数据源 Tab 切换（BOC CSV / 支付宝 GBK CSV / 微信 XLSX，兼容 CSV 变体），自动跳过文件信息头定位表头
+- 解析预览（列样例、日期范围、收/支分布）+ 去重比对（新增/重复跳过）→ 确认后写入 SQLite，重复导入幂等
+- 明细表格：排序、分页、行展开详情、列显隐；汇总卡片随筛选联动（收入/支出/不计收支/期末余额或笔数）
+- 左侧筛选栏：日期快捷档位、收/支多选、分类多选、金额区间、关键词搜索（300ms 防抖）
+- 三张表 `boc_transactions` / `alipay_transactions` / `wechat_transactions`：源明细列全量入库 + `source_file` / `imported_at` / `dedup_key`（UNIQUE）
+
+## 开发
+
+```bash
+uv sync          # 安装全部依赖
+uv run pytest    # 运行测试（解析层/存储层/HTTP 服务）
+```
