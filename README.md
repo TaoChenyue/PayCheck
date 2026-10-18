@@ -146,7 +146,7 @@ src/boc_pdf2csv/
 本地 Web 工具：BOC / 支付宝 / 微信三源账单的 HTML 展示 + SQLite 导入（Python 标准库 HTTP 服务，无 Web 框架）。
 
 ```bash
-# 启动（默认库文件 D:\Data\PayCheck\paycheck.db，端口 8765）
+# 启动（默认库文件 paycheck.db，相对启动目录；端口 8765）
 paycheck-workbench
 # 自定义库文件与端口，并自动打开浏览器
 paycheck-workbench --db ./my.db --port 8765 --open
