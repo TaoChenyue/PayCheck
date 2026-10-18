@@ -946,6 +946,10 @@ $("#amount-min").addEventListener("input", debounce((e) => { filtersBySource[cur
 $("#amount-max").addEventListener("input", debounce((e) => { filtersBySource[currentSource].amount_max = e.target.value; onFilterChange(); }, 300));
 document.querySelectorAll("#presets .preset").forEach((b) =>
   b.addEventListener("click", () => applyPreset(b.dataset.preset)));
+$("#btn-colset").addEventListener("click", () => $("#colset").classList.toggle("open"));
+document.addEventListener("click", (e) => {
+  if (!$("#colset").contains(e.target)) $("#colset").classList.remove("open");
+});
 
 /* ================= 启动 ================= */
 (async function init() {
