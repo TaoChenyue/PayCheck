@@ -20,5 +20,8 @@ tmp/
 .opencode/
 .claude/
 
+# Local git worktrees
+.worktrees/
+
 # Temp test data
 test_*.csv
