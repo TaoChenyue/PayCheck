@@ -164,12 +164,13 @@ def process_folder(
     timeout_minutes: int = 60,
     verbose: bool = False,
     device: str = "gpu",
+    force: bool = False,
 ) -> FolderResult:
     """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV
 
     处理流程:
       1. 扫描文件夹中所有 .pdf 文件
-      2. 同名 CSV 已存在的 PDF 直接跳过
+      2. 同名 CSV 已存在的 PDF 直接跳过（force=True 时覆盖重新导出）
       3. 逐个 PDF 调用 OCR 管线（默认强制 GPU）
       4. 每个 PDF 的交易去重（按日期+金额+对方账户名）
       5. 按日期+时间排序
@@ -181,6 +182,7 @@ def process_folder(
         timeout_minutes: 单个 PDF 超时分钟数
         verbose: 是否输出详细日志
         device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
+        force: 是否强制重新导出（同名 CSV 已存在时覆盖而不是跳过）
 
     Returns:
         FolderResult 批量处理汇总
@@ -214,8 +216,8 @@ def process_folder(
             pdf_name = os.path.basename(pdf_path)
             csv_path = os.path.splitext(pdf_path)[0] + ".csv"
 
-            # 同名 CSV 已存在 → 跳过
-            if os.path.exists(csv_path):
+            # 同名 CSV 已存在 → 跳过（force 时覆盖重新导出）
+            if not force and os.path.exists(csv_path):
                 result.skipped.append(pdf_path)
                 pbar.set_postfix_str(f"跳过 {pdf_name}")
                 log.info("跳过（同名 CSV 已存在）: %s", pdf_name)

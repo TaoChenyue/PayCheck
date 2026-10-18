@@ -2,6 +2,7 @@
 
 用法:
     boc-pdf2csv ./statements/                    # 每个 PDF → 同名 CSV（已存在则跳过）
+    boc-pdf2csv ./statements/ --force            # 强制重新导出（覆盖同名 CSV）
     boc-pdf2csv ./statements/ --scale 2.0        # 调整渲染精度
     boc-pdf2csv ./statements/ --timeout 120      # 延长超时
     boc-pdf2csv ./statements/ --device cpu       # 无 GPU 机器使用 CPU 推理
@@ -47,6 +48,11 @@ def main() -> int:
         help="OCR 推理设备（默认: gpu，强制使用 GPU；无 GPU 机器可用 cpu）",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help="强制重新导出：同名 CSV 已存在时覆盖而不是跳过",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="详细日志输出",
@@ -73,6 +79,7 @@ def main() -> int:
             timeout_minutes=args.timeout,
             verbose=args.verbose,
             device=args.device,
+            force=args.force,
         )
     except NotADirectoryError as e:
         print(f"错误: {e}", file=sys.stderr)

@@ -55,6 +55,9 @@ uv pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12
 # 基本用法：文件夹内每个 PDF → 同名 CSV（已存在则跳过）
 boc-pdf2csv ./statements/
 
+# 强制重新导出：同名 CSV 已存在时覆盖而不是跳过
+boc-pdf2csv ./statements/ --force
+
 # 调整渲染精度（低配机器可用 2.0）
 boc-pdf2csv ./statements/ --scale 2.0
 
@@ -75,7 +78,7 @@ boc-pdf2csv ./statements/ --verbose
 python -m boc_pdf2csv ./statements/
 ```
 
-`2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则跳过此 PDF，删除对应 CSV 后可重新转换。
+`2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则默认跳过此 PDF，删除对应 CSV 或加 `--force` 可重新转换（`--force` 会覆盖已有 CSV）。
 
 默认强制使用 GPU 推理；未检测到 GPU 时直接报错（不会静默回退 CPU），无 GPU 的机器需显式加 `--device cpu`。
 
@@ -95,6 +98,9 @@ csv_content = process_pdf("./statements/2025-01.pdf", output_path="2025-01.csv")
 
 # 推理设备默认强制 GPU（device='gpu'），无 GPU 时显式指定 CPU
 csv_content = process_pdf("./statements/2025-01.pdf", device="cpu")
+
+# 文件夹批量处理默认跳过已有同名 CSV，force=True 时覆盖重新导出
+result = process_folder("./statements/", force=True)
 ```
 
 ## CSV 输出格式
