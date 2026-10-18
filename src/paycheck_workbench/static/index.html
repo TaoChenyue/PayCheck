@@ -769,7 +769,10 @@ function updatePresetActive() {
 }
 function presetRange(preset) {
   const now = new Date();
-  const fmt = (d) => d.toISOString().slice(0, 10);
+  const fmt = (d) => {
+    const p2 = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+  };
   const firstOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
   if (preset === "this-month") return [fmt(firstOfMonth(now)), fmt(now)];
   if (preset === "last-month") {
