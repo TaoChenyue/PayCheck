@@ -1,7 +1,8 @@
-"""解析层测试：合成样本（恒跑）+ D:\\Data\\PayCheck 真实样本（存在时跑）"""
+"""解析层测试：合成样本（恒跑）+ 真实样本（设置 PAYCHECK_SAMPLE_DIR 环境变量时跑）"""
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -18,8 +19,9 @@ from paycheck_workbench.sources import (
     dedup_key,
 )
 
-REAL = Path(r"D:\Data\PayCheck")
-HAS_REAL = REAL.is_dir()
+_REAL_DIR = os.environ.get("PAYCHECK_SAMPLE_DIR", "")
+REAL = Path(_REAL_DIR)
+HAS_REAL = bool(_REAL_DIR) and REAL.is_dir()
 
 BOC_FILE = REAL / "BOC" / "20240801-20260731.csv"
 ALIPAY_FILE = REAL / "ALIPAY" / "支付宝交易明细(20240801-20250731).csv"
@@ -127,7 +129,7 @@ def test_wechat_dedup_key():
     assert dedup_key(SOURCE_WECHAT, values) == "2025-07-31 19:33:35|0.50|丰巢"
 
 
-# ---------------- 真实样本（D:\Data\PayCheck 存在时）----------------
+# ---------------- 真实样本（PAYCHECK_SAMPLE_DIR 指向的样本目录存在时跑）----------------
 
 @pytest.mark.skipif(not (HAS_REAL and BOC_FILE.exists()), reason="无真实样本")
 def test_boc_real_sample():
