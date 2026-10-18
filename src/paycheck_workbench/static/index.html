@@ -603,7 +603,9 @@ function cellHtml(row, col) {
     return `<span class="num">${esc(v)}</span><button class="copy-btn" data-copy="${esc(v)}">复制</button>`;
   }
   if (!v) return '<span class="empty-val">—</span>';
-  return `<span title="${esc(v)}">${esc(v)}</span>`;
+  // 微信「支付方式」在中性交易行可能为 /，按设计显示为 —
+  const display = col.key === "支付方式" && v === "/" ? "—" : v;
+  return `<span title="${esc(v)}">${esc(display)}</span>`;
 }
 function renderTableBodyKeep() {
   // 列显隐变化时仅重绘表格（行数据已在 lastRows 中）
@@ -661,6 +663,7 @@ function toggleDetail(id) {
     if (c.kind === "datetime" && c.key === "datetime" && o.time_col) {
       v = [row[o.date_col], row[o.time_col]].filter(Boolean).join(" ");
     }
+    if (c.key === "支付方式" && v === "/") v = "—";
     const copy = (c.kind === "copy" && v) ? `<button class="copy-btn" data-copy="${esc(v)}">复制</button>` : "";
     return `<div class="detail-item"><div class="k">${esc(c.label)}</div><div class="v">${v ? esc(v) : "—"}${copy}</div></div>`;
   });
