@@ -32,6 +32,7 @@ def _pdf_to_transactions(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
+    device: str = "gpu",
 ) -> List[Dict[str, Any]]:
     """处理单个 PDF，返回交易字典列表（不写 CSV）
 
@@ -40,6 +41,7 @@ def _pdf_to_transactions(
         scale: 渲染缩放倍率
         timeout_minutes: 超时分钟数
         verbose: 是否输出详细日志
+        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
 
     Returns:
         交易字典列表（可能为空）
@@ -60,7 +62,7 @@ def _pdf_to_transactions(
             return []
 
         # 阶段二：图片 → OCR → 结构化
-        warmup_engine()
+        warmup_engine(device)
 
         def _page_key(p: str) -> int:
             m = re.search(r'p(\d+)\.png$', p)
@@ -79,7 +81,7 @@ def _pdf_to_transactions(
                 break
 
             try:
-                items = process_image(img_path)
+                items = process_image(img_path, device=device)
                 if items:
                     rows = group_items_to_rows(items, scale)
                     txn_dicts = rows_to_transactions(rows)
@@ -104,6 +106,7 @@ def process_pdf(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
+    device: str = "gpu",
 ) -> str:
     """单个 PDF → CSV 完整流水线
 
@@ -115,19 +118,20 @@ def process_pdf(
         scale: 渲染缩放倍率
         timeout_minutes: 单 PDF 超时分钟数
         verbose: 是否输出详细日志
+        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
 
     Returns:
         CSV 内容字符串
 
     Raises:
         FileNotFoundError: PDF 文件不存在
-        RuntimeError: 渲染失败
+        RuntimeError: 渲染失败 / 无可用 GPU
     """
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
 
     start_time = time.time()
-    transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose)
+    transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose, device)
 
     elapsed = time.time() - start_time
     log.info("处理完成: %d 条交易, 耗时 %.1fs", len(transactions), elapsed)
@@ -159,13 +163,14 @@ def process_folder(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
+    device: str = "gpu",
 ) -> FolderResult:
     """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV
 
     处理流程:
       1. 扫描文件夹中所有 .pdf 文件
       2. 同名 CSV 已存在的 PDF 直接跳过
-      3. 逐个 PDF 调用 OCR 管线
+      3. 逐个 PDF 调用 OCR 管线（默认强制 GPU）
       4. 每个 PDF 的交易去重（按日期+金额+对方账户名）
       5. 按日期+时间排序
       6. 写出 <同名>.csv 到 PDF 所在文件夹
@@ -175,6 +180,7 @@ def process_folder(
         scale: 渲染缩放倍率
         timeout_minutes: 单个 PDF 超时分钟数
         verbose: 是否输出详细日志
+        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
 
     Returns:
         FolderResult 批量处理汇总
@@ -220,7 +226,7 @@ def process_folder(
 
             pbar.set_postfix_str(pdf_name)
             try:
-                transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose)
+                transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose, device)
             except Exception as e:
                 log.error("处理失败: %s — %s", pdf_name, e)
                 result.failed.append(pdf_path)

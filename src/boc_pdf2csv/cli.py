@@ -4,6 +4,7 @@
     boc-pdf2csv ./statements/                    # 每个 PDF → 同名 CSV（已存在则跳过）
     boc-pdf2csv ./statements/ --scale 2.0        # 调整渲染精度
     boc-pdf2csv ./statements/ --timeout 120      # 延长超时
+    boc-pdf2csv ./statements/ --device cpu       # 无 GPU 机器使用 CPU 推理
     boc-pdf2csv --version                        # 查看版本
     boc-pdf2csv --help                           # 帮助信息
 """
@@ -40,6 +41,12 @@ def main() -> int:
         help="单个 PDF 超时分钟数（默认: 60）",
     )
     parser.add_argument(
+        "--device",
+        choices=["gpu", "cpu"],
+        default="gpu",
+        help="OCR 推理设备（默认: gpu，强制使用 GPU；无 GPU 机器可用 cpu）",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="详细日志输出",
@@ -65,6 +72,7 @@ def main() -> int:
             scale=args.scale,
             timeout_minutes=args.timeout,
             verbose=args.verbose,
+            device=args.device,
         )
     except NotADirectoryError as e:
         print(f"错误: {e}", file=sys.stderr)

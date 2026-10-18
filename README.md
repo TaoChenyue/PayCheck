@@ -27,6 +27,7 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 - 自动剔除重复交易（按 日期 + 金额 + 对方账户名）
 - 自动按日期 + 时间排序
 - 输出 UTF-8 BOM 编码的 13 列标准 CSV
+- 默认强制使用 GPU（CUDA）推理，无 GPU 时可显式 `--device cpu`
 - 无任何前后端框架依赖，纯命令行使用
 
 ## 安装
@@ -41,6 +42,13 @@ uv sync --extra gpu
 
 > 也可用 pip 安装：`pip install -e .`（CPU 版需自行指定 paddlepaddle 源）。
 
+GPU 版 paddle 不内置 CUDA 运行库，Windows 上还需安装 NVIDIA 的 pip 包提供
+cudart / cublas / cudnn DLL（程序会自动把它们加入 DLL 搜索路径）：
+
+```bash
+uv pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12
+```
+
 ## 使用
 
 ```bash
@@ -52,6 +60,9 @@ boc-pdf2csv ./statements/ --scale 2.0
 
 # 延长超时（大批量文件）
 boc-pdf2csv ./statements/ --timeout 120
+
+# 无 GPU 机器使用 CPU 推理（默认强制 GPU）
+boc-pdf2csv ./statements/ --device cpu
 
 # 查看版本 / 帮助
 boc-pdf2csv --version
@@ -66,6 +77,8 @@ python -m boc_pdf2csv ./statements/
 
 `2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则跳过此 PDF，删除对应 CSV 后可重新转换。
 
+默认强制使用 GPU 推理；未检测到 GPU 时直接报错（不会静默回退 CPU），无 GPU 的机器需显式加 `--device cpu`。
+
 ### 作为 Python API 使用
 
 ```python
@@ -79,6 +92,9 @@ result.failed     # 处理失败的 PDF
 
 # 处理单个 PDF
 csv_content = process_pdf("./statements/2025-01.pdf", output_path="2025-01.csv")
+
+# 推理设备默认强制 GPU（device='gpu'），无 GPU 时显式指定 CPU
+csv_content = process_pdf("./statements/2025-01.pdf", device="cpu")
 ```
 
 ## CSV 输出格式
