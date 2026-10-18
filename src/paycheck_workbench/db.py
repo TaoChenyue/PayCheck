@@ -25,7 +25,7 @@ from paycheck_workbench.sources import (
     dedup_key,
 )
 
-DEFAULT_DB_PATH = Path(r"D:\Data\PayCheck\paycheck.db")
+DEFAULT_DB_PATH = Path("paycheck.db")  # 相对启动时的工作目录
 
 _PAGE_SIZES = (10, 50, 100, 200)
 _DEFAULT_PAGE_SIZE = 50

@@ -319,7 +319,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):
-    """启动本地服务（阻塞）。db_path 默认 D:\\Data\\PayCheck\\paycheck.db。"""
+    """启动本地服务（阻塞）。db_path 默认当前目录下的 paycheck.db（相对启动目录）。"""
     db_path = Path(db_path) if db_path else db.DEFAULT_DB_PATH
     db.init_db(db_path)
 
