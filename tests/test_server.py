@@ -121,3 +121,26 @@ def test_import_wrong_extension_rejected(base_url):
     )
     assert preview["ok"] is False
     assert "只支持" in preview["error"]
+
+
+def test_summary_with_date_filter(base_url):
+    """带日期筛选的汇总应正常返回且只统计筛选范围内记录（回归：余额查询双重 WHERE）。"""
+    rows = [
+        "2026-10-05,12:00:00,支出,10.00,超市A,银企对接,100.00,,快捷支付,人民币,,,",
+        "2026-09-15,12:00:00,支出,30.00,超市C,银企对接,100.00,,快捷支付,人民币,,,",
+    ]
+    body = ("date,time,tx_type,amount,counterparty,channel,balance,memo,tx_name,currency,branch,cp_account,cp_bank\r\n"
+            + "\r\n".join(rows) + "\r\n").encode("utf-8-sig")
+    confirm = _post(base_url + "/api/import/confirm", body, _upload_headers("boc"))
+    assert confirm["inserted"] == 2
+
+    summary = _get(base_url + "/api/summary?source=boc&date_from=2026-10-01&date_to=2026-10-19")
+    assert summary["ok"]
+    assert summary["count"] == 1
+    assert summary["expense_sum"] == 10.0
+    assert summary["last_balance"] == "100.00"
+
+    summary = _get(base_url + "/api/summary?source=boc&date_from=2026-09-01&date_to=2026-09-30")
+    assert summary["ok"]
+    assert summary["count"] == 1
+    assert summary["expense_sum"] == 30.0
