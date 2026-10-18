@@ -305,10 +305,14 @@ def query_summary(
 
     if cfg.balance_col:
         # BOC 期末余额：筛选范围内最后一笔（设计 2 汇总卡片）
+        balance_where = (
+            f'{where} AND "{cfg.balance_col}" != \'\''
+            if where
+            else f'WHERE "{cfg.balance_col}" != \'\''
+        )
         balance_row = conn.execute(
             f"""
-            SELECT "{cfg.balance_col}" AS b FROM "{table}"{where}
-            WHERE "{cfg.balance_col}" != ''
+            SELECT "{cfg.balance_col}" AS b FROM "{table}"{balance_where}
             ORDER BY "date" DESC, "time" DESC LIMIT 1
             """,
             params,
