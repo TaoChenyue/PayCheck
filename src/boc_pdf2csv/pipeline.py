@@ -2,7 +2,7 @@
 
 管线:
   process_pdf():    单个 PDF → 图片 → OCR → CSV
-  process_folder(): 文件夹批量处理 → 合并去重 → CSV
+  process_folder(): 文件夹批量处理 → 每个 PDF 输出同名 CSV（已存在则跳过）
 """
 
 import logging
@@ -10,6 +10,7 @@ import os
 import re
 import tempfile
 import time
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from tqdm import tqdm
@@ -137,37 +138,51 @@ def process_pdf(
     return write_csv(transactions, output_path)
 
 
+@dataclass
+class FolderResult:
+    """process_folder 的批量处理汇总
+
+    Attributes:
+        processed: 成功处理的 PDF 路径 → 同名 CSV 路径
+        skipped: 因同名 CSV 已存在而跳过的 PDF 路径
+        failed: 处理失败的 PDF 路径
+        total_transactions: 提取到的交易总数（去重后）
+    """
+    processed: Dict[str, str] = field(default_factory=dict)
+    skipped: List[str] = field(default_factory=list)
+    failed: List[str] = field(default_factory=list)
+    total_transactions: int = 0
+
+
 def process_folder(
     folder_path: str,
-    output_path: str = "output.csv",
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
-) -> str:
-    """批量处理文件夹内所有 PDF，合并输出单个 CSV
+) -> FolderResult:
+    """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV
 
     处理流程:
       1. 扫描文件夹中所有 .pdf 文件
-      2. 逐个 PDF 调用 OCR 管线
-      3. 合并所有交易记录
-      4. 去重（按日期+金额+对方账户名）
+      2. 同名 CSV 已存在的 PDF 直接跳过
+      3. 逐个 PDF 调用 OCR 管线
+      4. 每个 PDF 的交易去重（按日期+金额+对方账户名）
       5. 按日期+时间排序
-      6. 写出单个 CSV
+      6. 写出 <同名>.csv 到 PDF 所在文件夹
 
     Args:
         folder_path: 包含 PDF 文件的文件夹路径
-        output_path: 输出 CSV 文件路径（默认: output.csv）
         scale: 渲染缩放倍率
         timeout_minutes: 单个 PDF 超时分钟数
         verbose: 是否输出详细日志
 
     Returns:
-        CSV 内容字符串
+        FolderResult 批量处理汇总
 
     Raises:
         NotADirectoryError: 输入路径非目录
         FileNotFoundError: 未找到 PDF 文件
-        RuntimeError: 无交易记录
+        RuntimeError: 全部 PDF 处理失败
     """
     if not os.path.isdir(folder_path):
         raise NotADirectoryError(f"输入路径不存在或非目录: {folder_path}")
@@ -186,46 +201,56 @@ def process_folder(
     if verbose:
         log.info("PDF 列表: %s", [os.path.basename(p) for p in pdf_files])
 
-    all_transactions: List[Dict[str, Any]] = []
-    failed_count = 0
+    result = FolderResult()
 
     with tqdm(total=len(pdf_files), desc="处理 PDF", unit="个") as pbar:
-        for i, pdf_path in enumerate(pdf_files):
+        for pdf_path in pdf_files:
             pdf_name = os.path.basename(pdf_path)
-            pbar.set_postfix_str(pdf_name)
+            csv_path = os.path.splitext(pdf_path)[0] + ".csv"
 
+            # 同名 CSV 已存在 → 跳过
+            if os.path.exists(csv_path):
+                result.skipped.append(pdf_path)
+                pbar.set_postfix_str(f"跳过 {pdf_name}")
+                log.info("跳过（同名 CSV 已存在）: %s", pdf_name)
+                if verbose:
+                    tqdm.write(f"  [{pdf_name}] 跳过: {os.path.basename(csv_path)} 已存在")
+                pbar.update(1)
+                continue
+
+            pbar.set_postfix_str(pdf_name)
             try:
                 transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose)
-                all_transactions.extend(transactions)
-                if verbose:
-                    tqdm.write(f"  [{i + 1}/{len(pdf_files)}] {pdf_name} → {len(transactions)} 条交易")
             except Exception as e:
                 log.error("处理失败: %s — %s", pdf_name, e)
-                failed_count += 1
+                result.failed.append(pdf_path)
                 if verbose:
-                    tqdm.write(f"  [{i + 1}/{len(pdf_files)}] {pdf_name} 失败: {e}")
+                    tqdm.write(f"  [{pdf_name}] 失败: {e}")
+                pbar.update(1)
+                continue
 
-    if not all_transactions:
-        if failed_count > 0:
-            raise RuntimeError(f"处理失败: {failed_count}/{len(pdf_files)} 个 PDF 处理出错，且无有效交易记录")
-        raise RuntimeError("未提取到任何交易记录")
+            # 去重（按日期 + 金额 + 对方账户名）
+            seen = set()
+            deduped: List[Dict[str, Any]] = []
+            for t in transactions:
+                key = (t.get("date"), t.get("amount"), t.get("counterparty"))
+                if key not in seen:
+                    seen.add(key)
+                    deduped.append(t)
 
-    # 去重（按日期 + 金额 + 对方账户名）
-    seen = set()
-    deduped: List[Dict[str, Any]] = []
-    for t in all_transactions:
-        key = (t.get("date"), t.get("amount"), t.get("counterparty"))
-        if key not in seen:
-            seen.add(key)
-            deduped.append(t)
+            # 按日期 + 时间排序
+            deduped.sort(key=lambda t: (t.get("date", ""), t.get("time", "")))
 
-    if verbose:
-        log.info("去重: %d → %d 条交易", len(all_transactions), len(deduped))
+            # 写出同名 CSV（即使无交易也写表头，保证重跑时跳过）
+            write_csv(deduped, csv_path)
+            result.processed[pdf_path] = csv_path
+            result.total_transactions += len(deduped)
+            log.info("%s → %s (%d 条交易)", pdf_name, os.path.basename(csv_path), len(deduped))
+            if verbose:
+                tqdm.write(f"  [{pdf_name}] → {os.path.basename(csv_path)} ({len(deduped)} 条交易)")
+            pbar.update(1)
 
-    # 按日期 + 时间排序
-    deduped.sort(key=lambda t: (t.get("date", ""), t.get("time", "")))
+    if not result.processed and result.failed:
+        raise RuntimeError(f"处理失败: {len(result.failed)}/{len(pdf_files)} 个 PDF 处理出错")
 
-    # 写出 CSV
-    csv_content = write_csv(deduped, output_path)
-    log.info("合并输出: %d 条交易 → %s", len(deduped), output_path)
-    return csv_content
+    return result

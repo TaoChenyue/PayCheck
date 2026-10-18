@@ -23,7 +23,7 @@
 PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → 交易去重排序 → CSV
 ```
 
-- 批量处理文件夹内所有 PDF，合并输出单个 CSV
+- 文件夹内每个 PDF 输出同名 CSV，同名 CSV 已存在则自动跳过
 - 自动剔除重复交易（按 日期 + 金额 + 对方账户名）
 - 自动按日期 + 时间排序
 - 输出 UTF-8 BOM 编码的 13 列标准 CSV
@@ -44,12 +44,8 @@ uv sync --extra gpu
 ## 使用
 
 ```bash
-# 基本用法：转换文件夹内所有 PDF
+# 基本用法：文件夹内每个 PDF → 同名 CSV（已存在则跳过）
 boc-pdf2csv ./statements/
-
-# 指定输出文件
-boc-pdf2csv ./statements/ --output result.csv
-boc-pdf2csv ./statements/ -o result.csv
 
 # 调整渲染精度（低配机器可用 2.0）
 boc-pdf2csv ./statements/ --scale 2.0
@@ -65,19 +61,24 @@ boc-pdf2csv --help
 boc-pdf2csv ./statements/ --verbose
 
 # 通过 Python 模块调用
-python -m boc_pdf2csv ./statements/ -o out.csv
+python -m boc_pdf2csv ./statements/
 ```
+
+`2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则跳过此 PDF，删除对应 CSV 后可重新转换。
 
 ### 作为 Python API 使用
 
 ```python
 from boc_pdf2csv import process_folder, process_pdf
 
-# 批量处理文件夹
-csv_content = process_folder("./statements/", output_path="out.csv")
+# 批量处理文件夹：每个 PDF → 同名 CSV（已存在则跳过），返回汇总
+result = process_folder("./statements/")
+result.processed  # {PDF 路径: CSV 路径}
+result.skipped    # 跳过的 PDF（同名 CSV 已存在）
+result.failed     # 处理失败的 PDF
 
 # 处理单个 PDF
-csv_content = process_pdf("./statements/2025-01.pdf", output_path="out.csv")
+csv_content = process_pdf("./statements/2025-01.pdf", output_path="2025-01.csv")
 ```
 
 ## CSV 输出格式
@@ -107,7 +108,7 @@ csv_content = process_pdf("./statements/2025-01.pdf", output_path="out.csv")
 | 0 | 成功 |
 | 1 | 输入路径不存在或非目录 |
 | 2 | 未找到 PDF 文件 |
-| 3 | 处理失败（部分或全部 PDF） |
+| 3 | 处理失败（全部 PDF 处理出错） |
 | 4 | 未提取到任何交易记录 |
 
 ## 项目结构

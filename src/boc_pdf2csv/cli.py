@@ -1,8 +1,7 @@
 """boc-pdf2csv 命令行接口
 
 用法:
-    boc-pdf2csv ./statements/                    # 基本用法
-    boc-pdf2csv ./statements/ --output out.csv   # 指定输出文件
+    boc-pdf2csv ./statements/                    # 每个 PDF → 同名 CSV（已存在则跳过）
     boc-pdf2csv ./statements/ --scale 2.0        # 调整渲染精度
     boc-pdf2csv ./statements/ --timeout 120      # 延长超时
     boc-pdf2csv --version                        # 查看版本
@@ -11,6 +10,7 @@
 
 import argparse
 import logging
+import os
 import sys
 
 from boc_pdf2csv import __version__
@@ -26,11 +26,6 @@ def main() -> int:
     parser.add_argument(
         "input",
         help="包含 PDF 文件的文件夹路径",
-    )
-    parser.add_argument(
-        "--output", "-o",
-        default="output.csv",
-        help="输出 CSV 文件路径（默认: output.csv）",
     )
     parser.add_argument(
         "--scale",
@@ -65,21 +60,12 @@ def main() -> int:
     )
 
     try:
-        csv_content = process_folder(
+        result = process_folder(
             folder_path=args.input,
-            output_path=args.output,
             scale=args.scale,
             timeout_minutes=args.timeout,
             verbose=args.verbose,
         )
-
-        if not csv_content.strip().split("\n")[1:]:
-            # CSV 仅有表头，无交易数据
-            print("警告: 未提取到任何交易记录", file=sys.stderr)
-            return 4
-
-        return 0
-
     except NotADirectoryError as e:
         print(f"错误: {e}", file=sys.stderr)
         return 1
@@ -98,6 +84,24 @@ def main() -> int:
             import traceback
             traceback.print_exc()
         return 3
+
+    # 汇总输出
+    print(
+        f"完成: {len(result.processed)} 个 PDF → CSV, "
+        f"跳过 {len(result.skipped)} 个, 失败 {len(result.failed)} 个, "
+        f"共 {result.total_transactions} 条交易"
+    )
+
+    if result.failed:
+        for pdf_path in result.failed:
+            print(f"警告: 处理失败: {os.path.basename(pdf_path)}", file=sys.stderr)
+
+    if result.processed and result.total_transactions == 0:
+        # 全部 CSV 仅有表头，无交易数据
+        print("警告: 未提取到任何交易记录", file=sys.stderr)
+        return 4
+
+    return 0
 
 
 if __name__ == "__main__":
