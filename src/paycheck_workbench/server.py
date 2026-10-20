@@ -402,6 +402,11 @@ class Handler(BaseHTTPRequestHandler):
         date_min = date_max = ""
         merged_dist: dict = {}
         for file_name, data in files:
+            if len(data) > MAX_UPLOAD_BYTES:
+                # 与单文件 _read_upload 口径一致：超限文件不解析、不写入
+                file_stats.append({"file_name": file_name, "error": "文件超过 64MB 上限"})
+                totals["error_file_count"] += 1
+                continue
             if Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS[source]:
                 ext = Path(file_name).suffix.lower() or "无扩展名"
                 file_stats.append({
