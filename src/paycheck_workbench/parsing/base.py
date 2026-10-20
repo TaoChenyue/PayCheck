@@ -48,8 +48,15 @@ def decode_csv_bytes(data: bytes) -> str:
 
 
 def read_csv_rows(text: str) -> List[Tuple[int, List[str]]]:
-    """csv 整体解析（兼容引号内换行），返回 (reader 行号, 字段列表)。"""
-    return list(enumerate(csv.reader(io.StringIO(text, newline="")), start=1))
+    """csv 整体解析（兼容引号内换行），返回 (reader 行号, 字段列表)。
+
+    单字段超过 csv 模块长度上限（默认 131072）时抛 csv.Error，此处转为 ParseError，
+    避免上层（HTTP 预览/写入）因未捕获异常而断开连接。
+    """
+    try:
+        return list(enumerate(csv.reader(io.StringIO(text, newline="")), start=1))
+    except csv.Error as exc:
+        raise ParseError(f"CSV 解析失败：{exc}（请检查是否存在异常超长字段）") from exc
 
 
 def find_header(
