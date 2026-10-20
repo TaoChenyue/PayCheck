@@ -305,7 +305,6 @@ tr.bf-error td { color: var(--danger); }
   <div class="brand">账单工作台</div>
   <nav id="tabs"></nav>
   <div class="topbar-actions">
-    <button id="btn-import" class="btn btn-primary">导入账单</button>
     <button id="btn-refresh" class="btn">刷新</button>
   </div>
 </header>
@@ -1270,7 +1269,6 @@ function renderBatchDone(results) {
 }
 
 /* ================= 事件绑定 ================= */
-$("#btn-import").addEventListener("click", openModal);
 $("#btn-import-empty").addEventListener("click", openModal);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
