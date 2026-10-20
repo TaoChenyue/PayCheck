@@ -397,7 +397,10 @@ class Handler(BaseHTTPRequestHandler):
 
         seen: set = set()
         file_stats: List[dict] = []
+        columns: List[str] = []
         totals = {"row_count": 0, "new_count": 0, "dup_count": 0, "failed_count": 0, "error_file_count": 0}
+        date_min = date_max = ""
+        merged_dist: dict = {}
         for file_name, data in files:
             if Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS[source]:
                 ext = Path(file_name).suffix.lower() or "无扩展名"
@@ -414,6 +417,8 @@ class Handler(BaseHTTPRequestHandler):
                 totals["error_file_count"] += 1
                 continue
             stats = _preview_stats(cfg, parsed, source, existing, seen)
+            if not columns:
+                columns = parsed.columns
             file_stats.append({
                 "file_name": file_name,
                 "row_count": stats["row_count"],
@@ -423,21 +428,41 @@ class Handler(BaseHTTPRequestHandler):
                 "dup_count": stats["dup_count"],
                 "date_min": stats["date_min"],
                 "date_max": stats["date_max"],
+                "distribution": stats["distribution"],
+                "sample": [r.values for r in parsed.rows[:5]],
             })
             totals["row_count"] += stats["row_count"]
             totals["new_count"] += stats["new_count"]
             totals["dup_count"] += stats["dup_count"]
             totals["failed_count"] += stats["error_count"] + stats["invalid_count"]
+            # 合并覆盖日期与收支分布（设计 4.2 合并统计次行）
+            if stats["date_min"]:
+                date_min = stats["date_min"] if not date_min or stats["date_min"] < date_min else date_min
+                date_max = stats["date_max"] if not date_max or stats["date_max"] > date_max else date_max
+            for item in stats["distribution"]:
+                acc = merged_dist.setdefault(item["label"], {"count": 0, "sum": 0.0})
+                acc["count"] += item["count"]
+                acc["sum"] += item["sum"]
+
+        order = ["收入", "支出"] + ([cfg.neutral_direction] if cfg.neutral_direction else [])
+        distribution = [
+            {"label": label, "count": merged_dist[label]["count"], "sum": round(merged_dist[label]["sum"], 2)}
+            for label in order if label in merged_dist
+        ]
 
         self._send(200, {
             "ok": True,
             "source": source,
             "file_count": len(files),
+            "columns": columns,
             "files": file_stats,
             "total_rows": totals["row_count"],
             "total_new": totals["new_count"],
             "total_dup": totals["dup_count"],
             "total_failed": totals["failed_count"],
+            "date_min": date_min,
+            "date_max": date_max,
+            "distribution": distribution,
             "error_file_count": totals["error_file_count"],
         })
 
