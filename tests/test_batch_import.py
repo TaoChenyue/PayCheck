@@ -201,6 +201,50 @@ def test_batch_preview_alipay_merged_distribution(base_url):
     assert res["total_new"] == 3
 
 
+def test_batch_preview_oversize_file_flagged(base_url):
+    """>64MB 文件：批量预览即拦截并标记 error（与单文件口径一致），不解析不写入。"""
+    f1 = _boc_csv([_boc_row("2024-08-01", "12:00:00", "1.00", "超市A")])
+    big = b"x" * (64 * 1024 * 1024 + 1)
+    res = _post(base_url + "/api/import/preview-batch",
+                _multipart([("big.csv", big), ("a.csv", f1)]), _headers())
+
+    assert res["ok"]
+    assert "超过 64MB" in res["files"][0]["error"]
+    assert res["files"][1]["new_count"] == 1
+    assert res["error_file_count"] == 1
+    assert res["total_new"] == 1
+
+
+def test_batch_preview_oversized_field_file_flagged(base_url):
+    """含 >128KB 单字段的文件：标记解析失败，同批其余文件正常返回（整批不断开）。"""
+    f1 = _boc_csv([_boc_row("2024-08-01", "12:00:00", "1.00", "超市A")])
+    big = "x" * (200 * 1024)
+    f2 = (
+        _BOC_HEADER + "\r\n"
+        f"2024-08-02,12:00:00,支出,2.00,超市B,银企对接,100.00,{big},快捷支付,人民币,,,\r\n"
+    ).encode("utf-8-sig")
+    res = _post(base_url + "/api/import/preview-batch",
+                _multipart([("a.csv", f1), ("big.csv", f2)]), _headers())
+
+    assert res["ok"]
+    assert res["files"][0]["new_count"] == 1
+    assert "CSV 解析失败" in res["files"][1]["error"]
+    assert res["error_file_count"] == 1
+    assert res["total_new"] == 1
+
+
+def test_single_preview_oversized_field_graceful(base_url):
+    """>128KB 单字段：单文件预览优雅返回解析失败（ok=False JSON），不断开连接（既有缺陷）。"""
+    big = "x" * (200 * 1024)
+    body = (
+        _BOC_HEADER + "\r\n"
+        f"2024-08-01,12:00:00,支出,1.00,超市,银企对接,100.00,{big},快捷支付,人民币,,,\r\n"
+    ).encode("utf-8-sig")
+    res = _post_file(base_url + "/api/import/preview", body, "big.csv")
+    assert res["ok"] is False
+    assert "CSV 解析失败" in res["error"]
+
+
 def test_batch_preview_without_files_400(base_url):
     body = f"--{BOUNDARY}--\r\n".encode("utf-8")
     with pytest.raises(urllib.error.HTTPError) as excinfo:
