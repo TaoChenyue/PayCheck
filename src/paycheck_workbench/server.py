@@ -6,26 +6,30 @@ API：
   GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位
   GET  /api/rows?source=...   筛选 + 排序 + 分页查询
   GET  /api/summary?source=... 汇总卡片（筛选联动）
-  POST /api/import/preview    解析文件，返回预览与去重比对（不写入）
-  POST /api/import/confirm    解析文件并写入（幂等）
+  POST /api/import/preview        解析单个文件，返回预览与去重比对（不写入）
+  POST /api/import/confirm        解析单个文件并写入（幂等）
+  POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
 """
 
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from paycheck_workbench import __version__
 from paycheck_workbench import db
 from paycheck_workbench.parsing import ParseError, parse_file
-from paycheck_workbench.sources import SOURCE_CONFIGS, SOURCES
+from paycheck_workbench.sources import ALLOWED_EXTENSIONS, SOURCE_CONFIGS, SOURCES
 
 _INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024  # 单文件上限 64MB（本地账单规模远小于此）
+MAX_BATCH_UPLOAD_BYTES = 256 * 1024 * 1024  # 一次批量上传总上限
+MAX_BATCH_FILES = 50  # 一次批量导入的文件数上限
 
 
 class ApiError(Exception):
@@ -58,6 +62,114 @@ def _parse_int(value: Optional[str], default: int, minimum: int = 1) -> int:
         return max(int(value), minimum)
     except ValueError as exc:
         raise ApiError(f"参数不是有效整数：{value}") from exc
+
+
+def _decode_part_filename(raw: str) -> str:
+    """解析 multipart 中的文件名：头按 latin-1 读回原始字节，再按 UTF-8 解码（浏览器直发 UTF-8）。"""
+    name = raw
+    if "%" in name:  # 个别实现会对文件名做百分号编码
+        try:
+            name = urllib.parse.unquote(name)
+        except Exception:
+            pass
+    try:
+        return name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return name
+
+
+def _parse_multipart_files(body: bytes, content_type: str) -> List[Tuple[str, bytes]]:
+    """解析 multipart/form-data 请求体，返回 [(文件名, 内容)]（忽略无 filename 的字段）。"""
+    match = re.search(r'boundary="?([^";\s]+)"?', content_type)
+    if not match:
+        raise ApiError("multipart 请求缺少 boundary")
+    delim = b"--" + match.group(1).encode("utf-8")
+    files: List[Tuple[str, bytes]] = []
+    for section in body.split(delim):
+        if not section or section.startswith(b"--") or not section.strip():
+            continue  # 前言 / 结束符 / 空段
+        if section.startswith(b"\r\n"):
+            section = section[2:]
+        head, sep, content = section.partition(b"\r\n\r\n")
+        if not sep:
+            continue
+        if content.endswith(b"\r\n"):
+            content = content[:-2]
+        head_text = head.decode("latin-1")
+        name_match = re.search(r'name="?files"?\s*;\s*filename="([^"]*)"', head_text, re.I)
+        if not name_match:
+            name_match = re.search(r'name="?files"?\s*;\s*filename=([^\s;]+)', head_text, re.I)
+        if not name_match:
+            continue
+        files.append((_decode_part_filename(name_match.group(1)), content))
+    return files
+
+
+def _preview_stats(cfg, parsed, source: str, existing: set, seen: set) -> dict:
+    """逐行统计：收支分布、日期范围、新增/重复（库内已有 ∪ 批内已见）/无效键。
+
+    seen 就地累积本文件的新增键；返回 dict 含 row_count / error_count / invalid_count /
+    new_count / dup_count / date_min / date_max / distribution。
+    """
+    col_map = {c: i for i, c in enumerate(parsed.columns)}
+    time_idx = col_map[cfg.date_col]
+    amount_idx = col_map[cfg.amount_col]
+    dir_idx = col_map[cfg.direction_col]
+
+    income = expense = neutral = 0
+    income_sum = expense_sum = neutral_sum = 0.0
+    date_min = date_max = ""
+    for row in parsed.rows:
+        values = row.values
+        direction = values[dir_idx]
+        try:
+            amount = float(values[amount_idx]) if values[amount_idx] else 0.0
+        except ValueError:
+            amount = 0.0
+        if direction == "收入":
+            income += 1
+            income_sum += amount
+        elif direction == "支出":
+            expense += 1
+            expense_sum += amount
+        elif cfg.neutral_direction and direction == cfg.neutral_direction:
+            neutral += 1
+            neutral_sum += amount
+        time_value = values[time_idx]
+        if time_value:
+            if not date_min or time_value < date_min:
+                date_min = time_value
+            if not date_max or time_value > date_max:
+                date_max = time_value
+
+    new_count = dup_count = invalid_count = 0
+    for row in parsed.rows:
+        key = db.dedup_key(source, dict(zip(parsed.columns, row.values)))
+        if not key:
+            invalid_count += 1  # 空键行在 confirm 阶段计入失败
+        elif key in existing or key in seen:
+            dup_count += 1
+        else:
+            new_count += 1
+            seen.add(key)
+
+    dist = [{"label": "收入", "count": income, "sum": round(income_sum, 2)}]
+    if cfg.neutral_direction:
+        dist.append({"label": "支出", "count": expense, "sum": round(expense_sum, 2)})
+        dist.append({"label": cfg.neutral_direction, "count": neutral, "sum": round(neutral_sum, 2)})
+    else:
+        dist.append({"label": "支出", "count": expense, "sum": round(expense_sum, 2)})
+
+    return {
+        "row_count": len(parsed.rows),
+        "error_count": len(parsed.errors),
+        "invalid_count": invalid_count,
+        "new_count": new_count,
+        "dup_count": dup_count,
+        "date_min": date_min[:10],
+        "date_max": date_max[:10],
+        "distribution": dist,
+    }
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -221,6 +333,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/import/preview":
                 self._api_import_preview()
+            elif parsed.path == "/api/import/preview-batch":
+                self._api_import_preview_batch()
             elif parsed.path == "/api/import/confirm":
                 self._api_import_confirm()
             else:
@@ -239,71 +353,92 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         cfg = SOURCE_CONFIGS[source]
-        col_map = {c: i for i, c in enumerate(parsed_result.columns)}
-        time_idx = col_map[cfg.date_col]
-        amount_idx = col_map[cfg.amount_col]
-        dir_idx = col_map[cfg.direction_col]
-
-        income = expense = neutral = 0
-        income_sum = expense_sum = neutral_sum = 0.0
-        date_min = date_max = ""
-        for row in parsed_result.rows:
-            values = row.values
-            direction = values[dir_idx]
-            try:
-                amount = float(values[amount_idx]) if values[amount_idx] else 0.0
-            except ValueError:
-                amount = 0.0
-            if direction == "收入":
-                income += 1
-                income_sum += amount
-            elif direction == "支出":
-                expense += 1
-                expense_sum += amount
-            elif cfg.neutral_direction and direction == cfg.neutral_direction:
-                neutral += 1
-                neutral_sum += amount
-            time_value = values[time_idx]
-            if time_value:
-                if not date_min or time_value < date_min:
-                    date_min = time_value
-                if not date_max or time_value > date_max:
-                    date_max = time_value
-
         with self._connect() as conn:
             existing = db.existing_dedup_keys(conn, source)
-        new_count = dup_count = 0
-        seen = set()
-        for row in parsed_result.rows:
-            key = db.dedup_key(source, dict(zip(parsed_result.columns, row.values)))
-            if not key:
-                continue  # 空键行在 confirm 阶段计入失败
-            if key in existing or key in seen:
-                dup_count += 1
-            else:
-                new_count += 1
-                seen.add(key)
-
-        dist = [{"label": "收入", "count": income, "sum": round(income_sum, 2)}]
-        if cfg.neutral_direction:
-            dist.append({"label": "支出", "count": expense, "sum": round(expense_sum, 2)})
-            dist.append({"label": cfg.neutral_direction, "count": neutral, "sum": round(neutral_sum, 2)})
-        else:
-            dist.append({"label": "支出", "count": expense, "sum": round(expense_sum, 2)})
+        stats = _preview_stats(cfg, parsed_result, source, existing, set())
 
         self._send(200, {
             "ok": True,
             "source": source,
             "file_name": file_name,
             "columns": parsed_result.columns,
-            "row_count": len(parsed_result.rows),
-            "error_count": len(parsed_result.errors),
-            "date_min": date_min[:10],
-            "date_max": date_max[:10],
-            "distribution": dist,
-            "new_count": new_count,
-            "dup_count": dup_count,
+            "row_count": stats["row_count"],
+            "error_count": stats["error_count"],
+            "date_min": stats["date_min"],
+            "date_max": stats["date_max"],
+            "distribution": stats["distribution"],
+            "new_count": stats["new_count"],
+            "dup_count": stats["dup_count"],
             "sample": [r.values for r in parsed_result.rows[:5]],
+        })
+
+    def _api_import_preview_batch(self):
+        """批量预览：multipart 携带多个文件，返回逐文件统计与合并去重比对（不写入）。"""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ApiError("请求体为空")
+        if length > MAX_BATCH_UPLOAD_BYTES:
+            raise ApiError("批量上传总大小超过 256MB 上限")
+        source = self.headers.get("X-Source", "")
+        if source not in SOURCE_CONFIGS:
+            raise ApiError(f"未知数据源：{source}")
+        files = _parse_multipart_files(
+            self.rfile.read(length), self.headers.get("Content-Type", "")
+        )
+        if not files:
+            raise ApiError("未收到文件")
+        if len(files) > MAX_BATCH_FILES:
+            raise ApiError(f"一次最多导入 {MAX_BATCH_FILES} 个文件")
+
+        cfg = SOURCE_CONFIGS[source]
+        allowed = "、".join(ALLOWED_EXTENSIONS[source])
+        with self._connect() as conn:
+            existing = db.existing_dedup_keys(conn, source)
+
+        seen: set = set()
+        file_stats: List[dict] = []
+        totals = {"row_count": 0, "new_count": 0, "dup_count": 0, "failed_count": 0, "error_file_count": 0}
+        for file_name, data in files:
+            if Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS[source]:
+                ext = Path(file_name).suffix.lower() or "无扩展名"
+                file_stats.append({
+                    "file_name": file_name,
+                    "error": f"{cfg.label} 只支持 {allowed} 文件（收到 {ext}）",
+                })
+                totals["error_file_count"] += 1
+                continue
+            try:
+                parsed = parse_file(source, file_name, data)
+            except ParseError as exc:
+                file_stats.append({"file_name": file_name, "error": str(exc)})
+                totals["error_file_count"] += 1
+                continue
+            stats = _preview_stats(cfg, parsed, source, existing, seen)
+            file_stats.append({
+                "file_name": file_name,
+                "row_count": stats["row_count"],
+                "error_count": stats["error_count"],
+                "invalid_count": stats["invalid_count"],
+                "new_count": stats["new_count"],
+                "dup_count": stats["dup_count"],
+                "date_min": stats["date_min"],
+                "date_max": stats["date_max"],
+            })
+            totals["row_count"] += stats["row_count"]
+            totals["new_count"] += stats["new_count"]
+            totals["dup_count"] += stats["dup_count"]
+            totals["failed_count"] += stats["error_count"] + stats["invalid_count"]
+
+        self._send(200, {
+            "ok": True,
+            "source": source,
+            "file_count": len(files),
+            "files": file_stats,
+            "total_rows": totals["row_count"],
+            "total_new": totals["new_count"],
+            "total_dup": totals["dup_count"],
+            "total_failed": totals["failed_count"],
+            "error_file_count": totals["error_file_count"],
         })
 
     def _api_import_confirm(self):
