@@ -180,6 +180,7 @@ python -m paycheck_workbench
 
 - 三数据源 Tab 切换（BOC CSV / 支付宝 GBK CSV / 微信 XLSX，兼容 CSV 变体），自动跳过文件信息头定位表头
 - 解析预览（列样例、日期范围、收/支分布）+ 去重比对（新增/重复跳过）→ 确认后写入 SQLite，重复导入幂等
+- 导入入口支持一次选择多个文件（多选/拖拽，按当前 Tab 限定类型）：逐文件统计 + 合并去重比对，确认后逐文件写入并显示进度与结果，类型不符的文件明确提示且不写入
 - 明细表格：排序、分页、行展开详情、列显隐；汇总卡片随筛选联动（收入/支出/不计收支/期末余额或笔数）
 - 左侧筛选栏：日期快捷档位、收/支多选、分类多选、金额区间、关键词搜索（300ms 防抖）
 - 三张表 `boc_transactions` / `alipay_transactions` / `wechat_transactions`：源明细列全量入库 + `source_file` / `imported_at` / `dedup_key`（UNIQUE）
