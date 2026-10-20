@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from paycheck_workbench.server import serve
+from paycheck_workbench.sources import ALIPAY_COLUMNS, BOC_COLUMNS
 
 BOUNDARY = "----PayCheckTestBoundary123"
 
@@ -39,12 +40,18 @@ def base_url(tmp_path):
     yield "http://127.0.0.1:8901"
 
 
-def _boc_row(date, time_, amount, counterparty):
-    return f"{date},{time_},支出,{amount},{counterparty},银企对接,100.00,,快捷支付,人民币,,,"
+def _boc_row(date, time_, amount, counterparty, tx_type="支出"):
+    return f"{date},{time_},{tx_type},{amount},{counterparty},银企对接,100.00,,快捷支付,人民币,,,"
 
 
 def _boc_csv(rows):
     return ("\r\n".join([_BOC_HEADER, *rows]) + "\r\n").encode("utf-8-sig")
+
+
+def _alipay_csv(row_texts):
+    info = ["支付宝交易明细", "共2笔记录"]
+    header = ",".join(ALIPAY_COLUMNS) + ","
+    return "\n".join([*info, header, *row_texts]).encode("gbk")
 
 
 def _multipart(files):
@@ -61,10 +68,10 @@ def _multipart(files):
     return b"".join(parts)
 
 
-def _headers():
+def _headers(source="boc"):
     return {
         "Content-Type": f"multipart/form-data; boundary={BOUNDARY}",
-        "X-Source": "boc",
+        "X-Source": source,
     }
 
 
@@ -91,22 +98,41 @@ def test_batch_preview_merged_stats(base_url):
     f1 = _boc_csv([_boc_row("2024-08-01", "12:00:00", "1.00", "超市A"),
                    _boc_row("2024-08-02", "12:00:00", "2.00", "超市B")])
     f2 = _boc_csv([_boc_row("2024-08-02", "12:00:00", "2.00", "超市B"),  # 与 f1 批内重复
-                   _boc_row("2024-08-03", "12:00:00", "3.00", "超市C")])
+                   _boc_row("2024-08-03", "12:00:00", "3.00", "超市C"),
+                   _boc_row("2024-08-04", "12:00:00", "100.00", "工资", "收入")])
     res = _post(base_url + "/api/import/preview-batch", _multipart([("a.csv", f1), ("b.csv", f2)]), _headers())
 
     assert res["ok"]
     assert res["file_count"] == 2
+    assert res["columns"] == BOC_COLUMNS
     assert res["files"][0]["file_name"] == "a.csv"
     assert res["files"][0]["new_count"] == 2
     assert res["files"][0]["dup_count"] == 0
     assert res["files"][0]["date_min"] == "2024-08-01"
-    assert res["files"][1]["new_count"] == 1
+    assert res["files"][1]["new_count"] == 2
     assert res["files"][1]["dup_count"] == 1
-    assert res["total_rows"] == 4
-    assert res["total_new"] == 3
+    assert res["total_rows"] == 5
+    assert res["total_new"] == 4
     assert res["total_dup"] == 1
     assert res["total_failed"] == 0
     assert res["error_file_count"] == 0
+    # 合并覆盖日期与收支分布（设计 4.2 合并统计次行）
+    assert res["date_min"] == "2024-08-01"
+    assert res["date_max"] == "2024-08-04"
+    assert res["distribution"] == [
+        {"label": "收入", "count": 1, "sum": 100.0},
+        {"label": "支出", "count": 4, "sum": 8.0},
+    ]
+    # 逐文件分布与首 5 行样例（卡片展开区）
+    assert res["files"][0]["distribution"] == [
+        {"label": "收入", "count": 0, "sum": 0.0},
+        {"label": "支出", "count": 2, "sum": 3.0},
+    ]
+    assert res["files"][0]["sample"] == [
+        ["2024-08-01", "12:00:00", "支出", "1.00", "超市A", "银企对接", "100.00", "", "快捷支付", "人民币", "", "", ""],
+        ["2024-08-02", "12:00:00", "支出", "2.00", "超市B", "银企对接", "100.00", "", "快捷支付", "人民币", "", "", ""],
+    ]
+    assert len(res["files"][1]["sample"]) == 3
 
 
 def test_batch_preview_bad_extension_flagged(base_url):
@@ -145,6 +171,34 @@ def test_batch_preview_same_file_twice(base_url):
     assert res["files"][1]["dup_count"] == 2
     assert res["total_new"] == 2
     assert res["total_dup"] == 2
+
+
+def test_batch_preview_sample_limited_to_5(base_url):
+    f = _boc_csv([_boc_row(f"2024-08-0{i}", "12:00:00", "1.00", "超市") for i in range(1, 7)])
+    res = _post(base_url + "/api/import/preview-batch", _multipart([("a.csv", f)]), _headers())
+    assert res["files"][0]["row_count"] == 6
+    assert len(res["files"][0]["sample"]) == 5
+
+
+def test_batch_preview_alipay_merged_distribution(base_url):
+    """支付宝批内合并分布：收入/支出/不计收支三类合并顺序与数值正确。"""
+    f1 = _alipay_csv([
+        "2025-07-31 18:05:17,餐饮美食,上海亚惠,/,商品A,支出,27.00,中国银行储蓄卡(3569),交易成功,ORDER001,M001,备注1,",
+        "2025-07-30 06:02:38,投资理财,余额宝,/,收益发放,不计收支,5.22,余额宝,交易成功,ORDER002\t,\t,,",
+    ])
+    f2 = _alipay_csv([
+        "2025-07-29 12:00:00,其他,转账,/,转入,收入,100.00,余额,交易成功,ORDER003,M003,备注3,",
+    ])
+    res = _post(base_url + "/api/import/preview-batch",
+                _multipart([("a.csv", f1), ("b.csv", f2)]), _headers("alipay"))
+
+    assert res["columns"] == ALIPAY_COLUMNS
+    assert res["distribution"] == [
+        {"label": "收入", "count": 1, "sum": 100.0},
+        {"label": "支出", "count": 1, "sum": 27.0},
+        {"label": "不计收支", "count": 1, "sum": 5.22},
+    ]
+    assert res["total_new"] == 3
 
 
 def test_batch_preview_without_files_400(base_url):
@@ -189,6 +243,12 @@ def test_batch_real_sample_twice_idempotent(base_url):
     assert second["new_count"] == 0
     assert second["dup_count"] == first["new_count"]
     assert preview["total_new"] == first["new_count"]
+    # 合并覆盖日期/收支分布与逐文件分布、样例均返回
+    assert preview["date_min"] == first["date_min"]
+    assert preview["date_max"] == first["date_max"]
+    assert sum(d["count"] for d in preview["distribution"]) == first["row_count"] * 2
+    assert len(first["sample"]) == 5
+    assert first["distribution"]
 
     r1 = _post_file(base_url + "/api/import/confirm", data, "real1.csv")
     assert r1["inserted"] == first["new_count"]
