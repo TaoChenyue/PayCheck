@@ -1157,7 +1157,8 @@ function renderBatchPreview(model) {
       else model.expanded.add(item.name);
       renderBatchPreview(model);
     });
-    card.querySelector(".fc-remove").addEventListener("click", () => {
+    card.querySelector(".fc-remove").addEventListener("click", (event) => {
+      event.stopPropagation();  // 防冒泡到卡片头部展开处理器，覆盖「回到选择态」的渲染
       item.removed = true;
       model.expanded.delete(item.name);
       if (!model.items.some((f) => !f.removed)) {
