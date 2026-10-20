@@ -348,6 +348,7 @@ tr.bf-error td { color: var(--danger); }
     <div id="banners"></div>
     <div id="cards"></div>
     <div id="toolbar">
+      <button class="btn btn-primary" id="btn-import-toolbar">导入账单</button>
       <input type="search" id="search" placeholder="搜索…">
       <div id="colset">
         <button class="btn" id="btn-colset">列设置 ▾</button>
@@ -1269,6 +1270,7 @@ function renderBatchDone(results) {
 }
 
 /* ================= 事件绑定 ================= */
+$("#btn-import-toolbar").addEventListener("click", openModal);
 $("#btn-import-empty").addEventListener("click", openModal);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
