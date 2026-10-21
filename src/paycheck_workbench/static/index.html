@@ -90,6 +90,7 @@ body {
   padding: 3px 4px; border-radius: 4px; min-width: 0;
 }
 .checkbox-list label .lbl { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.sidebar-note { font-size: 12px; color: #C4C7CC; margin-top: 8px; line-height: 1.5; }
 .checkbox-list label:hover { background: var(--row-hover); }
 .checkbox-list input { accent-color: var(--brand); }
 #category-list { max-height: 240px; overflow-y: auto; }
@@ -461,6 +462,7 @@ tr.bf-error td { color: var(--danger); }
     <div class="sidebar-section">
       <h3>收/支</h3>
       <div class="checkbox-list" id="direction-list"></div>
+      <div class="sidebar-note" id="direction-note" hidden>仅作用于真实收入 / 真实支出区</div>
     </div>
     <div class="sidebar-section">
       <h3 id="category-title">分类</h3>
@@ -744,6 +746,7 @@ function renderSidebar() {
       f.directions = [...$("#direction-list").querySelectorAll("input:checked")].map((i) => i.value);
       onFilterChange();
     }));
+  $("#direction-note").hidden = currentSource !== TOTAL;  // 收/支筛选不作用于内部流动区
   // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
   if (currentSource === TOTAL) {
     $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
