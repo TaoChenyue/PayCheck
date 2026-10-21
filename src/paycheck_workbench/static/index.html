@@ -1307,7 +1307,7 @@ function resetFilters() {
 const RULE_SOURCE_OPTIONS = [["boc", "BOC"], ["alipay", "支付宝"], ["wechat", "微信"]];
 const OP_LABELS = { eq: "等于", in: "任一等于", contains: "包含", starts: "开头是", not_contains: "不包含" };
 const OP_OPTIONS = Object.entries(OP_LABELS);
-const ACTION_LABELS = { fold: "折叠标灰", hide: "隐藏" };
+const ACTION_LABELS = { fold: "内部流动", hide: "重复记录" };
 const FIELD_LABELS = { tx_name: "交易名称", counterparty: "对方账户名", memo: "附言", channel: "渠道", tx_type: "类型" };
 const FIELD_OPTIONS = {
   boc: [["tx_name", "交易名称"], ["counterparty", "对方账户名"], ["memo", "附言"], ["channel", "渠道"], ["tx_type", "类型"]],
@@ -1519,7 +1519,7 @@ function renderRuleForm() {
       <div class="f-row radio-line">
         <span class="f-label">命中处理</span>
         ${Object.entries(ACTION_LABELS).map(([v, l]) =>
-          `<label><input type="radio" name="f-action" value="${v}" ${r.action === v ? "checked" : ""}> ${l}（不计入汇总）</label>`).join("")}
+          `<label><input type="radio" name="f-action" value="${v}" ${r.action === v ? "checked" : ""}> ${l}（不计入真实收支）</label>`).join("")}
         <span class="hit-preview" id="f-hit">—</span>
       </div>
       <div class="form-actions">
