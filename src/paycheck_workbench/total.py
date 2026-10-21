@@ -371,7 +371,8 @@ def query_summary(
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
 ) -> dict:
-    """总账户汇总（真实口径）：真实收入 / 真实支出 / 净收支 / 真实笔数 + 内部流动行数。"""
+    """总账户汇总（真实口径，TCY-20 设计 §1）：真实收入 / 真实支出 / 净收支 / 真实笔数，
+    另返回内部流动的组数与行数（不计入真实收支），取代旧的 counted/transfer/hidden 三口径。"""
     selected = [s for s in (sources if sources is not None else SOURCES) if s in SOURCE_CONFIGS]
     income, expense, flow_rows = _zone_rows(
         conn, selected,
