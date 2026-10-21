@@ -248,6 +248,14 @@ tr.flow-member td { background: #FAFBFC; color: var(--text-2); font-size: 12px; 
 tr.flow-more td { text-align: center; color: var(--brand); cursor: pointer; font-size: 12px; padding: 8px; }
 tr.grp-hint-row td { padding: 6px 16px; background: var(--page-bg); }
 .grp-hint { font-size: 12px; color: var(--text-2); }
+.zone-pagination {
+  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
+  font-size: 13px; color: var(--text-2); padding: 10px 16px; border-top: 1px solid var(--border);
+}
+.zone-pagination button {
+  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 12px; cursor: pointer;
+}
+.zone-pagination button:disabled { opacity: .4; cursor: not-allowed; }
 #total-tools { display: flex; align-items: center; gap: 8px; }
 
 /* ---------- 规则设置弹窗 ---------- */
@@ -559,6 +567,7 @@ let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
 let lastSummary = null;       // 最近一次汇总响应（总账户区头合计展示）
 let lastTotal = null;         // 最近一次总账户三区响应
 let collapsedZones = { income: false, expense: false, flow: false };  // 总账户区块收起状态
+let totalZonePages = { income: 1, expense: 1, flow: 1 };  // 总账户三区各自独立分页
 let expandedFlowGroups = new Set();  // 内部流动区已展开的组（组 key）
 let flowShownAll = new Set();        // 内部流动区已「展开更多」的组（组 key）
 let flowAllExpanded = false;         // 内部流动区「全部展开」开关
@@ -670,6 +679,9 @@ function filterQuery() {
   if (f.directions.length) p.set("directions", f.directions.join(","));
   if (currentSource === TOTAL) {
     if (f.sources.length) p.set("sources", f.sources.join(","));
+    p.set("income_page", totalZonePages.income);
+    p.set("expense_page", totalZonePages.expense);
+    p.set("flow_page", totalZonePages.flow);
   } else if (f.categories.length) {
     p.set("categories", f.categories.join(","));
   }
@@ -940,7 +952,10 @@ function zoneHtml(zoneKey, title, cols) {
       <span class="zone-title">${esc(title)}</span><span class="zone-sub">${sub}</span>
       <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
     </div>
-    <div class="zone-body" data-zone="${zoneKey}" ${collapsed ? "hidden" : ""}>${body}</div>`;
+    <div class="zone-body" data-zone="${zoneKey}" ${collapsed ? "hidden" : ""}>
+      ${body}
+      ${z.total > 0 ? zonePaginationHtml(zoneKey) : ""}
+    </div>`;
 }
 function zoneRowHtml(row, cols) {
   const tds = cols.map((col) => {
@@ -964,7 +979,10 @@ function flowZoneHtml(cols) {
       <span class="zone-expand-all" data-act="expand-all">${flowAllExpanded ? "全部收起 ▴" : "全部展开 ▾"}</span>
       <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
     </div>
-    <div class="zone-body" data-zone="flow" ${collapsed ? "hidden" : ""}>${body}</div>`;
+    <div class="zone-body" data-zone="flow" ${collapsed ? "hidden" : ""}>
+      ${body}
+      ${z.total > 0 ? zonePaginationHtml("flow") : ""}
+    </div>`;
 }
 function flowGroupHtml(g, cols) {
   // 组主行 + 展开成员行（时间正序，默认收起；超 50 行先显示前 50 行）+ 跨区引用提示
@@ -1003,6 +1021,17 @@ function memberRowHtml(m, cols, hidden) {
   }).join("");
   return `<tr class="flow-member" data-id="${m.id}" ${hidden}>${tds}</tr>`;
 }
+function zonePaginationHtml(zoneKey) {
+  const z = lastTotal[zoneKey];
+  const page = totalZonePages[zoneKey];
+  const pages = Math.max(1, Math.ceil(z.total / z.page_size));
+  const unit = zoneKey === "flow" ? "组" : "条";
+  return `<div class="zone-pagination">
+    <span>第 ${page} 页，共 ${pages} 页 · ${z.total.toLocaleString()} ${unit}</span>
+    <button data-act="prev" ${page <= 1 ? "disabled" : ""}>上一页</button>
+    <button data-act="next" ${page >= pages ? "disabled" : ""}>下一页</button>
+  </div>`;
+}
 function renderFlowZone() {
   // 仅重绘内部流动区（展开/收起、展开更多、全部展开），保留其余区块状态
   const vis = visibleColsBySource[TOTAL];
@@ -1022,6 +1051,16 @@ function bindZoneEvents() {
       const fold = head.querySelector(".zone-collapse");
       if (fold) fold.textContent = collapsedZones[zone] ? "展开 ▾" : "收起 ▴";
     });
+  });
+  // 三区各自独立分页
+  document.querySelectorAll("#total-zones .zone-pagination").forEach((bar) => {
+    const zone = bar.parentElement.dataset.zone;
+    bar.querySelectorAll("button").forEach((btn) =>
+      btn.addEventListener("click", () => {
+        if (btn.disabled) return;
+        totalZonePages[zone] += btn.dataset.act === "next" ? 1 : -1;
+        loadRows();
+      }));
   });
   // 真实区表头排序与行详情（沿用现有交互）
   document.querySelectorAll("#zone-income th.sortable, #zone-expense th.sortable").forEach((th) =>
@@ -1247,9 +1286,13 @@ async function switchTab(source) {
 }
 const onFilterChange = debounce(() => {
   pageBySource[currentSource] = 1;
+  resetTotalPages();
   updatePresetActive();
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }, 300);
+function resetTotalPages() {
+  totalZonePages = { income: 1, expense: 1, flow: 1 };
+}
 function updatePresetActive() {
   const f = filtersBySource[currentSource];
   const presets = ["this-month", "last-month", "recent-3m"];
@@ -1300,6 +1343,7 @@ function resetFilters() {
   filtersBySource[currentSource] = freshFilters();
   renderSidebar();
   pageBySource[currentSource] = 1;
+  resetTotalPages();
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }
 
@@ -2118,11 +2162,13 @@ $("#btn-reset").addEventListener("click", resetFilters);
 $("#search").addEventListener("input", debounce((e) => {
   filtersBySource[currentSource].q = e.target.value.trim();
   pageBySource[currentSource] = 1;
+  resetTotalPages();
   loadRows().then(loadSummary).catch((err) => showErrorBanner(err.message));
 }, 300));
 $("#pagesize").addEventListener("change", (e) => {
   pageSizeBySource[currentSource] = Number(e.target.value);
   pageBySource[currentSource] = 1;
+  resetTotalPages();
   loadRows();
 });
 $("#date-from").addEventListener("change", (e) => { filtersBySource[currentSource].date_from = e.target.value; onFilterChange(); });
