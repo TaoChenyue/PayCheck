@@ -25,6 +25,30 @@ from paycheck_workbench.sources import (
 
 _TOTAL_SORT_KEYS = {"datetime", "amount", "counterparty"}
 
+# 通道对映射（TCY-20 设计 §3.1）：内置预设规则名 → 通道对（服务器常量，随预设维护）。
+# 自定义规则自成一个通道对（名 = 规则名）；未命中规则的不计收支行按来源归组。
+FLOW_PAIRS: Dict[str, str] = {
+    "余额宝-转入转出": "支付宝 ↔ BOC",
+    "支付宝余额-提现": "支付宝 ↔ BOC",
+    "支付宝小荷包": "支付宝 ↔ BOC",
+    "银行卡快捷支付-渠道行（支付宝）": "支付宝 ↔ BOC",
+    "银行卡渠道退款（支付宝）": "支付宝 ↔ BOC",
+    "平台提现入账": "支付宝 ↔ BOC",
+    "基金/平台入账（蚂蚁）": "支付宝 ↔ BOC",
+    "基金/平台入账（支付宝）": "支付宝 ↔ BOC",
+    "零钱通-转入转出": "微信 ↔ BOC",
+    "微信零钱-充值提现": "微信 ↔ BOC",
+    "银行卡快捷支付-渠道行（财付通）": "微信 ↔ BOC",
+    "银行卡渠道退款（财付通）": "微信 ↔ BOC",
+    "基金/平台入账（财付通）": "微信 ↔ BOC",
+    "花呗还款-支付宝侧": "花呗",
+    "花呗还款-银行侧": "花呗",
+    "同名账户互转": "同名账户",
+}
+
+# 跨区引用提示的平台名（设计 §3.2）：渠道重复组的真身在真实支出区
+PAIR_PLATFORMS = {"支付宝 ↔ BOC": "支付宝", "微信 ↔ BOC": "微信"}
+
 
 # ---------------------------------------------------------------------------
 # 统一字段映射（设计 §2.2）
@@ -209,6 +233,58 @@ def _flow_public(row: dict) -> dict:
     return public
 
 
+def _pair_of(row: dict) -> str:
+    """行所属通道对：优先取命中规则的内置映射，其次自定义规则名，未命中按来源归组。"""
+    names = [h["name"] for h in row["_hits"]]
+    for name in names:
+        if name in FLOW_PAIRS:
+            return FLOW_PAIRS[name]
+    if names:
+        return names[0]  # 自定义规则自成一个通道对（名 = 规则名）
+    return SOURCE_CONFIGS[row["source"]].label
+
+
+def _pick_main(rows_desc: List[dict]) -> dict:
+    """组主记录（设计 §3.2）：组内方向=收入的最新一行 → 支出最新 → 时间最新。"""
+    for row in rows_desc:
+        if row["direction"] == "收入":
+            return row
+    for row in rows_desc:
+        if row["direction"] == "支出":
+            return row
+    return rows_desc[0]
+
+
+def _group_flows(rows: List[dict]) -> List[dict]:
+    """内部流动行按「通道对 × 日期」分组（聚合级，不逐笔配对），组按主记录时间倒序。"""
+    buckets: Dict[Tuple[str, str], List[dict]] = {}
+    for row in rows:
+        buckets.setdefault((_pair_of(row), row["date"]), []).append(row)
+    groups: List[dict] = []
+    for (pair, date), members in buckets.items():
+        desc = sorted(members, key=lambda r: r["time"] or "", reverse=True)
+        main = _pick_main(desc)
+        others = [r for r in desc if r is not main]
+        others.sort(key=lambda r: r["time"] or "")  # 成员时间正序
+        has_dup = any(_mark_of(r)["mark"] == "duplicate" for r in members)
+        has_platform = any(r["source"] in (SOURCE_ALIPAY, SOURCE_WECHAT) for r in members)
+        platform = PAIR_PLATFORMS.get(pair, "")
+        main_public = _flow_public(main)
+        main_public["member_count"] = len(others)
+        groups.append({
+            "key": f"{pair}|{date}",
+            "pair": pair,
+            "date": date,
+            "main": main_public,
+            "members": [_flow_public(r) for r in others],
+            # 渠道重复行的真身在真实支出区：组内只有银行侧行时提示跨区引用（设计 §3.2）
+            "cross_ref": bool(has_dup and not has_platform and platform),
+            "platform": platform,
+        })
+    groups.sort(key=lambda g: g["main"]["time"] or "", reverse=True)
+    return groups
+
+
 def _zone_rows(conn, selected, **filters) -> Tuple[List[dict], List[dict], List[dict]]:
     """取回所选源并返回三区行列表（income, expense, flow）。
 
@@ -303,5 +379,5 @@ def query_summary(
         "expense": expense_agg,
         "net": round(income_agg["sum"] - expense_agg["sum"], 2),
         "count": income_agg["count"] + expense_agg["count"],
-        "flow": {"rows": len(flow_rows)},
+        "flow": {"groups": len(_group_flows(flow_rows)), "rows": len(flow_rows)},
     }
