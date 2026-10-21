@@ -235,6 +235,47 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
   background: #FEF0EF; border: 1px solid #F6C5C2; color: var(--danger); border-radius: 8px;
   padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: none;
 }
+.modal-warn {
+  background: #FFF9E6; border: 1px solid #F2DEB3; color: #8A6D1F; border-radius: 8px;
+  padding: 10px 14px; font-size: 13px; margin-bottom: 14px; word-break: break-all;
+}
+/* 批量导入：逐文件可展开卡片 / 进度列表 / 确定进度条 */
+.sample-table-wrap th.num { text-align: right; }
+tr.bf-error td { color: var(--danger); }
+.bf-new { color: var(--income); font-weight: 600; }
+.bf-fail { color: var(--danger); font-weight: 600; }
+.file-card { border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; background: #fff; }
+.file-card.error { border-color: #F6C5C2; background: #FEF0EF; }
+.file-card-head {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer;
+  font-size: 13px; user-select: none;
+}
+.file-card-head:hover { background: var(--row-hover); }
+.file-card .fc-toggle { width: 14px; color: var(--text-2); flex-shrink: 0; }
+.file-card .fc-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card .fc-summary { color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.file-card.error .fc-summary { color: var(--danger); }
+.fc-remove {
+  border: 1px solid var(--border); background: #fff; border-radius: 6px; cursor: pointer;
+  padding: 2px 8px; font-size: 12px; color: var(--text-2); flex-shrink: 0;
+}
+.fc-remove:hover { color: var(--danger); border-color: var(--danger); }
+.file-card-body { padding: 10px 14px 14px; border-top: 1px solid var(--border); }
+.file-card-body h5 { font-size: 12px; color: var(--text-2); margin: 6px 0; font-weight: 600; }
+.batch-merged-extra { font-size: 13px; color: var(--text-2); margin-top: 10px; line-height: 1.8; }
+.batch-file-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.batch-file-item {
+  display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13px;
+}
+.batch-file-item .bf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.batch-file-item .bf-status { color: var(--text-2); white-space: nowrap; }
+.batch-file-item.active { border-color: var(--brand); }
+.batch-file-item.active .bf-status { color: var(--brand); }
+.batch-file-item.done .bf-status { color: var(--income); }
+.batch-file-item.fail { border-color: #F6C5C2; background: #FEF0EF; }
+.batch-file-item.fail .bf-status { color: var(--danger); }
+.progress-bar .fill.determinate { width: 0%; animation: none; transition: width .25s; }
 .preview-block { margin-bottom: 18px; }
 .preview-block h4 { font-size: 13px; color: var(--text-2); margin-bottom: 8px; font-weight: 600; }
 .preview-file { font-size: 14px; font-weight: 600; margin-bottom: 12px; word-break: break-all; }
@@ -370,7 +411,10 @@ let pageBySource = {};
 let pageSizeBySource = {};
 let expandedRow = null;         // 当前展开的明细 id
 let modalSource = null;         // 弹窗打开时的数据源
-let modalFile = null;           // 已选文件
+let modalFile = null;           // 已选文件（单文件流程）
+let modalFiles = null;          // 批量模式的有效文件列表
+let modalWarn = null;           // 类型不符/同名被跳过的文件提示
+let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
 
 function freshFilters() {
   return { q: "", date_from: "", date_to: "", directions: [], categories: [], amount_min: "", amount_max: "" };
@@ -428,6 +472,11 @@ async function copyText(text) {
 }
 function api(path, opts) {
   return fetch(path, opts).then((r) => r.json().catch(() => ({ ok: false, error: "响应解析失败" })));
+}
+function extOk(name) {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot).toLowerCase() : "";
+  return ACCEPT[modalSource].split(",").map((s) => s.trim()).includes(ext);
 }
 
 /* ================= 数据加载 ================= */
@@ -721,7 +770,7 @@ function addBanner(type, message, failures) {
   div.className = `banner ${type}`;
   let inner = `<span>${esc(message)}</span>`;
   if (failures && failures.length) {
-    inner += `<span class="expand-link" data-act="toggle">查看失败明细（${failures.length} 条）</span><ul hidden>${failures.map((f) => `<li>第 ${f.row} 行：${esc(f.reason)}</li>`).join("")}</ul>`;
+    inner += `<span class="expand-link" data-act="toggle">查看失败明细（${failures.length} 条）</span><ul hidden>${failures.map((f) => `<li>${f.file ? esc(f.file) + " " : ""}第 ${f.row} 行：${esc(f.reason)}</li>`).join("")}</ul>`;
   }
   inner += `<button class="banner-close" data-act="close">×</button>`;
   div.innerHTML = inner;
@@ -809,33 +858,66 @@ function resetFilters() {
 function openModal() {
   modalSource = currentSource;
   modalFile = null;
+  modalFiles = null;
+  modalWarn = null;
+  batchImporting = false;
   $("#modal-mask").hidden = false;
   $("#modal-source-label").textContent = `（${SOURCE_LABELS[modalSource]} · ${FORMAT_DESC[modalSource]}）`;
   renderModalSelect();
 }
 function closeModal() {
+  if (batchImporting) return;  // 批量写入进行中，防误关
   $("#modal-mask").hidden = true;
   modalFile = null;
+  modalFiles = null;
+  modalWarn = null;
 }
 function renderModalSelect() {
   const body = $("#modal-body");
   body.innerHTML = `
     <div id="dropzone">
-      <div class="dz-title">点击或拖拽文件到此处</div>
+      <div class="dz-title">点击选择或拖拽文件到此处（可多选）</div>
       <div>支持格式：${esc(FORMAT_DESC[modalSource])}</div>
       <div class="dz-desc">导入前会先解析预览并做去重比对，确认后才写入数据库</div>
     </div>
-    <input type="file" id="file-input" accept="${ACCEPT[modalSource]}" hidden>`;
+    <input type="file" id="file-input" accept="${ACCEPT[modalSource]}" multiple hidden>`;
   const dz = $("#dropzone");
   const input = $("#file-input");
   dz.addEventListener("click", () => input.click());
-  input.addEventListener("change", () => { if (input.files[0]) handleFile(input.files[0]); });
+  input.addEventListener("change", () => { if (input.files.length) handleFiles([...input.files]); });
   ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
   ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragover"); }));
   dz.addEventListener("drop", (e) => {
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (file) handleFile(file);
+    const files = e.dataTransfer.files && [...e.dataTransfer.files];
+    if (files && files.length) handleFiles(files);
   });
+}
+function handleFiles(files) {
+  // 同一次选择中同名文件忽略并提示（设计 §3.3 建议项）；按当前 Tab 限定类型，不匹配的明确提示且不写入
+  const seenNames = new Set();
+  const dupNames = [];
+  const unique = files.filter((f) => {
+    if (seenNames.has(f.name)) { dupNames.push(f.name); return false; }
+    seenNames.add(f.name);
+    return true;
+  });
+  const valid = unique.filter((f) => extOk(f.name));
+  const invalid = unique.filter((f) => !extOk(f.name));
+  const notices = [];
+  if (invalid.length) notices.push(`以下 ${invalid.length} 个文件类型与当前数据源不符，已跳过不导入：${invalid.map((f) => f.name).join("、")}`);
+  if (dupNames.length) notices.push(`同一次选择中的 ${dupNames.length} 个同名文件已忽略：${dupNames.join("、")}`);
+  modalWarn = notices.length ? notices.join("；") : null;
+  if (!valid.length) {
+    renderModalSelect();
+    modalError(modalWarn);
+    return;
+  }
+  if (valid.length === 1) {
+    handleFile(valid[0]);
+    return;
+  }
+  modalFiles = valid;
+  previewBatch(valid);
 }
 function modalError(msg) {
   let el = $("#modal-error");
@@ -866,6 +948,27 @@ function upload(path, file) {
     },
   }).then((r) => r.json().catch(() => ({ ok: false, error: "响应解析失败" })));
 }
+function uploadBatch(path, files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  return fetch(path, {
+    method: "POST",
+    body: fd,
+    headers: { "X-Source": modalSource },  // Content-Type 由浏览器带 boundary 自动设置
+  }).then((r) => r.json().catch(() => ({ ok: false, error: "响应解析失败" })));
+}
+async function previewBatch(files) {
+  renderModalLoading(`正在解析 ${files.length} 个文件 …`);
+  try {
+    const res = await uploadBatch("/api/import/preview-batch", files);
+    if (!res.ok) { renderModalSelect(); modalError(res.error || "解析失败"); return; }
+    // 响应文件顺序与上传顺序一致；解析失败的文件确认时不再上传，结果中直接标记失败
+    renderBatchPreview(buildBatchModel(res, files));
+  } catch (e) {
+    renderModalSelect();
+    modalError("网络错误：" + e.message);
+  }
+}
 function renderModalLoading(text) {
   $("#modal-body").innerHTML = `
     <div style="padding:20px;text-align:center;color:#646A73">${esc(text)}</div>
@@ -876,7 +979,9 @@ function renderModalPreview(p) {
     `<div class="stat"><div class="s-label">${esc(d.label)}</div><div class="s-value">${d.count.toLocaleString()} 笔 · ${fmtMoney(d.sum)}</div></div>`).join("");
   const sampleHead = p.columns.map((c) => `<th>${esc(c)}</th>`).join("");
   const sampleRows = p.sample.map((r) => `<tr>${r.map((v) => `<td>${v ? esc(v) : "—"}</td>`).join("")}</tr>`).join("");
+  const warn = modalWarn ? `<div class="modal-warn">${esc(modalWarn)}</div>` : "";
   $("#modal-body").innerHTML = `
+    ${warn}
     <div class="preview-file">${esc(p.file_name)}</div>
     <div class="preview-block">
       <h4>解析结果</h4>
@@ -903,7 +1008,7 @@ function renderModalPreview(p) {
       <button class="btn" id="btn-cancel">取消</button>
       <button class="btn btn-primary" id="btn-confirm" ${p.new_count === 0 && p.error_count === 0 ? "disabled" : ""}>确认导入${p.new_count ? `（${p.new_count} 条）` : ""}</button>
     </div>`;
-  $("#btn-reselect").addEventListener("click", () => { modalFile = null; renderModalSelect(); });
+  $("#btn-reselect").addEventListener("click", () => { modalFile = null; modalWarn = null; renderModalSelect(); });
   $("#btn-cancel").addEventListener("click", closeModal);
   $("#btn-confirm").addEventListener("click", confirmImport);
 }
@@ -921,6 +1026,248 @@ async function confirmImport() {
     renderModalSelect();
     modalError("网络错误：" + e.message);
   }
+}
+
+/* ---- 批量导入：预览 → 逐文件写入（进度）→ 结果 ---- */
+function buildBatchModel(res, files) {
+  // 服务端逐文件响应 → 客户端模型：columns 顶层共享，卡片展开态随模型保存
+  return {
+    source: res.source,
+    columns: res.columns || [],
+    expanded: new Set(res.files.length === 1 ? [res.files[0].file_name] : []),  // 单文件默认展开
+    items: res.files.map((f, i) => ({
+      file: files[i],
+      name: f.file_name,
+      error: f.error || null,
+      removed: false,
+      stats: f.error ? null : {
+        row_count: f.row_count,
+        error_count: f.error_count,
+        invalid_count: f.invalid_count,
+        new_count: f.new_count,
+        dup_count: f.dup_count,
+        date_min: f.date_min,
+        date_max: f.date_max,
+        distribution: f.distribution || [],
+        sample: f.sample || [],
+      },
+    })),
+  };
+}
+function batchTotals(model) {
+  // 移除后合并统计即时重算：仅统计未移除且解析成功的文件
+  const active = model.items.filter((f) => !f.removed && !f.error);
+  const totals = {
+    active_count: model.items.filter((f) => !f.removed).length,
+    row_count: 0, new_count: 0, dup_count: 0, failed_count: 0,
+    date_min: "", date_max: "", distribution: [],
+  };
+  const distAcc = {};
+  const order = [];
+  for (const f of active) {
+    const s = f.stats;
+    totals.row_count += s.row_count;
+    totals.new_count += s.new_count;
+    totals.dup_count += s.dup_count;
+    totals.failed_count += s.error_count + s.invalid_count;
+    if (s.date_min && (!totals.date_min || s.date_min < totals.date_min)) totals.date_min = s.date_min;
+    if (s.date_max && (!totals.date_max || s.date_max > totals.date_max)) totals.date_max = s.date_max;
+    for (const d of s.distribution) {
+      if (!order.includes(d.label)) order.push(d.label);
+      const acc = distAcc[d.label] || (distAcc[d.label] = { count: 0, sum: 0 });
+      acc.count += d.count;
+      acc.sum += d.sum;
+    }
+  }
+  totals.distribution = order.map((l) => ({ label: l, count: distAcc[l].count, sum: Math.round(distAcc[l].sum * 100) / 100 }));
+  return totals;
+}
+function batchFileCardHtml(model, f, i) {
+  if (f.error) {
+    return `<div class="file-card error" data-i="${i}">
+      <div class="file-card-head">
+        <span class="fc-toggle">·</span>
+        <span class="fc-name">${esc(f.name)}</span>
+        <span class="fc-summary">解析失败：${esc(f.error)}</span>
+        <button class="fc-remove">移除</button>
+      </div>
+    </div>`;
+  }
+  const s = f.stats;
+  const failed = s.error_count + s.invalid_count;
+  const isOpen = model.expanded.has(f.name);
+  const dist = s.distribution.map((d) =>
+    `<div class="stat"><div class="s-label">${esc(d.label)}</div><div class="s-value">${d.count.toLocaleString()} 笔 · ${fmtMoney(d.sum)}</div></div>`).join("");
+  const sampleHead = model.columns.map((c) => `<th>${esc(c)}</th>`).join("");
+  const sampleRows = s.sample.map((r) => `<tr>${r.map((v) => `<td>${v ? esc(v) : "—"}</td>`).join("")}</tr>`).join("");
+  return `<div class="file-card${isOpen ? " open" : ""}" data-i="${i}">
+    <div class="file-card-head">
+      <span class="fc-toggle">${isOpen ? "▾" : "▸"}</span>
+      <span class="fc-name">${esc(f.name)}</span>
+      <span class="fc-summary">${s.row_count.toLocaleString()} 行 · <span class="bf-new">新增 ${s.new_count.toLocaleString()}</span> · 重复 ${s.dup_count.toLocaleString()}${failed ? ` · <span class="bf-fail">失败 ${failed}</span>` : ""}</span>
+      <button class="fc-remove">移除</button>
+    </div>
+    <div class="file-card-body" ${isOpen ? "" : "hidden"}>
+      <h5>收支分布</h5>
+      <div class="preview-stats">${dist}</div>
+      <h5>首 5 行样例</h5>
+      <div class="sample-table-wrap"><table><thead><tr>${sampleHead}</tr></thead><tbody>${sampleRows}</tbody></table></div>
+    </div>
+  </div>`;
+}
+function renderBatchPreview(model) {
+  const totals = batchTotals(model);
+  const warn = modalWarn ? `<div class="modal-warn">${esc(modalWarn)}</div>` : "";
+  const errorFiles = model.items.filter((f) => f.error && !f.removed);
+  const errNote = errorFiles.length
+    ? `<div class="modal-warn">${errorFiles.length} 个文件解析失败或类型不符，确认后不会写入，请检查文件或移除</div>` : "";
+  const cards = model.items.map((f, i) => (f.removed ? "" : batchFileCardHtml(model, f, i))).join("");
+  const canConfirm = totals.new_count > 0 || totals.failed_count > 0;
+  const extra = [];
+  if (totals.date_min) extra.push(`覆盖日期 ${esc(totals.date_min)} ~ ${esc(totals.date_max)}`);
+  const distLine = totals.distribution.map((d) => `${esc(d.label)} ${d.count.toLocaleString()} 笔 · ${fmtMoney(d.sum)}`).join(" ｜ ");
+  if (distLine) extra.push(distLine);
+  $("#modal-body").innerHTML = `
+    ${warn}${errNote}
+    <div class="preview-file">已选择 ${totals.active_count} 个文件（${esc(SOURCE_LABELS[modalSource])}）</div>
+    <div class="preview-block">
+      <h4>逐文件明细（点击展开收支分布与首 5 行样例，可移除）</h4>
+      ${cards}
+    </div>
+    <div class="preview-block">
+      <h4>合并统计</h4>
+      <div class="preview-stats">
+        <div class="stat new"><div class="s-label">新增</div><div class="s-value">${totals.new_count.toLocaleString()} 条</div></div>
+        <div class="stat dup"><div class="s-label">重复跳过</div><div class="s-value">${totals.dup_count.toLocaleString()} 条</div></div>
+        <div class="stat err"><div class="s-label">失败（不写入）</div><div class="s-value">${totals.failed_count.toLocaleString()} 行</div></div>
+        <div class="stat"><div class="s-label">明细总行数</div><div class="s-value">${totals.row_count.toLocaleString()}</div></div>
+      </div>
+      <div class="batch-merged-extra">${extra.join(" · ")}</div>
+    </div>
+    <div id="modal-actions">
+      <button class="btn" id="btn-reselect">重新选择</button>
+      <button class="btn" id="btn-cancel">取消</button>
+      <button class="btn btn-primary" id="btn-confirm" ${canConfirm ? "" : "disabled"}>确认导入${totals.new_count ? `（${totals.new_count.toLocaleString()} 条）` : ""}</button>
+    </div>`;
+  // 卡片事件：展开/收起、移除（移除后合并统计即时重算）
+  document.querySelectorAll("#modal-body .file-card").forEach((card) => {
+    const item = model.items[Number(card.dataset.i)];
+    card.querySelector(".file-card-head").addEventListener("click", () => {
+      if (model.expanded.has(item.name)) model.expanded.delete(item.name);
+      else model.expanded.add(item.name);
+      renderBatchPreview(model);
+    });
+    card.querySelector(".fc-remove").addEventListener("click", (event) => {
+      event.stopPropagation();  // 防冒泡到卡片头部展开处理器，覆盖「回到选择态」的渲染
+      item.removed = true;
+      model.expanded.delete(item.name);
+      if (!model.items.some((f) => !f.removed)) {
+        modalWarn = null;
+        renderModalSelect();
+        return;
+      }
+      renderBatchPreview(model);
+    });
+  });
+  $("#btn-reselect").addEventListener("click", () => { modalWarn = null; renderModalSelect(); });
+  $("#btn-cancel").addEventListener("click", closeModal);
+  $("#btn-confirm").addEventListener("click", () => confirmBatchImport(model));
+}
+async function confirmBatchImport(model) {
+  // 逐文件调用单文件 confirm 接口（幂等键不变，批内重复由库内已见键自然拦截）；
+  // 已移除与预览解析失败的文件不上传（解析失败的直接在结果中标记）
+  const plan = model.items.filter((f) => !f.removed).map((f) => ({ file: f.file, error: f.error || null }));
+  batchImporting = true;
+  renderBatchProgress(plan);
+  const results = [];
+  for (let i = 0; i < plan.length; i++) {
+    const { file, error } = plan[i];
+    if (error) {
+      results.push({ file_name: file.name, error, inserted: 0, skipped: 0, failed: 0, failures: [] });
+      setBatchItemState(i, "fail", `解析失败：${error}`);
+    } else {
+      setBatchItemState(i, "active", "写入中…");
+      try {
+        const res = await upload("/api/import/confirm", file);
+        if (!res.ok) {
+          results.push({ file_name: file.name, error: res.error || "导入失败", inserted: 0, skipped: 0, failed: 0, failures: [] });
+          setBatchItemState(i, "fail", res.error || "导入失败");
+        } else {
+          results.push({ file_name: file.name, error: null, ...res });
+          setBatchItemState(i, "done", `新增 ${res.inserted.toLocaleString()} · 跳过 ${res.skipped.toLocaleString()} · 失败 ${res.failed}`);
+        }
+      } catch (e) {
+        results.push({ file_name: file.name, error: "网络错误：" + e.message, inserted: 0, skipped: 0, failed: 0, failures: [] });
+        setBatchItemState(i, "fail", "网络错误：" + e.message);
+      }
+    }
+    setBatchProgress(i + 1, plan.length);
+  }
+  batchImporting = false;
+  renderBatchDone(results);
+}
+function renderBatchProgress(plan) {
+  $("#modal-body").innerHTML = `
+    <div class="preview-file">正在导入（0/${plan.length}）</div>
+    <div class="batch-file-list">${plan.map((p, i) => `
+      <div class="batch-file-item" data-i="${i}">
+        <span class="bf-name">${esc(p.file.name)}</span>
+        <span class="bf-status">等待中</span>
+      </div>`).join("")}</div>
+    <div class="progress-bar"><div class="fill determinate" id="batch-progress-fill"></div></div>
+    <div style="font-size:12px;color:#646A73;margin-top:8px">请勿关闭窗口，正在逐文件写入</div>`;
+}
+function setBatchItemState(i, state, text) {
+  const el = document.querySelector(`.batch-file-item[data-i="${i}"]`);
+  if (!el) return;
+  el.className = `batch-file-item ${state}`;
+  el.querySelector(".bf-status").textContent = text;
+}
+function setBatchProgress(done, total) {
+  const fill = $("#batch-progress-fill");
+  if (fill) fill.style.width = `${Math.round((done / total) * 100)}%`;
+  const title = $("#modal-body .preview-file");
+  if (title) title.textContent = `正在导入（${done}/${total}）`;
+}
+function renderBatchDone(results) {
+  const agg = results.reduce((a, r) => ({
+    inserted: a.inserted + (r.inserted || 0),
+    skipped: a.skipped + (r.skipped || 0),
+    failed: a.failed + (r.failed || 0),
+    fileErrors: a.fileErrors + (r.error ? 1 : 0),
+  }), { inserted: 0, skipped: 0, failed: 0, fileErrors: 0 });
+  const rows = results.map((r) => {
+    if (r.error) return `<tr class="bf-error"><td>${esc(r.file_name)}</td><td>导入失败：${esc(r.error)}</td></tr>`;
+    return `<tr><td>${esc(r.file_name)}</td><td class="num">新增 <span class="bf-new">${r.inserted.toLocaleString()}</span> · 跳过 ${r.skipped.toLocaleString()}${r.failed ? ` · <span class="bf-fail">失败 ${r.failed}</span>` : ""}</td></tr>`;
+  }).join("");
+  $("#modal-body").innerHTML = `
+    <div class="preview-file">导入完成</div>
+    <div class="preview-block">
+      <h4>逐文件结果</h4>
+      <div class="sample-table-wrap"><table class="batch-table">
+        <thead><tr><th>文件</th><th>结果</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+    <div class="preview-block">
+      <h4>合并结果</h4>
+      <div class="preview-stats">
+        <div class="stat new"><div class="s-label">新增</div><div class="s-value">${agg.inserted.toLocaleString()} 条</div></div>
+        <div class="stat dup"><div class="s-label">重复跳过</div><div class="s-value">${agg.skipped.toLocaleString()} 条</div></div>
+        <div class="stat err"><div class="s-label">失败行数</div><div class="s-value">${agg.failed.toLocaleString()}</div></div>
+      </div>
+    </div>
+    <div id="modal-actions">
+      <button class="btn btn-primary" id="btn-done">完成</button>
+    </div>`;
+  $("#btn-done").addEventListener("click", () => {
+    closeModal();
+    const fileErrNote = agg.fileErrors ? `（${agg.fileErrors} 个文件解析失败）` : "";
+    const msg = `已导入 ${agg.inserted.toLocaleString()} 条，跳过 ${agg.skipped.toLocaleString()} 条，失败 ${agg.failed} 条${fileErrNote}`;
+    const failures = results.flatMap((r) => (r.failures || []).map((f) => ({ ...f, file: r.file_name })));
+    addBanner(agg.failed > 0 || agg.fileErrors > 0 ? "error" : "success", msg, failures);
+    refreshAll();
+  });
 }
 
 /* ================= 事件绑定 ================= */

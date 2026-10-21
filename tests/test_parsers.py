@@ -62,6 +62,15 @@ def test_boc_header_mismatch_rejected():
         parse_file(SOURCE_BOC, "a.csv", bad)
 
 
+def test_csv_oversized_field_raises_parse_error():
+    """单字段超过 csv 长度上限：抛 ParseError 而非 csv.Error（上层优雅报错的前提）。"""
+    big = "x" * (200 * 1024)
+    text = ",".join(BOC_COLUMNS) + "\r\n"
+    text += f"2024-08-01,12:00:00,支出,1.00,超市,银企对接,100.00,{big},快捷支付,人民币,,,\r\n"
+    with pytest.raises(ParseError, match="CSV 解析失败"):
+        parse_file(SOURCE_BOC, "a.csv", text.encode("utf-8-sig"))
+
+
 def test_boc_wrong_extension_rejected():
     with pytest.raises(ParseError, match="只支持"):
         parse_file(SOURCE_BOC, "a.xlsx", _boc_csv_text().encode("utf-8-sig"))
