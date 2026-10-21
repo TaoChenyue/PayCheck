@@ -233,13 +233,7 @@ tr.fold-full-row .money { text-decoration: line-through; color: var(--neutral); 
   padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg);
   border-top: 1px solid var(--border);
 }
-#transfer-tools { display: flex; align-items: center; gap: 8px; }
-.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
-.seg span {
-  padding: 6px 12px; font-size: 13px; color: var(--text-2); cursor: pointer; white-space: nowrap;
-}
-.seg span + span { border-left: 1px solid var(--border); }
-.seg span.on { background: color-mix(in srgb, var(--brand) 10%, #fff); color: var(--brand); font-weight: 600; }
+#total-tools { display: flex; align-items: center; gap: 8px; }
 
 /* ---------- 规则设置弹窗 ---------- */
 #rules-modal-mask {
@@ -465,12 +459,7 @@ tr.bf-error td { color: var(--danger); }
     <div id="cards"></div>
     <div id="toolbar">
       <input type="search" id="search" placeholder="搜索…">
-      <div id="transfer-tools" hidden>
-        <div class="seg" id="transfer-mode">
-          <span data-mode="show">全部显示</span>
-          <span data-mode="fold">折叠标灰</span>
-          <span data-mode="hide">隐藏</span>
-        </div>
+      <div id="total-tools" hidden>
         <button class="btn" id="btn-rules">规则设置</button>
       </div>
       <div id="colset">
@@ -548,8 +537,7 @@ let modalFile = null;           // 已选文件（单文件流程）
 let modalFiles = null;          // 批量模式的有效文件列表
 let modalWarn = null;           // 类型不符/同名被跳过的文件提示
 let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
-let transferMode = "fold";      // 总账户：内部转账显示模式（全部显示/折叠标灰/隐藏）
-let lastSummary = null;         // 最近一次汇总响应（总账户模式切换免重查）
+let lastSummary = null;       // 最近一次汇总响应（总账户区头合计展示）
 
 const TOTAL = "total";
 const TAB_ORDER = ["boc", "alipay", "wechat", TOTAL];
@@ -668,7 +656,6 @@ async function loadRows() {
   p.set("page_size", pageSizeBySource[currentSource]);
   const s = sortBySource[currentSource];
   if (s.order) { p.set("sort", s.key); p.set("order", s.order); }
-  if (currentSource === TOTAL) p.set("transfer", transferMode);
   showSkeleton();
   const res = await api("/api/rows?" + p.toString());
   if (!res.ok) throw new Error(res.error || "查询失败");
@@ -755,8 +742,7 @@ function renderToolbar() {
   const vis = visibleColsBySource[currentSource];
   $("#search").placeholder = o.search_placeholder || "搜索…";
   $("#search").value = filtersBySource[currentSource].q;
-  $("#transfer-tools").hidden = currentSource !== TOTAL;
-  renderTransferMode();
+  $("#total-tools").hidden = currentSource !== TOTAL;
   $("#colset-panel").innerHTML = o.columns.map((c) =>
     `<label><input type="checkbox" value="${esc(c.key)}" ${vis.has(c.key) ? "checked" : ""}> ${esc(c.label)}</label>`
   ).join("");
@@ -767,12 +753,6 @@ function renderToolbar() {
     }));
   $("#pagesize").value = String(pageSizeBySource[currentSource]);
   renderTableHead();
-}
-function renderTransferMode() {
-  const el = $("#transfer-mode");
-  if (!el) return;
-  el.querySelectorAll("span").forEach((s) =>
-    s.classList.toggle("on", s.dataset.mode === transferMode));
 }
 function renderTableHead() {
   const o = optionsCache[currentSource];
@@ -818,17 +798,10 @@ function renderCards(summary) {
   ).join("");
 }
 function renderTotalCards(s) {
-  // 汇总三口径由服务端一次返回：全部显示=三套合计；折叠/隐藏=计入口径（不计入汇总的命中行另计）
-  const all = transferMode === "show";
-  const income = all
-    ? s.counted.income_sum + s.transfer.income_sum + s.hidden.income_sum
-    : s.counted.income_sum;
-  const expense = all
-    ? s.counted.expense_sum + s.transfer.expense_sum + s.hidden.expense_sum
-    : s.counted.expense_sum;
-  const count = all
-    ? s.counted.count + s.transfer.count + s.hidden.count
-    : s.counted.count;
+  // 三模式切换已移除：固定按计入口径展示（命中规则行不计入汇总）
+  const income = s.counted.income_sum;
+  const expense = s.counted.expense_sum;
+  const count = s.counted.count;
   const transferCount = s.transfer.count + s.hidden.count;
   const net = income - expense;
   const cards = [
@@ -943,7 +916,7 @@ function renderTotalTable(res) {
       const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
       return `<td${cls}>${cellHtml(row, col)}</td>`;
     }).join("");
-    if (row.transfer && transferMode === "fold") {
+    if (row.transfer) {
       // 折叠标灰：默认收窄为一条折叠条，点击展开完整行
       return `<tr class="data-row fold-strip-row" data-id="${row.id}"><td colspan="${cols.length}">${foldStripHtml(row)}</td></tr>
               <tr class="data-row fold-full-row" data-id="${row.id}" hidden>${full}</tr>
@@ -2005,14 +1978,6 @@ $("#amount-max").addEventListener("input", debounce((e) => { filtersBySource[cur
 document.querySelectorAll("#presets .preset").forEach((b) =>
   b.addEventListener("click", () => applyPreset(b.dataset.preset)));
 $("#btn-colset").addEventListener("click", () => $("#colset").classList.toggle("open"));
-$("#transfer-mode").querySelectorAll("span").forEach((el) =>
-  el.addEventListener("click", () => {
-    if (el.dataset.mode === transferMode) return;
-    transferMode = el.dataset.mode;
-    renderTransferMode();
-    if (lastSummary) renderCards(lastSummary);  // 汇总三口径免重查
-    loadRows();
-  }));
 document.addEventListener("click", (e) => {
   if (!$("#colset").contains(e.target)) $("#colset").classList.remove("open");
 });
