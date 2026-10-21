@@ -246,8 +246,23 @@ tr.fold-full-row .money { text-decoration: line-through; color: var(--neutral); 
 .zone-table-wrap { overflow-x: auto; }
 .zone-empty { padding: 18px 16px; color: #C4C7CC; font-size: 13px; }
 .zonedesc { padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg); border-bottom: 1px solid var(--border); }
+.tag.flow {
+  background: color-mix(in srgb, var(--brand) 10%, #fff); color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 40%, #fff);
+}
+.tag.dup { background: #FFF7E8; color: #B25E09; border: 1px solid #E8C98A; }
 tr.flow-main td { cursor: pointer; }
+tr.flow-member td { background: #FAFBFC; color: var(--text-2); font-size: 12px; }
 .grp-pair { color: var(--text-2); font-size: 12px; margin-left: 8px; }
+.grp-arrow { color: var(--text-2); font-size: 12px; margin: 0 4px 0 8px; }
+.grp-badge { color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.zone-expand-all {
+  color: var(--brand); font-size: 12px; white-space: nowrap; padding: 2px 8px; border-radius: 6px;
+}
+.zone-expand-all:hover { background: var(--row-hover); }
+tr.flow-more td { text-align: center; color: var(--brand); cursor: pointer; font-size: 12px; padding: 8px; }
+tr.grp-hint-row td { padding: 6px 16px; background: var(--page-bg); }
+.grp-hint { font-size: 12px; color: var(--text-2); }
 #total-tools { display: flex; align-items: center; gap: 8px; }
 
 /* ---------- 规则设置弹窗 ---------- */
@@ -560,6 +575,10 @@ let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
 let lastSummary = null;       // 最近一次汇总响应（总账户区头合计展示）
 let lastTotal = null;         // 最近一次总账户三区响应
 let collapsedZones = { income: false, expense: false, flow: false };  // 总账户区块收起状态
+let expandedFlowGroups = new Set();  // 内部流动区已展开的组（组 key）
+let flowShownAll = new Set();        // 内部流动区已「展开更多」的组（组 key）
+let flowAllExpanded = false;         // 内部流动区「全部展开」开关
+const FLOW_MEMBER_CHUNK = 50;        // 组内成员先显示前 50 行，其余「展开更多」
 
 const TOTAL = "total";
 const TAB_ORDER = ["boc", "alipay", "wechat", TOTAL];
@@ -616,10 +635,12 @@ function dirTagHtml(row) {
 function srcBadgeHtml(source) {
   return `<span class="src-badge ${SRC_BADGE_CLS[source] || ""}">${esc(SOURCE_LABELS[source] || source)}</span>`;
 }
-function transferTagHtml(row) {
-  if (!row.transfer) return '<span class="empty-val">—</span>';
-  const names = esc((row.transfer.rule_names || []).join("、"));
-  return `<span class="tag transfer-tag" title="命中规则：${names}">内部转账</span>`;
+function markHtml(row) {
+  const names = esc((row.rule_names || []).join("、"));
+  const title = names ? ` title="命中规则：${names}"` : "";
+  if (row.mark === "duplicate") return `<span class="tag dup"${title}>重复记录</span>`;
+  if (row.mark === "flow") return `<span class="tag flow"${title}>内部流动</span>`;
+  return '<span class="empty-val">—</span>';
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
@@ -846,7 +867,7 @@ function cellHtml(row, col) {
   if (col.kind === "direction") return dirTagHtml(row);
   if (col.kind === "amount") return moneyHtml(row);
   if (col.kind === "source") return srcBadgeHtml(row.source);
-  if (col.kind === "transfer") return transferTagHtml(row);
+  if (col.kind === "mark") return markHtml(row);
   if (col.kind === "balance") return v ? `<span class="num">${fmtMoney(v)}</span>` : '<span class="empty-val">—</span>';
   if (col.kind === "status") return statusHtml(v);
   if (col.kind === "copy") {
@@ -910,9 +931,10 @@ function renderTotalZones() {
   const o = optionsCache[TOTAL];
   const vis = visibleColsBySource[TOTAL];
   const dataCols = o.columns.filter((c) => vis.has(c.key) && c.key !== "mark");
+  const flowCols = o.columns.filter((c) => vis.has(c.key));
   $("#zone-income").innerHTML = zoneHtml("income", "真实收入", dataCols);
   $("#zone-expense").innerHTML = zoneHtml("expense", "真实支出", dataCols);
-  $("#zone-flow").innerHTML = flowZoneHtml(dataCols);
+  $("#zone-flow").innerHTML = flowZoneHtml(flowCols);
   bindZoneEvents();
 }
 function theadCellHtml(c, sortable) {
@@ -952,29 +974,65 @@ function flowZoneHtml(cols) {
   const body = z.total === 0
     ? `<div class="zone-empty">暂无数据</div>`
     : `<div class="zonedesc">这里面的钱要么在账户之间倒来倒去，要么是同一笔钱记了多条记录，都不计入上面的真实收支。</div>
-       <div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, false)).join("")}</tr></thead><tbody>${z.groups.map((g) => flowMainRowHtml(g, cols)).join("")}</tbody></table></div>`;
+       <div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, false)).join("")}</tr></thead><tbody>${z.groups.map((g) => flowGroupHtml(g, cols)).join("")}</tbody></table></div>`;
   return `
     <div class="zone-head" data-zone="flow">
       <span class="zone-title">内部流动</span><span class="zone-sub">${sub}</span>
+      <span class="zone-expand-all" data-act="expand-all">${flowAllExpanded ? "全部收起 ▴" : "全部展开 ▾"}</span>
       <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
     </div>
     <div class="zone-body" data-zone="flow" ${collapsed ? "hidden" : ""}>${body}</div>`;
 }
-function flowMainRowHtml(g, cols) {
+function flowGroupHtml(g, cols) {
+  // 组主行 + 展开成员行（时间正序，默认收起；超 50 行先显示前 50 行）+ 跨区引用提示
+  const expanded = flowAllExpanded || expandedFlowGroups.has(g.key);
+  const html = [flowMainRowHtml(g, cols, expanded)];
+  const hidden = expanded ? "" : "hidden";
+  const shown = flowShownAll.has(g.key) ? g.members : g.members.slice(0, FLOW_MEMBER_CHUNK);
+  for (const m of shown) {
+    html.push(memberRowHtml(m, cols, hidden));
+    html.push(`<tr class="detail-row" data-for="${m.id}" hidden><td colspan="${cols.length}"></td></tr>`);
+  }
+  if (g.members.length > FLOW_MEMBER_CHUNK && !flowShownAll.has(g.key)) {
+    html.push(`<tr class="flow-more" data-group="${esc(g.key)}" ${hidden}><td colspan="${cols.length}">展开更多（还有 ${g.members.length - FLOW_MEMBER_CHUNK} 行）</td></tr>`);
+  }
+  if (g.cross_ref) {
+    html.push(`<tr class="grp-hint-row" ${hidden}><td colspan="${cols.length}" class="grp-hint">同日对应的${esc(g.platform || "")}侧明细已在「真实支出」区展示</td></tr>`);
+  }
+  return html.join("");
+}
+function flowMainRowHtml(g, cols, expanded) {
   const main = g.main;
   const tds = cols.map((col) => {
     const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
-    const inner = cellHtml(main, col);
-    const extras = col === cols[cols.length - 1] ? `<span class="grp-pair">${esc(g.pair)}</span>` : "";
+    const inner = col.kind === "mark" ? markHtml(main) : cellHtml(main, col);
+    const extras = col === cols[cols.length - 1]
+      ? `<span class="grp-pair">${esc(g.pair)}</span><span class="grp-arrow">${expanded ? "▾" : "▸"}</span>${main.member_count ? `<span class="grp-badge">+${main.member_count}</span>` : ""}`
+      : "";
     return `<td${cls}>${inner}${extras}</td>`;
   }).join("");
   return `<tr class="flow-main" data-group="${esc(g.key)}">${tds}</tr>`;
 }
+function memberRowHtml(m, cols, hidden) {
+  const tds = cols.map((col) => {
+    const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
+    return `<td${cls}>${cellHtml(m, col)}</td>`;
+  }).join("");
+  return `<tr class="flow-member" data-id="${m.id}" ${hidden}>${tds}</tr>`;
+}
+function renderFlowZone() {
+  // 仅重绘内部流动区（展开/收起、展开更多、全部展开），保留其余区块状态
+  const vis = visibleColsBySource[TOTAL];
+  const flowCols = optionsCache[TOTAL].columns.filter((c) => vis.has(c.key));
+  $("#zone-flow").innerHTML = flowZoneHtml(flowCols);
+  bindFlowEvents();
+}
 function bindZoneEvents() {
-  // 区块头点击收起/展开该区
+  // 区块头点击收起/展开该区（流动区「全部展开」按钮单独处理）
   document.querySelectorAll("#total-zones .zone-head").forEach((head) => {
     const zone = head.dataset.zone;
-    head.addEventListener("click", () => {
+    head.addEventListener("click", (ev) => {
+      if (ev.target.closest('[data-act="expand-all"]')) return;
       collapsedZones[zone] = !collapsedZones[zone];
       const body = document.querySelector(`#total-zones .zone-body[data-zone="${zone}"]`);
       if (body) body.hidden = collapsedZones[zone];
@@ -992,6 +1050,57 @@ function bindZoneEvents() {
     }));
   document.querySelectorAll("#zone-income .copy-btn, #zone-expense .copy-btn").forEach((btn) =>
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+  bindFlowEvents();
+}
+function bindFlowEvents() {
+  // 全部展开/收起
+  const expandAll = document.querySelector('#zone-flow [data-act="expand-all"]');
+  if (expandAll) expandAll.addEventListener("click", () => {
+    flowAllExpanded = !flowAllExpanded;
+    renderFlowZone();
+  });
+  // 组主行点击展开/收起组内成员
+  document.querySelectorAll("#zone-flow tr.flow-main").forEach((tr) =>
+    tr.addEventListener("click", () => {
+      const key = tr.dataset.group;
+      if (expandedFlowGroups.has(key)) expandedFlowGroups.delete(key);
+      else expandedFlowGroups.add(key);
+      renderFlowZone();
+    }));
+  // 组内「展开更多」
+  document.querySelectorAll("#zone-flow tr.flow-more").forEach((tr) =>
+    tr.addEventListener("click", () => {
+      flowShownAll.add(tr.dataset.group);
+      renderFlowZone();
+    }));
+  // 成员行点击展开该源原始全部列（复用现有详情交互）
+  document.querySelectorAll("#zone-flow tr.flow-member").forEach((tr) =>
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.classList.contains("copy-btn")) return;
+      toggleFlowMemberDetail(tr.dataset.id);
+    }));
+  document.querySelectorAll("#zone-flow .copy-btn").forEach((btn) =>
+    btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+}
+function toggleFlowMemberDetail(id) {
+  const detailRow = document.querySelector(`#zone-flow tr.detail-row[data-for="${id}"]`);
+  if (!detailRow) return;
+  const willOpen = detailRow.hidden;
+  document.querySelectorAll("#zone-flow tr.detail-row:not([hidden])").forEach((r) => { r.hidden = true; });
+  if (!willOpen) return;
+  const member = findFlowMember(id);
+  if (!member) return;
+  renderTotalDetail(detailRow.querySelector("td"), member);
+  detailRow.hidden = false;
+}
+function findFlowMember(id) {
+  if (!lastTotal || !lastTotal.flow) return null;
+  for (const g of lastTotal.flow.groups) {
+    if (String(g.main.id) === String(id)) return g.main;
+    const m = g.members.find((x) => String(x.id) === String(id));
+    if (m) return m;
+  }
+  return null;
 }
 function renderHiddenHint(res) {
   const el = $("#hidden-hint");
