@@ -948,7 +948,7 @@ function zoneHtml(zoneKey, title, cols) {
   const sub = sum ? `合计 ${sign}${fmtMoney(sum.sum)} · ${sum.count.toLocaleString()} 笔` : `共 ${z.total.toLocaleString()} 条`;
   const collapsed = collapsedZones[zoneKey];
   const body = z.total === 0
-    ? `<div class="zone-empty">暂无数据</div>`
+    ? `<div class="zone-empty">该区无记录</div>`
     : `<div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, true)).join("")}</tr></thead><tbody>${z.rows.map((row) => zoneRowHtml(row, cols)).join("")}</tbody></table></div>`;
   return `
     <div class="zone-head" data-zone="${zoneKey}">
@@ -973,7 +973,7 @@ function flowZoneHtml(cols) {
   const collapsed = collapsedZones.flow;
   const sub = `${z.total.toLocaleString()} 组 · ${(z.row_total || 0).toLocaleString()} 行 · 不计入收支`;
   const body = z.total === 0
-    ? `<div class="zone-empty">暂无数据</div>`
+    ? `<div class="zone-empty">该区无记录</div>`
     : `<div class="zonedesc">这里面的钱要么在账户之间倒来倒去，要么是同一笔钱记了多条记录，都不计入上面的真实收支。</div>
        <div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, false)).join("")}</tr></thead><tbody>${z.groups.map((g) => flowGroupHtml(g, cols)).join("")}</tbody></table></div>`;
   return `
@@ -1194,15 +1194,6 @@ function renderEmptyState(res) {
   const el = $("#empty-state");
   const hasFilter = JSON.stringify(filtersBySource[currentSource]) !== JSON.stringify(freshFilters());
   const o = optionsCache[currentSource];
-  if (currentSource === TOTAL) {
-    el.hidden = false;
-    el.querySelector(".empty-title").textContent = hasFilter ? "无匹配结果" : "暂无账单数据";
-    el.querySelector(".empty-desc").textContent = hasFilter
-      ? "当前筛选条件下没有账单记录，试试调整或重置筛选条件"
-      : "三个数据源都还没有账单，请切换到对应页签导入第一笔账单";
-    el.querySelector("#btn-import-empty").style.display = "none";
-    return;
-  }
   if (hasFilter) {
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "无匹配结果";
