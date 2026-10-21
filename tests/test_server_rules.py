@@ -1,4 +1,4 @@
-"""规则 API 与总账户 HTTP 端到端测试（TCY-15）"""
+"""规则 API 与总账户三区结构 HTTP 端到端测试（TCY-15/TCY-18）"""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def _seed_boc(base_url):
 
 
 RULE_PAYLOAD = {
-    "name": "快捷支付渠道行",
+    "name": "银行卡快捷支付-渠道行（支付宝）",
     "source": "boc",
     "conditions": [
         {"field": "tx_name", "op": "eq", "value": "网上快捷支付"},
@@ -68,7 +68,7 @@ class TestRulesApi:
     def test_create_list_update_delete(self, base_url):
         created = _send("POST", base_url + "/api/rules", RULE_PAYLOAD)
         assert created["ok"]
-        assert created["rule"]["name"] == "快捷支付渠道行"
+        assert created["rule"]["name"] == "银行卡快捷支付-渠道行（支付宝）"
         assert created["rule"]["enabled"] is True
 
         listed = _get(base_url + "/api/rules")
@@ -181,48 +181,63 @@ class TestTotalApi:
         assert res["directions"] == ["支出", "收入", "不计收支"]
         assert res["categories"] == ["boc", "alipay", "wechat"]
         assert [c["key"] for c in res["columns"]] == [
-            "time", "direction", "amount", "source", "counterparty", "summary", "transfer"]
+            "time", "direction", "amount", "source", "counterparty", "summary", "mark"]
 
-    def test_rows_total_with_transfer_modes(self, base_url):
+    def test_rows_total_three_zones(self, base_url):
+        """rows 返回三区结构：渠道行命中 hide 规则进流动区并标「重复记录」。"""
         _seed_boc(base_url)
         _send("POST", base_url + "/api/rules", RULE_PAYLOAD)
 
-        fold = _get(base_url + "/api/rows?source=total&transfer=fold")
-        assert fold["ok"]
-        assert fold["total"] == 1  # 渠道行被 hide 规则隐藏，剩工资行
-        assert fold["hidden"] == {"count": 1, "rule_names": ["快捷支付渠道行"]}
+        res = _get(base_url + "/api/rows?source=total")
+        assert res["ok"]
+        assert res["income"]["total"] == 1  # 工资行
+        assert res["income"]["rows"][0]["summary"] == "代发工资"
+        assert res["expense"]["total"] == 0
+        assert res["flow"]["total"] == 1  # 1 组
+        assert res["flow"]["row_total"] == 1
+        group = res["flow"]["groups"][0]
+        assert group["key"] == "支付宝 ↔ BOC|2026-10-01"
+        assert group["main"]["mark"] == "duplicate"
+        assert group["main"]["rule_names"] == ["银行卡快捷支付-渠道行（支付宝）"]
+        assert group["cross_ref"] is True
+        assert group["platform"] == "支付宝"
 
-        hide = _get(base_url + "/api/rows?source=total&transfer=hide")
-        assert hide["total"] == 1
-
-        show = _get(base_url + "/api/rows?source=total&transfer=show")
-        assert show["total"] == 2
-        assert all(r["transfer"] is None for r in show["rows"])
+    def test_rows_total_zone_pagination(self, base_url):
+        _seed_boc(base_url)
+        res = _get(base_url + "/api/rows?source=total&income_page=2&page_size=1")
+        assert res["income"]["page"] == 2
+        assert res["income"]["total"] == 1  # 仅工资行，第 2 页无数据
+        assert res["income"]["rows"] == []
+        assert res["expense"]["total"] == 1
+        assert res["flow"]["page"] == 1
+        assert res["expense"]["page"] == 1
 
     def test_rows_total_mapping_fields(self, base_url):
         _seed_boc(base_url)
-        show = _get(base_url + "/api/rows?source=total&transfer=show")
-        wage = next(r for r in show["rows"] if r["summary"] == "代发工资")
+        res = _get(base_url + "/api/rows?source=total")
+        wage = next(r for r in res["income"]["rows"] if r["summary"] == "代发工资")
         assert wage["source"] == "boc"
         assert wage["time"] == "2026-10-02 10:00:00"
         assert wage["direction"] == "收入"
         assert wage["raw"]["counterparty"] == "示例公司"
 
-    def test_summary_total_three_sets(self, base_url):
+    def test_summary_total_three_zones(self, base_url):
         _seed_boc(base_url)
         _send("POST", base_url + "/api/rules", RULE_PAYLOAD)
         summary = _get(base_url + "/api/summary?source=total")
         assert summary["ok"]
-        assert summary["counted"]["count"] == 1
-        assert summary["counted"]["income_sum"] == 3000.00
-        assert summary["hidden"]["count"] == 1
-        assert summary["hidden"]["expense_sum"] == 8.80
-        assert summary["transfer"]["count"] == 0
+        assert summary["income"] == {"count": 1, "sum": 3000.00}
+        assert summary["expense"] == {"count": 0, "sum": 0.0}
+        assert summary["net"] == 3000.00
+        assert summary["count"] == 1
+        assert summary["flow"] == {"groups": 1, "rows": 1}
 
     def test_rows_total_sources_filter(self, base_url):
         _seed_boc(base_url)
-        assert _get(base_url + "/api/rows?source=total&sources=alipay")["total"] == 0
-        assert _get(base_url + "/api/rows?source=total&sources=boc")["total"] == 2
+        assert _get(base_url + "/api/rows?source=total&sources=alipay")["income"]["total"] == 0
+        boc = _get(base_url + "/api/rows?source=total&sources=boc")
+        assert boc["income"]["total"] == 1  # 工资行
+        assert boc["expense"]["total"] == 1  # 快捷支付行（未建规则，属真实支出）
 
     def test_unknown_source_still_400(self, base_url):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
