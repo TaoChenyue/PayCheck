@@ -820,17 +820,13 @@ function renderCards(summary) {
   ).join("");
 }
 function renderTotalCards(s) {
-  // 三模式切换已移除：固定按计入口径展示（命中规则行不计入汇总）
-  const income = s.counted.income_sum;
-  const expense = s.counted.expense_sum;
-  const count = s.counted.count;
-  const transferCount = s.transfer.count + s.hidden.count;
-  const net = income - expense;
+  // 真实口径：真实收入 / 真实支出 / 净收支 / 真实笔数（副文本 = 内部流动组数 · 行数）
+  const net = s.net;
   const cards = [
-    { cls: "income", title: "总收入", value: "+" + fmtMoney(income), sub: "" },
-    { cls: "expense", title: "总支出", value: "−" + fmtMoney(expense), sub: "" },
-    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "" },
-    { cls: "", title: "交易笔数", value: count.toLocaleString(), sub: `其中内部转账 ${transferCount.toLocaleString()} 笔` },
+    { cls: "income", title: "真实收入", value: "+" + fmtMoney(s.income.sum), sub: `${s.income.count.toLocaleString()} 笔` },
+    { cls: "expense", title: "真实支出", value: "−" + fmtMoney(s.expense.sum), sub: `${s.expense.count.toLocaleString()} 笔` },
+    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "真实收入 − 真实支出" },
+    { cls: "", title: "真实笔数", value: s.count.toLocaleString(), sub: `内部流动 ${s.flow.groups.toLocaleString()} 组 · ${s.flow.rows.toLocaleString()} 行` },
   ];
   $("#cards").innerHTML = cards.map((c) =>
     `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
