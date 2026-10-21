@@ -1,13 +1,13 @@
-"""总账户虚拟源：三源统一字段映射、筛选、内部转账规则求值与三种显示模式（TCY-15）
+"""总账户虚拟源：三源统一字段映射、筛选、内部转账规则求值与三区划分（TCY-15/TCY-18）
 
-规则仅在查询时求值（设计 §3.6，不落库打标）：本地库数千行级，全量取回后在
-内存中完成统一映射 → 筛选 → 启用规则匹配 → 模式过滤 → 排序 → 分页，避免
-多表 UNION 下复杂 SQL 与打标数据过期的一致性问题。
+规则仅在查询时求值（不落库打标）：本地库数千行级，全量取回后在内存中完成
+统一映射 → 筛选 → 启用规则匹配 → 三区划分 → 分区排序 → 分页，避免多表 UNION
+下复杂 SQL 与打标数据过期的一致性问题。
 
-显示模式（设计 §2.3）：
-  show  全部显示：规则临时关闭，全部行计入汇总
-  fold  折叠标灰（默认）：fold 命中行保留在列表并标记、不计入汇总；hide 命中行隐藏
-  hide  隐藏：命中行全部隐藏、不计入汇总
+三区口径（TCY-20 设计 §2）：
+  未命中任何启用规则，方向=收入 → 真实收入
+  未命中任何启用规则，方向=支出 → 真实支出
+  命中启用规则（fold/hide）或未命中的不计收支行 → 内部流动
 """
 
 from __future__ import annotations
@@ -23,7 +23,6 @@ from paycheck_workbench.sources import (
     SOURCES,
 )
 
-TRANSFER_MODES = ("show", "fold", "hide")
 _TOTAL_SORT_KEYS = {"datetime", "amount", "counterparty"}
 
 
@@ -156,28 +155,29 @@ def apply_rules(conn, rows: List[dict], rules: List[dict]) -> None:
                     row["_hits"].append(rule)
 
 
-def apply_mode(rows: List[dict], mode: str) -> Tuple[List[dict], List[dict]]:
-    """按显示模式拆分（可见行, 隐藏行）。fold 模式下 hide 命中的行仍隐藏（设计 §1）。"""
-    if mode == "show":
-        for row in rows:
-            row["transfer"] = None
-        return rows, []
-    visible: List[dict] = []
-    hidden: List[dict] = []
-    for row in rows:
-        hits = row["_hits"]
-        if not hits:
-            row["transfer"] = None
-            visible.append(row)
-            continue
-        names = [h["name"] for h in hits]
-        if mode == "hide" or any(h["action"] == "hide" for h in hits):
-            row["transfer"] = {"rule_names": names, "action": "hide"}
-            hidden.append(row)
-        else:
-            row["transfer"] = {"rule_names": names, "action": "fold"}
-            visible.append(row)
-    return visible, hidden
+def _zone_of(row: dict) -> str:
+    """三区划分（TCY-20 设计 §2）：命中规则或不计收支未命中 → flow，其余按方向进真实区。"""
+    if row["_hits"]:
+        return "flow"
+    if row["direction"] == "收入":
+        return "income"
+    if row["direction"] == "支出":
+        return "expense"
+    return "flow"  # 不计收支（含微信中性交易映射）等未命中行，不污染真实收支
+
+
+def _mark_of(row: dict) -> dict:
+    """内部流动行标记（存储值不变，仅含义重新表述）：hide→重复记录、fold→内部流动。"""
+    names = [h["name"] for h in row["_hits"]]
+    label = "duplicate" if any(h["action"] == "hide" for h in row["_hits"]) else "flow"
+    return {"mark": label, "rule_names": names}
+
+
+def _amount(row: dict) -> float:
+    try:
+        return float(row["amount"] or 0)
+    except ValueError:
+        return 0.0
 
 
 def sort_rows(rows: List[dict], sort: str, order: str) -> None:
@@ -198,18 +198,33 @@ def sort_rows(rows: List[dict], sort: str, order: str) -> None:
     rows.sort(key=key, reverse=reverse)
 
 
-def _hidden_stats(hidden: List[dict]) -> dict:
-    """隐藏行统计（折叠模式下的提示条：数量 + 涉及规则名）。"""
-    names: List[str] = []
-    for row in hidden:
-        for name in row["transfer"]["rule_names"]:
-            if name not in names:
-                names.append(name)
-    return {"count": len(hidden), "rule_names": names}
-
-
 def _public(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in ("_id", "_hits")}
+
+
+def _flow_public(row: dict) -> dict:
+    """内部流动行对外字段：统一字段 + 标记与命中规则名。"""
+    public = _public(row)
+    public.update(_mark_of(row))
+    return public
+
+
+def _zone_rows(conn, selected, **filters) -> Tuple[List[dict], List[dict], List[dict]]:
+    """取回所选源并返回三区行列表（income, expense, flow）。
+
+    真实区应用收/支筛选；流动区不按方向筛选（TCY-20 设计 §3.4），筛选后重新
+    分组与主记录递补由分组层处理。
+    """
+    base = fetch_rows(conn, selected)
+    rules = [r for r in db.list_rules(conn) if r["enabled"]]
+    apply_rules(conn, base, rules)
+    real = filter_rows(base, **filters)
+    flow_filters = {**filters, "directions": None}
+    flow = filter_rows(base, **flow_filters)
+    income = [r for r in real if _zone_of(r) == "income"]
+    expense = [r for r in real if _zone_of(r) == "expense"]
+    flow_rows = [r for r in flow if _zone_of(r) == "flow"]
+    return income, expense, flow_rows
 
 
 def query_rows(
@@ -226,38 +241,37 @@ def query_rows(
     page_size: int = db._DEFAULT_PAGE_SIZE,
     sort: str = "datetime",
     order: str = "desc",
-    transfer: str = "fold",
+    transfer: Optional[str] = None,  # 已废弃（TCY-18 移除三模式），保留参数兼容
 ) -> dict:
-    """总账户明细查询：统一映射 + 筛选 + 启用规则求值 + 模式过滤 + 分页。"""
-    if transfer not in TRANSFER_MODES:
-        transfer = "fold"
+    """总账户明细查询：统一映射 + 筛选 + 启用规则求值 → 三区结构 + 分页。"""
     if page_size not in db._PAGE_SIZES:
         page_size = db._DEFAULT_PAGE_SIZE
     if sort not in _TOTAL_SORT_KEYS:
         sort = "datetime"
     selected = [s for s in (sources if sources is not None else SOURCES) if s in SOURCE_CONFIGS]
-
-    rows = fetch_rows(conn, selected)
-    rows = filter_rows(
-        rows,
+    income, expense, flow_rows = _zone_rows(
+        conn, selected,
         q=q, date_from=date_from, date_to=date_to, directions=directions,
         amount_min=amount_min, amount_max=amount_max,
     )
-    sort_rows(rows, sort, order)
-    if transfer == "show":
-        visible, hidden = apply_mode(rows, "show")
-    else:
-        rules = [r for r in db.list_rules(conn) if r["enabled"]]
-        apply_rules(conn, rows, rules)
-        visible, hidden = apply_mode(rows, transfer)
+    sort_rows(income, sort, order)
+    sort_rows(expense, sort, order)
 
-    offset = (max(page, 1) - 1) * page_size
+    def page_of(rows: List[dict]) -> dict:
+        offset = (max(page, 1) - 1) * page_size
+        return {
+            "total": len(rows), "page": page, "page_size": page_size,
+            "rows": [_public(r) for r in rows[offset : offset + page_size]],
+        }
+
+    flow_offset = (max(page, 1) - 1) * page_size
     return {
-        "total": len(visible),
-        "page": page,
-        "page_size": page_size,
-        "rows": [_public(r) for r in visible[offset : offset + page_size]],
-        "hidden": _hidden_stats(hidden),
+        "income": page_of(income),
+        "expense": page_of(expense),
+        "flow": {
+            "total": len(flow_rows), "page": page, "page_size": page_size,
+            "rows": [_flow_public(r) for r in flow_rows[flow_offset : flow_offset + page_size]],
+        },
     }
 
 
@@ -272,41 +286,22 @@ def query_summary(
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
 ) -> dict:
-    """总账户汇总：计入/不计入（fold 命中）/隐藏（hide 命中）三套口径一次返回，
-    前端切换显示模式免重查（设计 §3.5）。"""
+    """总账户汇总（真实口径）：真实收入 / 真实支出 / 净收支 / 真实笔数 + 内部流动行数。"""
     selected = [s for s in (sources if sources is not None else SOURCES) if s in SOURCE_CONFIGS]
-    rows = fetch_rows(conn, selected)
-    rows = filter_rows(
-        rows,
+    income, expense, flow_rows = _zone_rows(
+        conn, selected,
         q=q, date_from=date_from, date_to=date_to, directions=directions,
         amount_min=amount_min, amount_max=amount_max,
     )
-    rules = [r for r in db.list_rules(conn) if r["enabled"]]
-    apply_rules(conn, rows, rules)
-    counted, transfer_rows, hidden_rows = [], [], []
-    for row in rows:
-        if not row["_hits"]:
-            counted.append(row)
-        elif any(h["action"] == "hide" for h in row["_hits"]):
-            hidden_rows.append(row)
-        else:
-            transfer_rows.append(row)
 
-    def agg(bucket: List[dict]) -> dict:
-        income = expense = 0.0
-        for row in bucket:
-            try:
-                amount = float(row["amount"] or 0)
-            except ValueError:
-                amount = 0.0
-            if row["direction"] == "收入":
-                income += amount
-            elif row["direction"] == "支出":
-                expense += amount
-        return {"count": len(bucket), "income_sum": round(income, 2), "expense_sum": round(expense, 2)}
+    def agg(rows: List[dict]) -> dict:
+        return {"count": len(rows), "sum": round(sum(_amount(r) for r in rows), 2)}
 
+    income_agg, expense_agg = agg(income), agg(expense)
     return {
-        "counted": agg(counted),
-        "transfer": agg(transfer_rows),
-        "hidden": agg(hidden_rows),
+        "income": income_agg,
+        "expense": expense_agg,
+        "net": round(income_agg["sum"] - expense_agg["sum"], 2),
+        "count": income_agg["count"] + expense_agg["count"],
+        "flow": {"rows": len(flow_rows)},
     }
