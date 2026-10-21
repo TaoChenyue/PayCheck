@@ -218,5 +218,5 @@ TOTAL_COLUMNS = [
     _col("source", "来源", "source"),
     _col("counterparty", "对方", "text", sort="counterparty"),
     _col("summary", "摘要", "text"),
-    _col("transfer", "内部转账", "transfer"),
+    _col("mark", "标记", "mark"),  # 仅内部流动区（内部流动 / 重复记录）
 ]

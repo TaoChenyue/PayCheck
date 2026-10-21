@@ -4,8 +4,8 @@ API：
   GET  /                      单页应用（static/index.html）
   GET  /api/meta              各源记录数、库路径、版本
   GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位（支持 source=total）
-  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 附 transfer 模式）
-  GET  /api/summary?source=... 汇总卡片（source=total 返回计入/不计入两套口径）
+  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 返回三区结构：income/expense/flow）
+  GET  /api/summary?source=... 汇总卡片（source=total 返回真实收入/真实支出/内部流动三口径）
   POST /api/import/preview        解析单个文件，返回预览与去重比对（不写入）
   POST /api/import/confirm        解析单个文件并写入（幂等）
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
@@ -347,15 +347,15 @@ class Handler(BaseHTTPRequestHandler):
             filters.pop("categories", None)  # 总账户的「分类」维度是来源多选
             raw_sources = (query.get("sources") or [None])[0]
             sources = _parse_list(raw_sources) if raw_sources else list(SOURCES)
-            transfer = (query.get("transfer") or ["fold"])[0]
             with self._connect() as conn:
                 result = total.query_rows(
                     conn,
-                    page=_parse_int((query.get("page") or [None])[0], 1),
-                    page_size=_parse_int((query.get("page_size") or [None])[0], db._DEFAULT_PAGE_SIZE),
                     sort=(query.get("sort") or ["datetime"])[0],
                     order=(query.get("order") or ["desc"])[0],
-                    transfer=transfer,
+                    income_page=_parse_int((query.get("income_page") or [None])[0], 1),
+                    expense_page=_parse_int((query.get("expense_page") or [None])[0], 1),
+                    flow_page=_parse_int((query.get("flow_page") or [None])[0], 1),
+                    page_size=_parse_int((query.get("page_size") or [None])[0], db._DEFAULT_PAGE_SIZE),
                     sources=sources,
                     **filters,
                 )
