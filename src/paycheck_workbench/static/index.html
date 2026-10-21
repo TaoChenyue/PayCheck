@@ -471,6 +471,7 @@ tr.bf-error td { color: var(--danger); }
           <span data-mode="fold">折叠标灰</span>
           <span data-mode="hide">隐藏</span>
         </div>
+        <button class="btn" id="btn-rules">规则设置</button>
       </div>
       <div id="colset">
         <button class="btn" id="btn-colset">列设置 ▾</button>
@@ -510,6 +511,15 @@ tr.bf-error td { color: var(--danger); }
       <button class="close" id="btn-modal-close">×</button>
     </div>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="rules-modal-mask" hidden>
+  <div id="rules-modal">
+    <div id="rules-modal-header">规则设置
+      <button class="close" id="btn-rules-close">×</button>
+    </div>
+    <div id="rules-modal-body"></div>
   </div>
 </div>
 
@@ -1166,6 +1176,372 @@ function resetFilters() {
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }
 
+/* ================= 规则设置弹窗 ================= */
+const RULE_SOURCE_OPTIONS = [["boc", "BOC"], ["alipay", "支付宝"], ["wechat", "微信"]];
+const OP_LABELS = { eq: "等于", in: "任一等于", contains: "包含", starts: "开头是", not_contains: "不包含" };
+const OP_OPTIONS = Object.entries(OP_LABELS);
+const ACTION_LABELS = { fold: "折叠标灰", hide: "隐藏" };
+const FIELD_LABELS = { tx_name: "交易名称", counterparty: "对方账户名", memo: "附言", channel: "渠道", tx_type: "类型" };
+const FIELD_OPTIONS = {
+  boc: [["tx_name", "交易名称"], ["counterparty", "对方账户名"], ["memo", "附言"], ["channel", "渠道"], ["tx_type", "类型"]],
+  alipay: [["交易分类", "交易分类"], ["交易对方", "交易对方"], ["商品说明", "商品说明"], ["收/付款方式", "收/付款方式"],
+           ["交易状态", "交易状态"], ["备注", "备注"], ["收/支", "收/支"]],
+  wechat: [["交易类型", "交易类型"], ["交易对方", "交易对方"], ["商品", "商品"], ["支付方式", "支付方式"],
+           ["当前状态", "当前状态"], ["备注", "备注"], ["收/支", "收/支"]],
+};
+const MAX_CONDITIONS = 5;
+
+let rulesList = null;             // GET /api/rules 缓存
+let presetsData = null;           // GET /api/presets 缓存
+let expandedRules = new Set();    // 规则列表展开的行
+let editingRule = null;           // 表单草稿（id 非空为编辑）
+let presetChecked = new Set();    // 预设导入勾选
+let presetExpanded = new Set();   // 预设展开查看规则
+let placeholderValues = {};       // 预设占位符填写值 {占位符: 值}
+
+const fieldLabel = (f) => FIELD_LABELS[f] || f;
+function condLine(c) {
+  return `${fieldLabel(c.field)} ${OP_LABELS[c.op] || c.op}「${c.value}」`;
+}
+function conditionSummary(conditions) {
+  return conditions.map(condLine).join(" 且 ");
+}
+
+function openRulesModal() {
+  $("#rules-modal-mask").hidden = false;
+  loadRulesView();
+}
+function closeRulesModal() {
+  $("#rules-modal-mask").hidden = true;
+}
+async function loadRulesView() {
+  try {
+    const [r, p] = await Promise.all([api("/api/rules"), api("/api/presets")]);
+    if (!r.ok) throw new Error(r.error || "获取规则失败");
+    if (!p.ok) throw new Error(p.error || "获取预设失败");
+    rulesList = r.rules;
+    presetsData = p.presets;
+    renderRulesList();
+  } catch (e) {
+    $("#rules-modal-body").innerHTML = `<div style="color:var(--danger);text-align:center;padding:24px 0">${esc(e.message)}</div>`;
+  }
+}
+function presetNameOf(presetId) {
+  const p = (presetsData || []).find((x) => x.id === presetId);
+  return p ? p.name : presetId;
+}
+function showRulesBanner(message, type) {
+  $("#rules-modal-body").insertAdjacentHTML("afterbegin",
+    `<div id="rules-banner" class="${type}"><span>${esc(message)}</span><button class="banner-close">×</button></div>`);
+  const banner = $("#rules-banner");
+  banner.querySelector(".banner-close").addEventListener("click", () => banner.remove());
+  setTimeout(() => banner.remove(), 6000);
+}
+async function refreshAfterRuleChange() {
+  // 规则写操作成功 → 弹窗列表与总账户视图立即按新规则重查（设计 §5.5）
+  await loadRulesView();
+  if (currentSource === TOTAL) {
+    try { await Promise.all([loadRows(), loadSummary()]); }
+    catch (e) { showErrorBanner(e.message); }
+  }
+}
+async function saveRule(rule) {
+  const isEdit = rule.id != null;
+  const body = {
+    name: rule.name || "", source: rule.source, conditions: rule.conditions,
+    action: rule.action, enabled: rule.enabled,
+  };
+  const res = await api(isEdit ? `/api/rules/${rule.id}` : "/api/rules", {
+    method: isEdit ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) { alert(res.error || "保存失败"); return null; }
+  return res.rule;
+}
+
+/* ---- 规则列表 ---- */
+function renderRulesList() {
+  const groups = RULE_SOURCE_OPTIONS.map(([source]) => ({
+    source,
+    rules: (rulesList || []).filter((r) => r.source === source),
+  })).filter((g) => g.rules.length);
+  $("#rules-modal-body").innerHTML = `
+    <div class="rules-toolbar">
+      <button class="btn btn-primary" id="btn-rule-new">新建规则</button>
+      <button class="btn" id="btn-rule-import">从预设导入</button>
+    </div>
+    ${groups.map(renderRuleGroup).join("") || '<div style="color:#C4C7CC;text-align:center;padding:24px 0">还没有规则，点击「新建规则」或「从预设导入」</div>'}`;
+  $("#btn-rule-new").addEventListener("click", () => openRuleForm(null));
+  $("#btn-rule-import").addEventListener("click", openPresetView);
+  bindRuleListEvents();
+}
+function renderRuleGroup(group) {
+  return `<div class="rule-group"><h4>${esc(SOURCE_LABELS[group.source])}</h4>${group.rules.map(renderRuleItem).join("")}</div>`;
+}
+function renderRuleItem(rule) {
+  const expanded = expandedRules.has(rule.id);
+  const hitText = rule.enabled ? `命中 ${rule.hit_count.toLocaleString()} 笔` : "未启用";
+  const presetTag = rule.preset_id ? '<span class="badge">来自预设</span>' : "";
+  const detail = expanded ? `<div class="rule-detail">
+    ${rule.conditions.map((c) => `<div class="cond-line">· ${esc(condLine(c))}</div>`).join("")}
+    ${rule.preset_id ? `<div class="cond-line">来源预设：${esc(presetNameOf(rule.preset_id))}</div>` : ""}
+  </div>` : "";
+  return `<div class="rule-item ${rule.enabled ? "" : "off"}" data-id="${rule.id}">
+    <div class="rule-head">
+      ${srcBadgeHtml(rule.source)}
+      <span class="rule-name">${esc(rule.name)}</span>${presetTag}
+      <span class="rule-hit">${hitText}</span>
+      <label class="switch" title="启用/停用"><input type="checkbox" ${rule.enabled ? "checked" : ""} data-act="toggle"><span class="slider"></span></label>
+      <span class="rule-ops">
+        <button data-act="expand">${expanded ? "收起" : "详情"}</button>
+        <button data-act="edit">编辑</button>
+        <button data-act="copy">复制</button>
+        <button data-act="delete" class="danger">删除</button>
+      </span>
+    </div>
+    <div class="rule-cond">${esc(conditionSummary(rule.conditions))} · ${esc(ACTION_LABELS[rule.action] || rule.action)}</div>
+    ${detail}
+  </div>`;
+}
+function bindRuleListEvents() {
+  document.querySelectorAll("#rules-modal-body .rule-item").forEach((item) => {
+    const id = Number(item.dataset.id);
+    const rule = rulesList.find((r) => r.id === id);
+    item.querySelector('[data-act="toggle"]').addEventListener("change", async (e) => {
+      const saved = await saveRule({ ...rule, enabled: e.target.checked });  // 启停直接切换，不弹确认
+      if (!saved) { e.target.checked = !e.target.checked; return; }
+      await refreshAfterRuleChange();
+    });
+    item.querySelector('[data-act="expand"]').addEventListener("click", () => {
+      expandedRules.has(id) ? expandedRules.delete(id) : expandedRules.add(id);
+      renderRulesList();
+    });
+    item.querySelector('[data-act="edit"]').addEventListener("click", () => openRuleForm(rule));
+    item.querySelector('[data-act="copy"]').addEventListener("click", () =>
+      openRuleForm({ ...rule, id: null, name: rule.name + "（副本）", enabled: true }));
+    item.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+      if (!confirm(`删除规则「${rule.name}」？删除后汇总口径立即变化。`)) return;
+      const res = await api(`/api/rules/${rule.id}`, { method: "DELETE" });
+      if (!res.ok) { alert(res.error || "删除失败"); return; }
+      await refreshAfterRuleChange();
+    });
+  });
+}
+
+/* ---- 新建 / 编辑表单 ---- */
+function openRuleForm(rule) {
+  editingRule = rule ? {
+    id: rule.id, name: rule.name, source: rule.source,
+    conditions: rule.conditions.map((c) => ({ ...c })),
+    action: rule.action, enabled: rule.enabled,
+  } : {
+    id: null, name: "", source: "boc",
+    conditions: [{ field: FIELD_OPTIONS.boc[0][0], op: "eq", value: "" }],
+    action: "fold", enabled: true,
+  };
+  renderRuleForm();
+  scheduleHitPreview();
+}
+function renderCondRow(c, i) {
+  const r = editingRule;
+  const fields = FIELD_OPTIONS[r.source].map(([v, l]) => `<option value="${v}" ${c.field === v ? "selected" : ""}>${l}</option>`).join("");
+  const ops = OP_OPTIONS.map(([v, l]) => `<option value="${v}" ${c.op === v ? "selected" : ""}>${l}</option>`).join("");
+  const hint = c.op === "in" ? '<div class="hint">多个值用 | 分隔</div>' : "";
+  return `<div class="cond-row" data-i="${i}">
+    <select class="field">${fields}</select>
+    <select class="op">${ops}</select>
+    <div class="cond-val"><input class="value" value="${esc(c.value)}" placeholder="条件值">${hint}</div>
+    <button class="btn cond-del" ${r.conditions.length <= 1 ? "disabled" : ""}>×</button>
+  </div>`;
+}
+function renderRuleForm() {
+  const r = editingRule;
+  const sourceOptions = RULE_SOURCE_OPTIONS.map(([v, l]) => `<option value="${v}" ${r.source === v ? "selected" : ""}>${l}</option>`).join("");
+  $("#rules-modal-body").innerHTML = `
+    <div class="rule-form">
+      <div class="f-row">
+        <span class="f-label">规则名称</span>
+        <input class="txt" id="f-name" placeholder="留空按条件自动生成" value="${esc(r.name)}" style="flex:1;min-width:220px">
+        <span class="f-label" style="min-width:auto">作用数据源</span>
+        <select class="sel" id="f-source">${sourceOptions}</select>
+      </div>
+      <div class="f-row"><span class="f-label">条件</span>
+        <div style="flex:1;display:flex;flex-direction:column;gap:8px" id="f-conds">${r.conditions.map(renderCondRow).join("")}</div>
+      </div>
+      <div class="f-row">
+        <span class="f-label"></span>
+        <button class="btn" id="f-add-cond" ${r.conditions.length >= MAX_CONDITIONS ? "disabled" : ""}>＋ 添加条件（AND）</button>
+        <span class="hint">单条规则内条件为 AND 关系；OR 场景请新建多条规则。条件最多 ${MAX_CONDITIONS} 条</span>
+      </div>
+      <div class="f-row radio-line">
+        <span class="f-label">命中处理</span>
+        ${Object.entries(ACTION_LABELS).map(([v, l]) =>
+          `<label><input type="radio" name="f-action" value="${v}" ${r.action === v ? "checked" : ""}> ${l}（不计入汇总）</label>`).join("")}
+        <span class="hit-preview" id="f-hit">—</span>
+      </div>
+      <div class="form-actions">
+        <button class="btn" id="f-cancel">取消</button>
+        <button class="btn btn-primary" id="f-save">保存</button>
+      </div>
+    </div>`;
+  $("#f-name").addEventListener("input", (e) => { r.name = e.target.value.trim(); });
+  $("#f-source").addEventListener("change", (e) => {
+    r.source = e.target.value;
+    const fields = FIELD_OPTIONS[r.source].map(([v]) => v);  // 字段白名单跟随数据源
+    r.conditions = r.conditions.map((c) => ({ ...c, field: fields.includes(c.field) ? c.field : fields[0] }));
+    renderRuleForm();
+    scheduleHitPreview();
+  });
+  $("#f-add-cond").addEventListener("click", () => {
+    r.conditions.push({ field: FIELD_OPTIONS[r.source][0][0], op: "contains", value: "" });
+    renderRuleForm();
+    scheduleHitPreview();
+  });
+  document.querySelectorAll("#f-conds .cond-row").forEach((rowEl) => {
+    const idx = Number(rowEl.dataset.i);
+    rowEl.querySelector("select.field").addEventListener("change", (e) => { r.conditions[idx].field = e.target.value; scheduleHitPreview(); });
+    rowEl.querySelector("select.op").addEventListener("change", (e) => { r.conditions[idx].op = e.target.value; scheduleHitPreview(); });
+    rowEl.querySelector("input.value").addEventListener("input", (e) => { r.conditions[idx].value = e.target.value; scheduleHitPreview(); });
+    rowEl.querySelector(".cond-del").addEventListener("click", () => {
+      r.conditions.splice(idx, 1);
+      renderRuleForm();
+      scheduleHitPreview();
+    });
+  });
+  document.querySelectorAll('input[name="f-action"]').forEach((el) =>
+    el.addEventListener("change", (e) => { r.action = e.target.value; }));
+  $("#f-cancel").addEventListener("click", () => loadRulesView());
+  $("#f-save").addEventListener("click", submitRuleForm);
+}
+function draftConditions() {
+  return editingRule.conditions.map((c) => ({ ...c, value: c.value.trim() }));
+}
+function conditionsComplete(conditions) {
+  return conditions.every((c) =>
+    c.value && (c.op !== "in" || c.value.split("|").some((v) => v.trim())));
+}
+const scheduleHitPreview = debounce(() => previewRuleHits(), 300);  // 实时命中预览（300ms 防抖）
+async function previewRuleHits() {
+  const el = $("#f-hit");
+  if (!el) return;
+  const conditions = draftConditions();
+  if (!conditionsComplete(conditions)) { el.textContent = "—"; return; }
+  try {
+    const res = await api("/api/rules/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: editingRule.source, conditions }),
+    });
+    el.textContent = res.ok ? `预计命中 ${res.hit_count.toLocaleString()} 笔` : (res.error || "试算失败");
+  } catch (e) { el.textContent = "试算失败"; }
+}
+async function submitRuleForm() {
+  const r = editingRule;
+  const conditions = draftConditions();
+  if (!conditionsComplete(conditions)) { alert("请填写所有条件值"); return; }
+  const saved = await saveRule({
+    id: r.id, name: r.name, source: r.source, conditions,
+    action: r.action, enabled: r.enabled,
+  });
+  if (!saved) return;
+  closeRulesModal();  // 保存 → 关闭弹窗 → 视图立即按新规则重查
+  await refreshAfterRuleChange();
+}
+
+/* ---- 从预设导入 ---- */
+async function openPresetView() {
+  presetChecked = new Set();
+  presetExpanded = new Set();
+  placeholderValues = {};
+  try {
+    const res = await api("/api/presets");
+    if (!res.ok) { alert(res.error || "获取预设失败"); return; }
+    presetsData = res.presets;
+    renderPresetList();
+  } catch (e) { alert("网络错误：" + e.message); }
+}
+function placeholderFields() {
+  const keys = new Set();
+  for (const pid of presetChecked) {
+    const p = presetsData.find((x) => x.id === pid);
+    if (!p) continue;
+    for (const r of p.rules) {
+      for (const c of r.conditions) {
+        const matches = c.value.match(/\{[^{}]+\}/g);
+        if (matches) matches.forEach((k) => keys.add(k));
+      }
+    }
+  }
+  return [...keys];
+}
+function renderPresetList() {
+  const items = presetsData.map((p) => {
+    const checked = presetChecked.has(p.id);
+    const expanded = presetExpanded.has(p.id);
+    const hit = p.hit_count == null ? "填写占位符后统计" : `预计命中 ${p.hit_count.toLocaleString()} 笔`;
+    const rulesHtml = expanded ? `<div class="preset-rules">${p.rules.map((r) =>
+      `<div class="preset-rule">${srcBadgeHtml(r.source)}<span>${esc(r.name)}</span>
+       <span>${esc(conditionSummary(r.conditions))} · ${esc(ACTION_LABELS[r.action])}</span>
+       ${r.enabled ? "" : '<span class="badge">默认不启用</span>'}</div>`).join("")}</div>` : "";
+    return `<div class="preset-item" data-id="${p.id}">
+      <div class="preset-head">
+        <input type="checkbox" data-act="check" ${checked ? "checked" : ""}>
+        <span class="preset-name">${esc(p.name)}</span>
+        <span class="preset-meta">${p.rule_count} 条规则 · ${hit}</span>
+        <button class="btn" data-act="expand" style="padding:2px 8px;font-size:12px">${expanded ? "收起" : "查看规则"}</button>
+      </div>
+      <div class="preset-desc">${esc(p.description)}</div>
+      ${rulesHtml}
+    </div>`;
+  }).join("");
+  const placeholderInputs = placeholderFields().map((key) => `
+    <div class="f-row"><span class="f-label">${esc(key.slice(1, -1))}</span>
+      <input class="txt" data-ph="${esc(key)}" value="${esc((placeholderValues[key] || ""))}" placeholder="用于规则条件中的占位符 ${esc(key)}"></div>`).join("");
+  $("#rules-modal-body").innerHTML = `
+    <div class="rules-toolbar"><button class="btn" id="btn-preset-back">← 返回规则列表</button></div>
+    <div id="preset-list">${items}</div>
+    ${placeholderInputs ? `<div class="rule-group"><h4>占位符填写</h4>${placeholderInputs}</div>` : ""}
+    <div class="form-actions">
+      <button class="btn btn-primary" id="btn-preset-import" ${presetChecked.size ? "" : "disabled"}>导入所选预设</button>
+    </div>`;
+  $("#btn-preset-back").addEventListener("click", () => loadRulesView());
+  document.querySelectorAll("#preset-list .preset-item").forEach((item) => {
+    const pid = item.dataset.id;
+    item.querySelector('[data-act="check"]').addEventListener("change", (e) => {
+      e.target.checked ? presetChecked.add(pid) : presetChecked.delete(pid);
+      renderPresetList();  // 占位符填写区随勾选变化
+    });
+    item.querySelector('[data-act="expand"]').addEventListener("click", () => {
+      presetExpanded.has(pid) ? presetExpanded.delete(pid) : presetExpanded.add(pid);
+      renderPresetList();
+    });
+  });
+  document.querySelectorAll("#rules-modal-body input[data-ph]").forEach((el) =>
+    el.addEventListener("input", (e) => { placeholderValues[e.target.dataset.ph] = e.target.value; }));
+  $("#btn-preset-import").addEventListener("click", submitPresetImport);
+}
+async function submitPresetImport() {
+  const keys = placeholderFields();
+  const replacements = {};
+  for (const key of keys) {
+    const value = (placeholderValues[key] || "").trim();
+    if (!value) { alert(`请填写占位符「${key}」对应的内容`); return; }
+    replacements[key.slice(1, -1)] = value;
+  }
+  const res = await api("/api/rules/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preset_ids: [...presetChecked], replacements }),
+  });
+  if (!res.ok) { alert(res.error || "导入失败"); return; }
+  const skipped = res.skipped || [];
+  const message = `已导入 ${res.created.length} 条规则，生成可编辑副本`
+    + (skipped.length ? `，跳过 ${skipped.length} 条（同名同条件已存在）` : "");
+  await refreshAfterRuleChange();
+  showRulesBanner(message, skipped.length ? "warn" : "success");
+}
+
 /* ================= 导入流程 ================= */
 function openModal() {
   modalSource = currentSource;
@@ -1588,6 +1964,9 @@ $("#btn-import-empty").addEventListener("click", openModal);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
 $("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
+$("#btn-rules").addEventListener("click", openRulesModal);
+$("#btn-rules-close").addEventListener("click", closeRulesModal);
+$("#rules-modal-mask").addEventListener("click", (e) => { if (e.target.id === "rules-modal-mask") closeRulesModal(); });
 $("#btn-collapse").addEventListener("click", () => $("#layout").classList.toggle("sidebar-collapsed"));
 $("#btn-reset").addEventListener("click", resetFilters);
 $("#search").addEventListener("input", debounce((e) => {
