@@ -233,6 +233,21 @@ tr.fold-full-row .money { text-decoration: line-through; color: var(--neutral); 
   padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg);
   border-top: 1px solid var(--border);
 }
+/* ---------- 总账户：三区（真实收入/真实支出/内部流动） ---------- */
+.zone { background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+.zone:last-child { margin-bottom: 0; }
+.zone-head {
+  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
+}
+.zone-title { font-weight: 600; white-space: nowrap; }
+.zone-sub { font-size: 12px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zone-collapse { margin-left: auto; color: var(--text-2); font-size: 12px; white-space: nowrap; }
+.zone-table-wrap { overflow-x: auto; }
+.zone-empty { padding: 18px 16px; color: #C4C7CC; font-size: 13px; }
+.zonedesc { padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg); border-bottom: 1px solid var(--border); }
+tr.flow-main td { cursor: pointer; }
+.grp-pair { color: var(--text-2); font-size: 12px; margin-left: 8px; }
 #total-tools { display: flex; align-items: center; gap: 8px; }
 
 /* ---------- 规则设置弹窗 ---------- */
@@ -480,6 +495,11 @@ tr.bf-error td { color: var(--danger); }
           <tbody id="table-body"></tbody>
         </table>
       </div>
+      <div id="total-zones" hidden>
+        <section class="zone" id="zone-income"></section>
+        <section class="zone" id="zone-expense"></section>
+        <section class="zone" id="zone-flow"></section>
+      </div>
       <div id="hidden-hint" hidden></div>
       <div id="empty-state" hidden>
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
@@ -538,6 +558,8 @@ let modalFiles = null;          // 批量模式的有效文件列表
 let modalWarn = null;           // 类型不符/同名被跳过的文件提示
 let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
 let lastSummary = null;       // 最近一次汇总响应（总账户区头合计展示）
+let lastTotal = null;         // 最近一次总账户三区响应
+let collapsedZones = { income: false, expense: false, flow: false };  // 总账户区块收起状态
 
 const TOTAL = "total";
 const TAB_ORDER = ["boc", "alipay", "wechat", TOTAL];
@@ -656,7 +678,7 @@ async function loadRows() {
   p.set("page_size", pageSizeBySource[currentSource]);
   const s = sortBySource[currentSource];
   if (s.order) { p.set("sort", s.key); p.set("order", s.order); }
-  showSkeleton();
+  if (currentSource === TOTAL) showTotalSkeleton(); else showSkeleton();
   const res = await api("/api/rows?" + p.toString());
   if (!res.ok) throw new Error(res.error || "查询失败");
   renderTable(res);
@@ -841,13 +863,16 @@ function cellHtml(row, col) {
   return `<span title="${esc(v)}">${esc(display)}</span>`;
 }
 function renderTableBodyKeep() {
-  // 列显隐变化时仅重绘表格（行数据已在 lastRows 中）
+  // 列显隐变化时仅重绘表格（行数据已在 lastRows / lastTotal 中）
+  if (currentSource === TOTAL) { if (lastTotal) renderTotalZones(); return; }
   if (lastRows) renderTable(lastRows);
 }
 let lastRows = null;
 function renderTable(res) {
+  if (currentSource === TOTAL) { lastTotal = res; renderTotalZones(); return; }
   lastRows = res;
-  if (currentSource === TOTAL) { renderTotalTable(res); return; }
+  $("#table-scroll").style.display = "";
+  $("#total-zones").hidden = true;
   $("#hidden-hint").hidden = true;
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
@@ -880,66 +905,97 @@ function renderTable(res) {
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
   renderPagination(res);
 }
-/* ---- 总账户明细表：统一列 + 折叠条 + 隐藏提示 ---- */
-function foldStripHtml(row) {
-  const d = dirInfo(row);
-  const names = esc((row.transfer.rule_names || []).join("、"));
-  const amount = (row.amount === "" || row.amount === null || row.amount === undefined)
-    ? "—" : `${d.sign}${fmtMoney(row.amount)}`;
-  return `<div class="fold-strip">
-    <span class="tag transfer-tag" title="命中规则：${names}">内部转账</span>
-    <span class="fold-time">${esc(row.time || "—")}</span>
-    <span class="tag ${d.cls}">${esc(d.label)}</span>
-    <span class="fold-amount">${amount}</span>
-    ${srcBadgeHtml(row.source)}
-    <span class="fold-cp">${esc(row.counterparty || "—")}</span>
-    <span class="fold-summary">${esc(row.summary || "")}</span>
-    <span class="fold-toggle">展开 ▸</span>
-  </div>`;
-}
-function renderTotalTable(res) {
+/* ---- 总账户三区：真实收入 / 真实支出 / 内部流动 ---- */
+function renderTotalZones() {
+  const res = lastTotal;
+  $("#table-scroll").style.display = "none";
+  $("#empty-state").hidden = true;
+  $("#total-zones").hidden = false;
   const o = optionsCache[TOTAL];
   const vis = visibleColsBySource[TOTAL];
-  const cols = o.columns.filter((c) => vis.has(c.key));
-  const body = $("#table-body");
-  expandedRow = null;
-  renderHiddenHint(res);
-  if (res.total === 0) {
-    body.innerHTML = "";
-    renderEmptyState(res);
-    renderPagination(res);
-    return;
-  }
-  $("#empty-state").hidden = true;
-  body.innerHTML = res.rows.map((row) => {
-    const full = cols.map((col) => {
-      const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
-      return `<td${cls}>${cellHtml(row, col)}</td>`;
-    }).join("");
-    if (row.transfer) {
-      // 折叠标灰：默认收窄为一条折叠条，点击展开完整行
-      return `<tr class="data-row fold-strip-row" data-id="${row.id}"><td colspan="${cols.length}">${foldStripHtml(row)}</td></tr>
-              <tr class="data-row fold-full-row" data-id="${row.id}" hidden>${full}</tr>
-              <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
-    }
-    return `<tr class="data-row" data-id="${row.id}">${full}</tr>
-            <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
+  const dataCols = o.columns.filter((c) => vis.has(c.key) && c.key !== "mark");
+  $("#zone-income").innerHTML = zoneHtml("income", "真实收入", dataCols);
+  $("#zone-expense").innerHTML = zoneHtml("expense", "真实支出", dataCols);
+  $("#zone-flow").innerHTML = flowZoneHtml(dataCols);
+  bindZoneEvents();
+}
+function theadCellHtml(c, sortable) {
+  const s = sortBySource[TOTAL];
+  let icon = "";
+  if (sortable && c.sort && s.key === c.sort && s.order) icon = `<span class="sort-icon">${s.order === "desc" ? "▼" : "▲"}</span>`;
+  return `<th class="${sortable && c.sort ? "sortable" : ""}" data-sort="${c.sort || ""}">${esc(c.label)}${icon}</th>`;
+}
+function zoneHtml(zoneKey, title, cols) {
+  const z = lastTotal[zoneKey];
+  const sum = lastSummary ? lastSummary[zoneKey] : null;
+  const sign = zoneKey === "income" ? "+" : "−";
+  const sub = sum ? `合计 ${sign}${fmtMoney(sum.sum)} · ${sum.count.toLocaleString()} 笔` : `共 ${z.total.toLocaleString()} 条`;
+  const collapsed = collapsedZones[zoneKey];
+  const body = z.total === 0
+    ? `<div class="zone-empty">暂无数据</div>`
+    : `<div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, true)).join("")}</tr></thead><tbody>${z.rows.map((row) => zoneRowHtml(row, cols)).join("")}</tbody></table></div>`;
+  return `
+    <div class="zone-head" data-zone="${zoneKey}">
+      <span class="zone-title">${esc(title)}</span><span class="zone-sub">${sub}</span>
+      <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
+    </div>
+    <div class="zone-body" data-zone="${zoneKey}" ${collapsed ? "hidden" : ""}>${body}</div>`;
+}
+function zoneRowHtml(row, cols) {
+  const tds = cols.map((col) => {
+    const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
+    return `<td${cls}>${cellHtml(row, col)}</td>`;
   }).join("");
-  body.querySelectorAll("tr.fold-strip-row").forEach((tr) =>
-    tr.addEventListener("click", () => {
-      tr.hidden = true;
-      const fullRow = body.querySelector(`tr.fold-full-row[data-id="${tr.dataset.id}"]`);
-      if (fullRow) fullRow.hidden = false;
-    }));
-  body.querySelectorAll("tr.data-row:not(.fold-strip-row)").forEach((tr) => {
+  return `<tr class="data-row" data-id="${row.id}">${tds}</tr>
+          <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
+}
+function flowZoneHtml(cols) {
+  const z = lastTotal.flow;
+  const collapsed = collapsedZones.flow;
+  const sub = `${z.total.toLocaleString()} 组 · ${(z.row_total || 0).toLocaleString()} 行 · 不计入收支`;
+  const body = z.total === 0
+    ? `<div class="zone-empty">暂无数据</div>`
+    : `<div class="zonedesc">这里面的钱要么在账户之间倒来倒去，要么是同一笔钱记了多条记录，都不计入上面的真实收支。</div>
+       <div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, false)).join("")}</tr></thead><tbody>${z.groups.map((g) => flowMainRowHtml(g, cols)).join("")}</tbody></table></div>`;
+  return `
+    <div class="zone-head" data-zone="flow">
+      <span class="zone-title">内部流动</span><span class="zone-sub">${sub}</span>
+      <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
+    </div>
+    <div class="zone-body" data-zone="flow" ${collapsed ? "hidden" : ""}>${body}</div>`;
+}
+function flowMainRowHtml(g, cols) {
+  const main = g.main;
+  const tds = cols.map((col) => {
+    const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
+    const inner = cellHtml(main, col);
+    const extras = col === cols[cols.length - 1] ? `<span class="grp-pair">${esc(g.pair)}</span>` : "";
+    return `<td${cls}>${inner}${extras}</td>`;
+  }).join("");
+  return `<tr class="flow-main" data-group="${esc(g.key)}">${tds}</tr>`;
+}
+function bindZoneEvents() {
+  // 区块头点击收起/展开该区
+  document.querySelectorAll("#total-zones .zone-head").forEach((head) => {
+    const zone = head.dataset.zone;
+    head.addEventListener("click", () => {
+      collapsedZones[zone] = !collapsedZones[zone];
+      const body = document.querySelector(`#total-zones .zone-body[data-zone="${zone}"]`);
+      if (body) body.hidden = collapsedZones[zone];
+      const fold = head.querySelector(".zone-collapse");
+      if (fold) fold.textContent = collapsedZones[zone] ? "展开 ▾" : "收起 ▴";
+    });
+  });
+  // 真实区表头排序与行详情（沿用现有交互）
+  document.querySelectorAll("#zone-income th.sortable, #zone-expense th.sortable").forEach((th) =>
+    th.addEventListener("click", () => cycleSort(th.dataset.sort)));
+  document.querySelectorAll("#zone-income tr.data-row, #zone-expense tr.data-row").forEach((tr) =>
     tr.addEventListener("click", (ev) => {
       if (ev.target.classList.contains("copy-btn")) return;
       toggleDetail(tr.dataset.id);
-    });
-  });
-  body.querySelectorAll(".copy-btn").forEach((btn) =>
+    }));
+  document.querySelectorAll("#zone-income .copy-btn, #zone-expense .copy-btn").forEach((btn) =>
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
-  renderPagination(res);
 }
 function renderHiddenHint(res) {
   const el = $("#hidden-hint");
@@ -958,10 +1014,16 @@ function toggleDetail(id) {
   document.querySelectorAll("tr.detail-row:not([hidden])").forEach((r) => { r.hidden = true; });
   expandedRow = null;
   if (!willOpen) return;
-  const row = lastRows.rows.find((r) => String(r.id) === String(id));
+  let row = null;
+  if (lastRows && lastRows.rows) row = lastRows.rows.find((r) => String(r.id) === String(id)) || null;
+  if (!row && lastTotal) {
+    // 总账户三区：行位于真实收入/真实支出区的当前页
+    const realRows = (lastTotal.income.rows || []).concat(lastTotal.expense.rows || []);
+    row = realRows.find((r) => String(r.id) === String(id)) || null;
+  }
   if (!row) return;
   if (currentSource === TOTAL) {
-    renderTotalDetail(detailRow, row);
+    renderTotalDetail(detailRow.querySelector("td"), row);
     detailRow.hidden = false;
     expandedRow = id;
     return;
@@ -986,7 +1048,7 @@ function toggleDetail(id) {
   detailRow.hidden = false;
   expandedRow = id;
 }
-function renderTotalDetail(detailRow, row) {
+function renderTotalDetail(td, row) {
   // 总账户行详情：展开该源原始全部列（与单源页签一致）
   const srcOptions = optionsCache[row.source];
   const items = srcOptions.columns.map((c) => {
@@ -998,13 +1060,13 @@ function renderTotalDetail(detailRow, row) {
     const copy = (c.kind === "copy" && v) ? `<button class="copy-btn" data-copy="${esc(v)}">复制</button>` : "";
     return `<div class="detail-item"><div class="k">${esc(c.label)}</div><div class="v">${v ? esc(v) : "—"}${copy}</div></div>`;
   });
-  if (row.transfer) {
-    items.push(`<div class="detail-item"><div class="k">内部转账</div><div class="v">${esc(row.transfer.rule_names.join("、"))}</div></div>`);
+  if (row.rule_names && row.rule_names.length) {
+    items.push(`<div class="detail-item"><div class="k">命中规则</div><div class="v">${esc(row.rule_names.join("、"))}</div></div>`);
   }
   items.push(`<div class="detail-item"><div class="k">来源文件</div><div class="v">${esc(row.source_file)}</div></div>`);
   items.push(`<div class="detail-item"><div class="k">导入时间</div><div class="v">${esc(row.imported_at)}</div></div>`);
-  detailRow.querySelector("td").innerHTML = `<div class="detail-grid">${items.join("")}</div>`;
-  detailRow.querySelectorAll(".copy-btn").forEach((btn) =>
+  td.innerHTML = `<div class="detail-grid">${items.join("")}</div>`;
+  td.querySelectorAll(".copy-btn").forEach((btn) =>
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
 }
 function renderEmptyState(res) {
@@ -1051,6 +1113,19 @@ function showSkeleton() {
   body.innerHTML = Array.from({ length: n }).map(() =>
     `<tr class="skeleton-row"><td colspan="12"><div class="skeleton-block"></div></td></tr>`).join("");
   $("#pagination").innerHTML = "";
+}
+function showTotalSkeleton() {
+  $("#table-scroll").style.display = "none";
+  $("#empty-state").hidden = true;
+  $("#total-zones").hidden = false;
+  const titles = { income: "真实收入", expense: "真实支出", flow: "内部流动" };
+  for (const zone of ["income", "expense", "flow"]) {
+    const el = $(`#zone-${zone}`);
+    el.innerHTML = `<div class="zone-head"><span class="zone-title">${titles[zone]}</span></div>
+      <div class="zone-body" style="padding:14px 16px">
+        <div class="skeleton-block"></div><div class="skeleton-block" style="margin-top:10px;width:60%"></div>
+      </div>`;
+  }
 }
 function showErrorBanner(message) {
   addBanner("error", message, false);
