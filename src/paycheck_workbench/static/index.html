@@ -1343,6 +1343,21 @@ function openRuleForm(rule) {
   renderRuleForm();
   scheduleHitPreview();
 }
+function syncCondHint(rowEl, op) {
+  // 操作符切换时即时增删「in」的值分隔提示，无需整表重渲染
+  const box = rowEl.querySelector(".cond-val");
+  let hint = box.querySelector(".hint");
+  if (op === "in") {
+    if (!hint) {
+      hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = "多个值用 | 分隔";
+      box.appendChild(hint);
+    }
+  } else if (hint) {
+    hint.remove();
+  }
+}
 function renderCondRow(c, i) {
   const r = editingRule;
   const fields = FIELD_OPTIONS[r.source].map(([v, l]) => `<option value="${v}" ${c.field === v ? "selected" : ""}>${l}</option>`).join("");
@@ -1401,7 +1416,11 @@ function renderRuleForm() {
   document.querySelectorAll("#f-conds .cond-row").forEach((rowEl) => {
     const idx = Number(rowEl.dataset.i);
     rowEl.querySelector("select.field").addEventListener("change", (e) => { r.conditions[idx].field = e.target.value; scheduleHitPreview(); });
-    rowEl.querySelector("select.op").addEventListener("change", (e) => { r.conditions[idx].op = e.target.value; scheduleHitPreview(); });
+    rowEl.querySelector("select.op").addEventListener("change", (e) => {
+      r.conditions[idx].op = e.target.value;
+      syncCondHint(rowEl, e.target.value);  // 提示即时出现/消失
+      scheduleHitPreview();
+    });
     rowEl.querySelector("input.value").addEventListener("input", (e) => { r.conditions[idx].value = e.target.value; scheduleHitPreview(); });
     rowEl.querySelector(".cond-del").addEventListener("click", () => {
       r.conditions.splice(idx, 1);
