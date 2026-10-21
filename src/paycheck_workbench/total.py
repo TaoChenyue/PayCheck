@@ -313,13 +313,18 @@ def query_rows(
     sources: Optional[List[str]] = None,
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
-    page: int = 1,
-    page_size: int = db._DEFAULT_PAGE_SIZE,
     sort: str = "datetime",
     order: str = "desc",
-    transfer: Optional[str] = None,  # 已废弃（TCY-18 移除三模式），保留参数兼容
+    income_page: int = 1,
+    expense_page: int = 1,
+    flow_page: int = 1,
+    page_size: int = db._DEFAULT_PAGE_SIZE,
 ) -> dict:
-    """总账户明细查询：统一映射 + 筛选 + 启用规则求值 → 三区结构 + 分页。"""
+    """总账户明细查询：统一映射 + 筛选 + 启用规则求值 → 三区结构 + 各区独立分页。
+
+    真实收入/真实支出区沿用排序与按行分页；内部流动区固定按组主记录时间倒序、
+    按组数分页（TCY-20 设计 §3.3）。
+    """
     if page_size not in db._PAGE_SIZES:
         page_size = db._DEFAULT_PAGE_SIZE
     if sort not in _TOTAL_SORT_KEYS:
@@ -333,20 +338,24 @@ def query_rows(
     sort_rows(income, sort, order)
     sort_rows(expense, sort, order)
 
-    def page_of(rows: List[dict]) -> dict:
-        offset = (max(page, 1) - 1) * page_size
+    def page_of(rows: List[dict], page: int) -> dict:
+        page = max(page, 1)
+        offset = (page - 1) * page_size
         return {
             "total": len(rows), "page": page, "page_size": page_size,
             "rows": [_public(r) for r in rows[offset : offset + page_size]],
         }
 
-    flow_offset = (max(page, 1) - 1) * page_size
+    groups = _group_flows(flow_rows)
+    flow_page = max(flow_page, 1)
+    flow_offset = (flow_page - 1) * page_size
     return {
-        "income": page_of(income),
-        "expense": page_of(expense),
+        "income": page_of(income, income_page),
+        "expense": page_of(expense, expense_page),
         "flow": {
-            "total": len(flow_rows), "page": page, "page_size": page_size,
-            "rows": [_flow_public(r) for r in flow_rows[flow_offset : flow_offset + page_size]],
+            "total": len(groups), "page": flow_page, "page_size": page_size,
+            "row_total": len(flow_rows),
+            "groups": groups[flow_offset : flow_offset + page_size],
         },
     }
 
