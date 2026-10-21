@@ -204,3 +204,19 @@ def dedup_key(source: str, values: Dict[str, str]) -> str:
         if key:
             return key
     return "|".join((values.get(c) or "").strip() for c in fallback).strip("|")
+
+
+# ---- 总账户虚拟源（TCY-15）：统一逻辑列与筛选维度 ----
+TOTAL_SOURCE = "total"
+TOTAL_DIRECTIONS = ["支出", "收入", "不计收支"]
+TOTAL_NEUTRAL = "不计收支"
+
+TOTAL_COLUMNS = [
+    _col("time", "时间", "datetime", sort="datetime"),
+    _col("direction", "收·支", "direction"),
+    _col("amount", "金额", "amount", sort="amount"),
+    _col("source", "来源", "source"),
+    _col("counterparty", "对方", "text", sort="counterparty"),
+    _col("summary", "摘要", "text"),
+    _col("transfer", "内部转账", "transfer"),
+]
