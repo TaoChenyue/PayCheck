@@ -3,12 +3,17 @@
 API：
   GET  /                      单页应用（static/index.html）
   GET  /api/meta              各源记录数、库路径、版本
-  GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位
-  GET  /api/rows?source=...   筛选 + 排序 + 分页查询
-  GET  /api/summary?source=... 汇总卡片（筛选联动）
+  GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位（支持 source=total）
+  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 附 transfer 模式）
+  GET  /api/summary?source=... 汇总卡片（source=total 返回计入/不计入两套口径）
   POST /api/import/preview        解析单个文件，返回预览与去重比对（不写入）
   POST /api/import/confirm        解析单个文件并写入（幂等）
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
+  GET  /api/rules             内部转账规则列表（附实时命中笔数）
+  POST /api/rules             新建规则 · PUT /api/rules/{id} 改含启停 · DELETE /api/rules/{id}
+  POST /api/rules/preview     草稿条件试算命中笔数
+  GET  /api/presets           内置预设库（附预计命中笔数）
+  POST /api/rules/import      从预设批量创建规则（同名同条件跳过）
 """
 
 from __future__ import annotations
@@ -23,8 +28,18 @@ from typing import List, Optional, Tuple
 
 from paycheck_workbench import __version__
 from paycheck_workbench import db
+from paycheck_workbench import rules
+from paycheck_workbench import total
 from paycheck_workbench.parsing import ParseError, parse_file
-from paycheck_workbench.sources import ALLOWED_EXTENSIONS, SOURCE_CONFIGS, SOURCES
+from paycheck_workbench.sources import (
+    ALLOWED_EXTENSIONS,
+    SOURCE_CONFIGS,
+    SOURCES,
+    TOTAL_COLUMNS,
+    TOTAL_DIRECTIONS,
+    TOTAL_NEUTRAL,
+    TOTAL_SOURCE,
+)
 
 _INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024  # 单文件上限 64MB（本地账单规模远小于此）
@@ -226,9 +241,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_rows(parsed)
             elif parsed.path == "/api/summary":
                 self._api_summary(parsed)
+            elif parsed.path == "/api/rules":
+                self._api_rules()
+            elif parsed.path == "/api/presets":
+                self._api_presets()
             else:
                 self._send_error(404, "Not Found")
         except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
             self._send_error(500, f"数据库读取失败：{exc}")
@@ -262,6 +283,26 @@ class Handler(BaseHTTPRequestHandler):
     def _api_options(self, parsed):
         query = urllib.parse.parse_qs(parsed.query)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            self._send(200, {
+                "ok": True,
+                "source": source,
+                "label": "总账户",
+                "columns": TOTAL_COLUMNS,
+                "directions": TOTAL_DIRECTIONS,
+                "neutral": TOTAL_NEUTRAL,
+                "category_label": "来源",
+                "categories": list(SOURCES),
+                "search_placeholder": "搜索对方 / 摘要",
+                "date_col": "",
+                "time_col": "",
+                "direction_col": "direction",
+                "amount_col": "amount",
+                "balance_col": "",
+                "page_sizes": list(db._PAGE_SIZES),
+                "default_page_size": db._DEFAULT_PAGE_SIZE,
+            })
+            return
         cfg = SOURCE_CONFIGS.get(source)
         if not cfg:
             raise ApiError(f"未知数据源：{source}")
@@ -301,6 +342,25 @@ class Handler(BaseHTTPRequestHandler):
     def _api_rows(self, parsed):
         query = urllib.parse.parse_qs(parsed.query)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            filters = self._filter_params(query)
+            filters.pop("categories", None)  # 总账户的「分类」维度是来源多选
+            raw_sources = (query.get("sources") or [None])[0]
+            sources = _parse_list(raw_sources) if raw_sources else list(SOURCES)
+            transfer = (query.get("transfer") or ["fold"])[0]
+            with self._connect() as conn:
+                result = total.query_rows(
+                    conn,
+                    page=_parse_int((query.get("page") or [None])[0], 1),
+                    page_size=_parse_int((query.get("page_size") or [None])[0], db._DEFAULT_PAGE_SIZE),
+                    sort=(query.get("sort") or ["datetime"])[0],
+                    order=(query.get("order") or ["desc"])[0],
+                    transfer=transfer,
+                    sources=sources,
+                    **filters,
+                )
+            self._send(200, {"ok": True, **result})
+            return
         if source not in SOURCE_CONFIGS:
             raise ApiError(f"未知数据源：{source}")
         filters = self._filter_params(query)
@@ -319,6 +379,15 @@ class Handler(BaseHTTPRequestHandler):
     def _api_summary(self, parsed):
         query = urllib.parse.parse_qs(parsed.query)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            filters = self._filter_params(query)
+            filters.pop("categories", None)
+            raw_sources = (query.get("sources") or [None])[0]
+            sources = _parse_list(raw_sources) if raw_sources else list(SOURCES)
+            with self._connect() as conn:
+                summary = total.query_summary(conn, sources=sources, **filters)
+            self._send(200, {"ok": True, "source": source, **summary})
+            return
         if source not in SOURCE_CONFIGS:
             raise ApiError(f"未知数据源：{source}")
         filters = self._filter_params(query)
@@ -337,9 +406,49 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_import_preview_batch()
             elif parsed.path == "/api/import/confirm":
                 self._api_import_confirm()
+            elif parsed.path == "/api/rules":
+                self._api_rules_create()
+            elif parsed.path == "/api/rules/preview":
+                self._api_rules_preview()
+            elif parsed.path == "/api/rules/import":
+                self._api_rules_import()
             else:
                 self._send_error(404, "Not Found")
         except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
+            self._send_error(400, str(exc))
+        except sqlite3.OperationalError as exc:
+            self._send_error(500, f"数据库写入失败：{exc}")
+
+    # ---- PUT / DELETE ----
+
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            match = re.fullmatch(r"/api/rules/(\d+)", parsed.path)
+            if match:
+                self._api_rules_update(int(match.group(1)))
+            else:
+                self._send_error(404, "Not Found")
+        except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
+            self._send_error(400, str(exc))
+        except sqlite3.OperationalError as exc:
+            self._send_error(500, f"数据库写入失败：{exc}")
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            match = re.fullmatch(r"/api/rules/(\d+)", parsed.path)
+            if match:
+                self._api_rules_delete(int(match.group(1)))
+            else:
+                self._send_error(404, "Not Found")
+        except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
             self._send_error(500, f"数据库写入失败：{exc}")
@@ -481,6 +590,121 @@ class Handler(BaseHTTPRequestHandler):
         with self._connect() as conn:
             result = db.import_parse_result(conn, source, parsed_result, file_name)
         self._send(200, {"ok": True, "file_name": file_name, **result})
+
+    # ---- 内部转账规则 API ----
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ApiError("请求体为空")
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ApiError("请求体不是有效 JSON") from exc
+
+    def _validate_rule_body(self, body) -> dict:
+        """校验并规整规则请求体；名称留空按条件自动生成。"""
+        source = body.get("source") or ""
+        conditions = body.get("conditions") or []
+        action = body.get("action") or "fold"
+        try:
+            rules.validate_rule(source, conditions, action)
+        except rules.RuleError as exc:
+            raise ApiError(str(exc)) from exc
+        name = (body.get("name") or "").strip() or rules.auto_name(conditions)
+        return {
+            "name": name,
+            "source": source,
+            "conditions": conditions,
+            "action": action,
+            "enabled": bool(body.get("enabled", True)),
+        }
+
+    def _api_rules(self):
+        with self._connect() as conn:
+            rule_list = db.list_rules(conn)
+            for rule in rule_list:
+                rule["hit_count"] = db.count_rule_hits(conn, rule)
+        self._send(200, {"ok": True, "rules": rule_list})
+
+    def _api_rules_create(self):
+        body = self._validate_rule_body(self._read_json())
+        with self._connect() as conn:
+            saved = db.save_rule(conn, body)
+            saved["hit_count"] = db.count_rule_hits(conn, saved)
+        self._send(200, {"ok": True, "rule": saved})
+
+    def _api_rules_update(self, rule_id: int):
+        body = self._validate_rule_body(self._read_json())
+        with self._connect() as conn:
+            if db.get_rule(conn, rule_id) is None:
+                raise ApiError("规则不存在")
+            saved = db.save_rule(conn, body, rule_id=rule_id)
+            saved["hit_count"] = db.count_rule_hits(conn, saved)
+        self._send(200, {"ok": True, "rule": saved})
+
+    def _api_rules_delete(self, rule_id: int):
+        with self._connect() as conn:
+            if db.get_rule(conn, rule_id) is None:
+                raise ApiError("规则不存在")
+            db.delete_rule(conn, rule_id)
+        self._send(200, {"ok": True})
+
+    def _api_rules_preview(self):
+        body = self._read_json()
+        source = body.get("source") or ""
+        conditions = body.get("conditions") or []
+        try:
+            rules.validate_rule(source, conditions, "fold")  # 命中数与处理方式无关
+        except rules.RuleError as exc:
+            raise ApiError(str(exc)) from exc
+        with self._connect() as conn:
+            hit_count = db.count_rule_hits(conn, {"source": source, "conditions": conditions})
+        self._send(200, {"ok": True, "hit_count": hit_count})
+
+    def _api_presets(self):
+        with self._connect() as conn:
+            presets = []
+            for preset in rules.PRESETS:
+                hit_count = None
+                if not rules.preset_placeholders(preset):
+                    hit_count = sum(db.count_rule_hits(conn, rule) for rule in preset["rules"])
+                presets.append({
+                    "id": preset["id"],
+                    "name": preset["name"],
+                    "description": preset["description"],
+                    "rules": preset["rules"],
+                    "rule_count": len(preset["rules"]),
+                    "hit_count": hit_count,
+                    "has_placeholder": bool(rules.preset_placeholders(preset)),
+                })
+        self._send(200, {"ok": True, "presets": presets})
+
+    def _api_rules_import(self):
+        body = self._read_json()
+        preset_ids = body.get("preset_ids") or []
+        replacements = body.get("replacements") or {}
+        created: List[dict] = []
+        skipped: List[dict] = []
+        with self._connect() as conn:
+            for preset_id in preset_ids:
+                preset = rules.PRESETS_BY_ID.get(preset_id)
+                if preset is None:
+                    raise ApiError(f"未知预设：{preset_id}")
+                try:
+                    specs = rules.instantiate_preset(preset, replacements)
+                except rules.RuleError as exc:
+                    raise ApiError(str(exc)) from exc
+                for spec in specs:
+                    if db.find_duplicate_rule(conn, spec["name"], spec["conditions"]):
+                        skipped.append({
+                            "preset_id": preset_id,
+                            "preset_name": preset["name"],
+                            "name": spec["name"],
+                        })
+                        continue
+                    created.append(db.save_rule(conn, {**spec, "preset_id": preset_id}))
+        self._send(200, {"ok": True, "created": created, "skipped": skipped})
 
 
 def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):
