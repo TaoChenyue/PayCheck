@@ -1,4 +1,4 @@
-"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总
+"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总、内部转账规则
 
 表结构（设计 3.4）：
   <source>_transactions
@@ -7,16 +7,20 @@
     source_file   TEXT
     imported_at   TEXT
     dedup_key     TEXT UNIQUE   -- 去重键（设计 4.3）
+  transfer_rules（内部转账规则，设计 3.5）
+    id / name / source / conditions(JSON) / action / enabled / preset_id / created_at / updated_at
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from paycheck_workbench.parsing import ParseResult
+from paycheck_workbench.rules import conditions_sql, rule_key
 from paycheck_workbench.sources import (
     SORT_COLUMNS,
     SOURCE_CONFIGS,
@@ -58,12 +62,33 @@ def _create_table(conn: sqlite3.Connection, cfg: SourceConfig) -> None:
     conn.commit()
 
 
+def _create_rules_table(conn: sqlite3.Connection) -> None:
+    """内部转账规则表（设计 3.5），幂等。"""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS transfer_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            source TEXT NOT NULL,
+            conditions TEXT NOT NULL,
+            action TEXT NOT NULL DEFAULT 'fold',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            preset_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.commit()
+
+
 def init_db(db_path) -> None:
     """建库建表（幂等）。库文件目录不存在时自动创建。"""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         for source in SOURCES:
             _create_table(conn, SOURCE_CONFIGS[source])
+        _create_rules_table(conn)
 
 
 def source_counts(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -329,3 +354,88 @@ def distinct_categories(conn: sqlite3.Connection, source: str) -> List[str]:
         f'SELECT DISTINCT "{col}" AS v FROM "{cfg.table}" WHERE "{col}" != "" ORDER BY "{col}"'
     ).fetchall()
     return [r["v"] for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# 内部转账规则（transfer_rules）
+# ---------------------------------------------------------------------------
+
+def _rule_dict(row: sqlite3.Row) -> dict:
+    rule = dict(row)
+    rule["conditions"] = json.loads(rule["conditions"])
+    rule["enabled"] = bool(rule["enabled"])
+    return rule
+
+
+def list_rules(conn: sqlite3.Connection) -> List[dict]:
+    """全部规则（按源、名称排序）。"""
+    rows = conn.execute("SELECT * FROM transfer_rules ORDER BY source, name, id").fetchall()
+    return [_rule_dict(r) for r in rows]
+
+
+def get_rule(conn: sqlite3.Connection, rule_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM transfer_rules WHERE id = ?", [rule_id]).fetchone()
+    return _rule_dict(row) if row else None
+
+
+def save_rule(conn: sqlite3.Connection, rule: dict, rule_id: Optional[int] = None) -> dict:
+    """新建或整体更新规则（更新含启停开关）。返回落库后的规则。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    if rule_id is None:
+        cur = conn.execute(
+            """
+            INSERT INTO transfer_rules (name, source, conditions, action, enabled, preset_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                rule["name"], rule["source"], json.dumps(rule["conditions"], ensure_ascii=False),
+                rule["action"], int(bool(rule.get("enabled", True))), rule.get("preset_id"), now, now,
+            ],
+        )
+        rule_id = cur.lastrowid
+    else:
+        existing = get_rule(conn, rule_id)
+        preset_id = existing["preset_id"] if existing and "preset_id" not in rule else rule.get("preset_id")
+        conn.execute(
+            """
+            UPDATE transfer_rules
+            SET name = ?, source = ?, conditions = ?, action = ?, enabled = ?, preset_id = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            [
+                rule["name"], rule["source"], json.dumps(rule["conditions"], ensure_ascii=False),
+                rule["action"], int(bool(rule.get("enabled", True))), preset_id, now, rule_id,
+            ],
+        )
+    conn.commit()
+    return get_rule(conn, rule_id)
+
+
+def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    conn.execute("DELETE FROM transfer_rules WHERE id = ?", [rule_id])
+    conn.commit()
+
+
+def find_duplicate_rule(conn: sqlite3.Connection, name: str, conditions: List[dict]) -> Optional[dict]:
+    """同名且同条件（AND 顺序无关）的既有规则；预设导入时用于跳过。"""
+    key = rule_key(conditions)
+    for rule in list_rules(conn):
+        if rule["name"] == name and rule_key(rule["conditions"]) == key:
+            return rule
+    return None
+
+
+def count_rule_hits(conn: sqlite3.Connection, rule: dict) -> int:
+    """规则在当前库中的命中笔数（查询时求值，不落库打标，设计 §3.6）。"""
+    cfg = SOURCE_CONFIGS[rule["source"]]
+    where, params = conditions_sql(rule["conditions"])
+    row = conn.execute(f'SELECT COUNT(*) AS n FROM "{cfg.table}"{where}', params).fetchone()
+    return row["n"] if row else 0
+
+
+def rule_match_ids(conn: sqlite3.Connection, rule: dict) -> set:
+    """规则命中的明细行 id 集合（总账户视图逐行打标用）。"""
+    cfg = SOURCE_CONFIGS[rule["source"]]
+    where, params = conditions_sql(rule["conditions"])
+    rows = conn.execute(f'SELECT id FROM "{cfg.table}"{where}', params).fetchall()
+    return {r["id"] for r in rows}
