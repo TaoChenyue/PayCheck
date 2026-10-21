@@ -20,6 +20,7 @@
 body[data-source="boc"] { --brand: #C8102E; }
 body[data-source="alipay"] { --brand: #1677FF; }
 body[data-source="wechat"] { --brand: #07C160; }
+body[data-source="total"] { --brand: #7C4DFF; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -208,6 +209,120 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .skeleton-block { height: 14px; border-radius: 4px; background: linear-gradient(90deg, #F0F1F3 25%, #E8E9EC 50%, #F0F1F3 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
+/* ---------- 总账户：来源徽标 / 内部转账 / 折叠条 / 模式切换 ---------- */
+.src-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
+  color: #fff; font-weight: 600; white-space: nowrap;
+}
+.src-badge.s-boc { background: #C8102E; }
+.src-badge.s-ali { background: #1677FF; }
+.src-badge.s-wx { background: #07C160; }
+.tag.transfer-tag { background: #F2F3F5; color: var(--neutral); border: 1px solid var(--border); }
+tr.fold-full-row td { background: #F7F7F9; color: var(--neutral); }
+tr.fold-full-row .money { text-decoration: line-through; color: var(--neutral); }
+.fold-strip-row td { padding: 6px 16px; background: #F7F7F9; }
+.fold-strip { display: flex; align-items: center; gap: 12px; color: var(--neutral); font-size: 12px; min-width: 0; }
+.fold-strip .fold-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fold-strip .fold-amount { font-variant-numeric: tabular-nums; text-decoration: line-through; white-space: nowrap; }
+.fold-strip .fold-cp {
+  color: var(--text-2); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fold-strip .fold-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-strip .fold-toggle { color: var(--brand); white-space: nowrap; }
+#hidden-hint {
+  padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg);
+  border-top: 1px solid var(--border);
+}
+#transfer-tools { display: flex; align-items: center; gap: 8px; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: #fff; }
+.seg span {
+  padding: 6px 12px; font-size: 13px; color: var(--text-2); cursor: pointer; white-space: nowrap;
+}
+.seg span + span { border-left: 1px solid var(--border); }
+.seg span.on { background: color-mix(in srgb, var(--brand) 10%, #fff); color: var(--brand); font-weight: 600; }
+
+/* ---------- 规则设置弹窗 ---------- */
+#rules-modal-mask {
+  position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+}
+#rules-modal-mask[hidden] { display: none; }
+#rules-modal {
+  background: #fff; border-radius: 12px; width: min(880px, 94vw); max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#rules-modal-header {
+  display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
+  font-size: 16px; font-weight: 600;
+}
+#rules-modal-header .close { margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2); }
+#rules-modal-body { padding: 20px; }
+#rules-banner {
+  border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; border: 1px solid;
+  display: flex; gap: 10px; align-items: center;
+}
+#rules-banner.success { background: #EDFBF4; border-color: #B8ECD5; color: #007A52; }
+#rules-banner.warn { background: #FFF9E6; border-color: #F2DEB3; color: #8A6D1F; }
+#rules-banner .banner-close { margin-left: auto; cursor: pointer; border: none; background: none; color: inherit; font-size: 14px; }
+.rules-toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
+.rule-group { margin-bottom: 18px; }
+.rule-group h4 { font-size: 13px; color: var(--text-2); font-weight: 600; margin-bottom: 8px; }
+.rule-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #fff; }
+.rule-item.off { opacity: .55; }
+.rule-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rule-name { font-weight: 600; }
+.rule-cond { color: var(--text-2); font-size: 12px; margin-top: 4px; }
+.rule-hit { font-size: 12px; color: var(--text-2); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rule-ops { display: flex; gap: 6px; align-items: center; }
+.rule-ops button {
+  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 2px 8px;
+  font-size: 12px; cursor: pointer; color: var(--text-2);
+}
+.rule-ops button:hover { color: var(--brand); border-color: var(--brand); }
+.rule-ops button.danger:hover { color: var(--danger); border-color: var(--danger); }
+.rule-detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--text-2); }
+.rule-detail .cond-line { margin: 2px 0; }
+.switch { position: relative; display: inline-block; width: 34px; height: 18px; vertical-align: middle; cursor: pointer; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.switch .slider { position: absolute; inset: 0; background: #C4C7CC; border-radius: 999px; transition: .15s; }
+.switch .slider::before {
+  content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
+  background: #fff; border-radius: 50%; transition: .15s;
+}
+.switch input:checked + .slider { background: var(--brand); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+.rule-form { display: flex; flex-direction: column; gap: 12px; }
+.rule-form .f-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rule-form .f-label { font-size: 13px; color: var(--text-2); min-width: 72px; flex-shrink: 0; }
+.rule-form input.txt, .rule-form select.sel {
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+  color: var(--text); background: #fff;
+}
+.rule-form input.txt:focus, .rule-form select.sel:focus { outline: none; border-color: var(--brand); }
+.rule-form .cond-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rule-form .cond-row select, .rule-form .cond-row input {
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: #fff;
+}
+.rule-form .cond-row select:focus, .rule-form .cond-row input:focus { outline: none; border-color: var(--brand); }
+.rule-form .cond-val { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
+.rule-form .cond-val input { width: 100%; }
+.rule-form .hint { font-size: 12px; color: var(--text-2); }
+.radio-line { display: flex; gap: 12px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.radio-line label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; min-width: auto; }
+.hit-preview { font-size: 12px; color: var(--text-2); margin-left: auto; font-variant-numeric: tabular-nums; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+.preset-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+.preset-head { display: flex; align-items: center; gap: 8px; }
+.preset-name { font-weight: 600; }
+.preset-desc { font-size: 12px; color: var(--text-2); margin-top: 4px; }
+.preset-meta { font-size: 12px; color: var(--text-2); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.preset-rules { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.preset-rule { font-size: 12px; color: var(--text-2); margin: 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.badge {
+  display: inline-block; font-size: 11px; border-radius: 999px; padding: 0 8px;
+  border: 1px solid var(--border); color: var(--text-2); white-space: nowrap;
+}
+
 /* ---------- 导入弹窗 ---------- */
 #modal-mask {
   position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 100;
@@ -350,6 +465,13 @@ tr.bf-error td { color: var(--danger); }
     <div id="cards"></div>
     <div id="toolbar">
       <input type="search" id="search" placeholder="搜索…">
+      <div id="transfer-tools" hidden>
+        <div class="seg" id="transfer-mode">
+          <span data-mode="show">全部显示</span>
+          <span data-mode="fold">折叠标灰</span>
+          <span data-mode="hide">隐藏</span>
+        </div>
+      </div>
       <div id="colset">
         <button class="btn" id="btn-colset">列设置 ▾</button>
         <div id="colset-panel"></div>
@@ -368,6 +490,7 @@ tr.bf-error td { color: var(--danger); }
           <tbody id="table-body"></tbody>
         </table>
       </div>
+      <div id="hidden-hint" hidden></div>
       <div id="empty-state" hidden>
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
@@ -415,11 +538,19 @@ let modalFile = null;           // 已选文件（单文件流程）
 let modalFiles = null;          // 批量模式的有效文件列表
 let modalWarn = null;           // 类型不符/同名被跳过的文件提示
 let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
+let transferMode = "fold";      // 总账户：内部转账显示模式（全部显示/折叠标灰/隐藏）
+let lastSummary = null;         // 最近一次汇总响应（总账户模式切换免重查）
+
+const TOTAL = "total";
+const TAB_ORDER = ["boc", "alipay", "wechat", TOTAL];
+const SRC_BADGE_CLS = { boc: "s-boc", alipay: "s-ali", wechat: "s-wx" };
+const TOTAL_LABEL = "总账户";
 
 function freshFilters() {
-  return { q: "", date_from: "", date_to: "", directions: [], categories: [], amount_min: "", amount_max: "" };
+  return { q: "", date_from: "", date_to: "", directions: [], categories: [],
+           amount_min: "", amount_max: "", sources: ["boc", "alipay", "wechat"] };
 }
-for (const s of ["boc", "alipay", "wechat"]) {
+for (const s of TAB_ORDER) {
   filtersBySource[s] = freshFilters();
   sortBySource[s] = { key: "datetime", order: "desc" };
   pageBySource[s] = 1;
@@ -461,6 +592,14 @@ function dirTagHtml(row) {
   const d = dirInfo(row);
   if (d.label === "—") return '<span class="empty-val">—</span>';
   return `<span class="tag ${d.cls}">${esc(d.label)}</span>`;
+}
+function srcBadgeHtml(source) {
+  return `<span class="src-badge ${SRC_BADGE_CLS[source] || ""}">${esc(SOURCE_LABELS[source] || source)}</span>`;
+}
+function transferTagHtml(row) {
+  if (!row.transfer) return '<span class="empty-val">—</span>';
+  const names = esc((row.transfer.rule_names || []).join("、"));
+  return `<span class="tag transfer-tag" title="命中规则：${names}">内部转账</span>`;
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
@@ -504,7 +643,11 @@ function filterQuery() {
   if (f.date_from) p.set("date_from", f.date_from);
   if (f.date_to) p.set("date_to", f.date_to);
   if (f.directions.length) p.set("directions", f.directions.join(","));
-  if (f.categories.length) p.set("categories", f.categories.join(","));
+  if (currentSource === TOTAL) {
+    if (f.sources.length) p.set("sources", f.sources.join(","));
+  } else if (f.categories.length) {
+    p.set("categories", f.categories.join(","));
+  }
   if (f.amount_min !== "") p.set("amount_min", f.amount_min);
   if (f.amount_max !== "") p.set("amount_max", f.amount_max);
   return p;
@@ -515,6 +658,7 @@ async function loadRows() {
   p.set("page_size", pageSizeBySource[currentSource]);
   const s = sortBySource[currentSource];
   if (s.order) { p.set("sort", s.key); p.set("order", s.order); }
+  if (currentSource === TOTAL) p.set("transfer", transferMode);
   showSkeleton();
   const res = await api("/api/rows?" + p.toString());
   if (!res.ok) throw new Error(res.error || "查询失败");
@@ -538,10 +682,14 @@ async function refreshAll() {
 function renderTabs() {
   const nav = $("#tabs");
   nav.innerHTML = "";
-  for (const s of ["boc", "alipay", "wechat"]) {
+  for (const s of TAB_ORDER) {
     const btn = document.createElement("button");
     btn.className = "tab" + (s === currentSource ? " active" : "");
-    btn.innerHTML = `${esc(SOURCE_LABELS[s] || s)} <span class="badge">${(meta.counts[s] ?? 0).toLocaleString()}</span>`;
+    const label = s === TOTAL ? TOTAL_LABEL : (SOURCE_LABELS[s] || s);
+    const count = s === TOTAL
+      ? (meta.counts.boc ?? 0) + (meta.counts.alipay ?? 0) + (meta.counts.wechat ?? 0)
+      : (meta.counts[s] ?? 0);
+    btn.innerHTML = `${esc(label)} <span class="badge">${count.toLocaleString()}</span>`;
     btn.onclick = () => switchTab(s);
     nav.appendChild(btn);
   }
@@ -560,7 +708,23 @@ function renderSidebar() {
       f.directions = [...$("#direction-list").querySelectorAll("input:checked")].map((i) => i.value);
       onFilterChange();
     }));
-  // 分类
+  // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
+  if (currentSource === TOTAL) {
+    $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
+      `<label><input type="checkbox" value="${s}" ${f.sources.includes(s) ? "checked" : ""}> ${esc(SOURCE_LABELS[s])}</label>`
+    ).join("");
+    $("#category-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.sources = [...$("#category-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+    $("#date-from").value = f.date_from;
+    $("#date-to").value = f.date_to;
+    $("#amount-min").value = f.amount_min;
+    $("#amount-max").value = f.amount_max;
+    updatePresetActive();
+    return;
+  }
   $("#category-list").innerHTML = o.categories.map((c) =>
     `<label><input type="checkbox" value="${esc(c)}" ${f.categories.includes(c) ? "checked" : ""}> ${esc(c)}</label>`
   ).join("") || '<div style="font-size:12px;color:#C4C7CC">暂无分类数据</div>';
@@ -581,6 +745,8 @@ function renderToolbar() {
   const vis = visibleColsBySource[currentSource];
   $("#search").placeholder = o.search_placeholder || "搜索…";
   $("#search").value = filtersBySource[currentSource].q;
+  $("#transfer-tools").hidden = currentSource !== TOTAL;
+  renderTransferMode();
   $("#colset-panel").innerHTML = o.columns.map((c) =>
     `<label><input type="checkbox" value="${esc(c.key)}" ${vis.has(c.key) ? "checked" : ""}> ${esc(c.label)}</label>`
   ).join("");
@@ -591,6 +757,12 @@ function renderToolbar() {
     }));
   $("#pagesize").value = String(pageSizeBySource[currentSource]);
   renderTableHead();
+}
+function renderTransferMode() {
+  const el = $("#transfer-mode");
+  if (!el) return;
+  el.querySelectorAll("span").forEach((s) =>
+    s.classList.toggle("on", s.dataset.mode === transferMode));
 }
 function renderTableHead() {
   const o = optionsCache[currentSource];
@@ -617,6 +789,8 @@ function cycleSort(sortKey) {
   loadRows();
 }
 function renderCards(summary) {
+  lastSummary = summary;
+  if (currentSource === TOTAL) { renderTotalCards(summary); return; }
   const o = optionsCache[currentSource];
   const cards = [];
   cards.push({ cls: "income", title: "收入合计", value: "+" + fmtMoney(summary.income_sum), sub: "" });
@@ -629,6 +803,30 @@ function renderCards(summary) {
   } else {
     cards.push({ cls: "", title: "笔数", value: summary.count.toLocaleString(), sub: "当前筛选结果" });
   }
+  $("#cards").innerHTML = cards.map((c) =>
+    `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
+  ).join("");
+}
+function renderTotalCards(s) {
+  // 汇总三口径由服务端一次返回：全部显示=三套合计；折叠/隐藏=计入口径（不计入汇总的命中行另计）
+  const all = transferMode === "show";
+  const income = all
+    ? s.counted.income_sum + s.transfer.income_sum + s.hidden.income_sum
+    : s.counted.income_sum;
+  const expense = all
+    ? s.counted.expense_sum + s.transfer.expense_sum + s.hidden.expense_sum
+    : s.counted.expense_sum;
+  const count = all
+    ? s.counted.count + s.transfer.count + s.hidden.count
+    : s.counted.count;
+  const transferCount = s.transfer.count + s.hidden.count;
+  const net = income - expense;
+  const cards = [
+    { cls: "income", title: "总收入", value: "+" + fmtMoney(income), sub: "" },
+    { cls: "expense", title: "总支出", value: "−" + fmtMoney(expense), sub: "" },
+    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "" },
+    { cls: "", title: "交易笔数", value: count.toLocaleString(), sub: `其中内部转账 ${transferCount.toLocaleString()} 笔` },
+  ];
   $("#cards").innerHTML = cards.map((c) =>
     `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
   ).join("");
@@ -646,6 +844,8 @@ function cellHtml(row, col) {
   }
   if (col.kind === "direction") return dirTagHtml(row);
   if (col.kind === "amount") return moneyHtml(row);
+  if (col.kind === "source") return srcBadgeHtml(row.source);
+  if (col.kind === "transfer") return transferTagHtml(row);
   if (col.kind === "balance") return v ? `<span class="num">${fmtMoney(v)}</span>` : '<span class="empty-val">—</span>';
   if (col.kind === "status") return statusHtml(v);
   if (col.kind === "copy") {
@@ -664,6 +864,8 @@ function renderTableBodyKeep() {
 let lastRows = null;
 function renderTable(res) {
   lastRows = res;
+  if (currentSource === TOTAL) { renderTotalTable(res); return; }
+  $("#hidden-hint").hidden = true;
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const cols = o.columns.filter((c) => vis.has(c.key));
@@ -695,6 +897,76 @@ function renderTable(res) {
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
   renderPagination(res);
 }
+/* ---- 总账户明细表：统一列 + 折叠条 + 隐藏提示 ---- */
+function foldStripHtml(row) {
+  const d = dirInfo(row);
+  const names = esc((row.transfer.rule_names || []).join("、"));
+  const amount = (row.amount === "" || row.amount === null || row.amount === undefined)
+    ? "—" : `${d.sign}${fmtMoney(row.amount)}`;
+  return `<div class="fold-strip">
+    <span class="tag transfer-tag" title="命中规则：${names}">内部转账</span>
+    <span class="fold-time">${esc(row.time || "—")}</span>
+    <span class="tag ${d.cls}">${esc(d.label)}</span>
+    <span class="fold-amount">${amount}</span>
+    ${srcBadgeHtml(row.source)}
+    <span class="fold-cp">${esc(row.counterparty || "—")}</span>
+    <span class="fold-summary">${esc(row.summary || "")}</span>
+    <span class="fold-toggle">展开 ▸</span>
+  </div>`;
+}
+function renderTotalTable(res) {
+  const o = optionsCache[TOTAL];
+  const vis = visibleColsBySource[TOTAL];
+  const cols = o.columns.filter((c) => vis.has(c.key));
+  const body = $("#table-body");
+  expandedRow = null;
+  renderHiddenHint(res);
+  if (res.total === 0) {
+    body.innerHTML = "";
+    renderEmptyState(res);
+    renderPagination(res);
+    return;
+  }
+  $("#empty-state").hidden = true;
+  body.innerHTML = res.rows.map((row) => {
+    const full = cols.map((col) => {
+      const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
+      return `<td${cls}>${cellHtml(row, col)}</td>`;
+    }).join("");
+    if (row.transfer && transferMode === "fold") {
+      // 折叠标灰：默认收窄为一条折叠条，点击展开完整行
+      return `<tr class="data-row fold-strip-row" data-id="${row.id}"><td colspan="${cols.length}">${foldStripHtml(row)}</td></tr>
+              <tr class="data-row fold-full-row" data-id="${row.id}" hidden>${full}</tr>
+              <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
+    }
+    return `<tr class="data-row" data-id="${row.id}">${full}</tr>
+            <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
+  }).join("");
+  body.querySelectorAll("tr.fold-strip-row").forEach((tr) =>
+    tr.addEventListener("click", () => {
+      tr.hidden = true;
+      const fullRow = body.querySelector(`tr.fold-full-row[data-id="${tr.dataset.id}"]`);
+      if (fullRow) fullRow.hidden = false;
+    }));
+  body.querySelectorAll("tr.data-row:not(.fold-strip-row)").forEach((tr) => {
+    tr.addEventListener("click", (ev) => {
+      if (ev.target.classList.contains("copy-btn")) return;
+      toggleDetail(tr.dataset.id);
+    });
+  });
+  body.querySelectorAll(".copy-btn").forEach((btn) =>
+    btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+  renderPagination(res);
+}
+function renderHiddenHint(res) {
+  const el = $("#hidden-hint");
+  if (res.hidden && res.hidden.count > 0 && res.hidden.rule_names.length) {
+    el.hidden = false;
+    el.textContent = `另有 ${res.hidden.count.toLocaleString()} 行内部转账记录已隐藏（规则：${res.hidden.rule_names.join("、")}）`;
+  } else {
+    el.hidden = true;
+  }
+}
 function toggleDetail(id) {
   const detailRow = document.querySelector(`tr.detail-row[data-for="${id}"]`);
   if (!detailRow) return;
@@ -705,6 +977,12 @@ function toggleDetail(id) {
   if (!willOpen) return;
   const row = lastRows.rows.find((r) => String(r.id) === String(id));
   if (!row) return;
+  if (currentSource === TOTAL) {
+    renderTotalDetail(detailRow, row);
+    detailRow.hidden = false;
+    expandedRow = id;
+    return;
+  }
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const detailCols = o.columns.filter((c) => !vis.has(c.key));
@@ -725,10 +1003,40 @@ function toggleDetail(id) {
   detailRow.hidden = false;
   expandedRow = id;
 }
+function renderTotalDetail(detailRow, row) {
+  // 总账户行详情：展开该源原始全部列（与单源页签一致）
+  const srcOptions = optionsCache[row.source];
+  const items = srcOptions.columns.map((c) => {
+    let v = row.raw ? row.raw[c.key] : "";
+    if (c.kind === "datetime" && c.key === "datetime" && srcOptions.time_col) {
+      v = [row.raw[srcOptions.date_col], row.raw[srcOptions.time_col]].filter(Boolean).join(" ");
+    }
+    if (c.key === "支付方式" && v === "/") v = "—";
+    const copy = (c.kind === "copy" && v) ? `<button class="copy-btn" data-copy="${esc(v)}">复制</button>` : "";
+    return `<div class="detail-item"><div class="k">${esc(c.label)}</div><div class="v">${v ? esc(v) : "—"}${copy}</div></div>`;
+  });
+  if (row.transfer) {
+    items.push(`<div class="detail-item"><div class="k">内部转账</div><div class="v">${esc(row.transfer.rule_names.join("、"))}</div></div>`);
+  }
+  items.push(`<div class="detail-item"><div class="k">来源文件</div><div class="v">${esc(row.source_file)}</div></div>`);
+  items.push(`<div class="detail-item"><div class="k">导入时间</div><div class="v">${esc(row.imported_at)}</div></div>`);
+  detailRow.querySelector("td").innerHTML = `<div class="detail-grid">${items.join("")}</div>`;
+  detailRow.querySelectorAll(".copy-btn").forEach((btn) =>
+    btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+}
 function renderEmptyState(res) {
   const el = $("#empty-state");
   const hasFilter = JSON.stringify(filtersBySource[currentSource]) !== JSON.stringify(freshFilters());
   const o = optionsCache[currentSource];
+  if (currentSource === TOTAL) {
+    el.hidden = false;
+    el.querySelector(".empty-title").textContent = hasFilter ? "无匹配结果" : "暂无账单数据";
+    el.querySelector(".empty-desc").textContent = hasFilter
+      ? "当前筛选条件下没有账单记录，试试调整或重置筛选条件"
+      : "三个数据源都还没有账单，请切换到对应页签导入第一笔账单";
+    el.querySelector("#btn-import-empty").style.display = "none";
+    return;
+  }
   if (hasFilter) {
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "无匹配结果";
@@ -792,6 +1100,10 @@ async function switchTab(source) {
   renderTabs();
   try {
     await loadOptions(source, false);
+    if (source === TOTAL) {
+      // 总账户行详情展开依赖各源列信息
+      await Promise.all(["boc", "alipay", "wechat"].map((s) => loadOptions(s, false)));
+    }
     renderSidebar(); renderToolbar();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) { showErrorBanner(e.message); }
@@ -1295,6 +1607,14 @@ $("#amount-max").addEventListener("input", debounce((e) => { filtersBySource[cur
 document.querySelectorAll("#presets .preset").forEach((b) =>
   b.addEventListener("click", () => applyPreset(b.dataset.preset)));
 $("#btn-colset").addEventListener("click", () => $("#colset").classList.toggle("open"));
+$("#transfer-mode").querySelectorAll("span").forEach((el) =>
+  el.addEventListener("click", () => {
+    if (el.dataset.mode === transferMode) return;
+    transferMode = el.dataset.mode;
+    renderTransferMode();
+    if (lastSummary) renderCards(lastSummary);  // 汇总三口径免重查
+    loadRows();
+  }));
 document.addEventListener("click", (e) => {
   if (!$("#colset").contains(e.target)) $("#colset").classList.remove("open");
 });
