@@ -229,10 +229,6 @@ tr.fold-full-row .money { text-decoration: line-through; color: var(--neutral); 
 }
 .fold-strip .fold-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fold-strip .fold-toggle { color: var(--brand); white-space: nowrap; }
-#hidden-hint {
-  padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg);
-  border-top: 1px solid var(--border);
-}
 /* ---------- 总账户：三区（真实收入/真实支出/内部流动） ---------- */
 .zone { background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
 .zone:last-child { margin-bottom: 0; }
@@ -515,7 +511,6 @@ tr.bf-error td { color: var(--danger); }
         <section class="zone" id="zone-expense"></section>
         <section class="zone" id="zone-flow"></section>
       </div>
-      <div id="hidden-hint" hidden></div>
       <div id="empty-state" hidden>
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
@@ -890,7 +885,6 @@ function renderTable(res) {
   lastRows = res;
   $("#table-scroll").style.display = "";
   $("#total-zones").hidden = true;
-  $("#hidden-hint").hidden = true;
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const cols = o.columns.filter((c) => vis.has(c.key));
@@ -1101,15 +1095,6 @@ function findFlowMember(id) {
     if (m) return m;
   }
   return null;
-}
-function renderHiddenHint(res) {
-  const el = $("#hidden-hint");
-  if (res.hidden && res.hidden.count > 0 && res.hidden.rule_names.length) {
-    el.hidden = false;
-    el.textContent = `另有 ${res.hidden.count.toLocaleString()} 行内部转账记录已隐藏（规则：${res.hidden.rule_names.join("、")}）`;
-  } else {
-    el.hidden = true;
-  }
 }
 function toggleDetail(id) {
   const detailRow = document.querySelector(`tr.detail-row[data-for="${id}"]`);
