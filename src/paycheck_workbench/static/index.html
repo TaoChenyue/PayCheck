@@ -66,8 +66,8 @@ body {
 /* ---------- 布局 ---------- */
 #layout { display: flex; flex: 1; min-height: 0; }
 #sidebar {
-  width: 280px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--border);
-  padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px;
+  width: 320px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--border);
+  padding: 16px; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 18px;
 }
 #layout.sidebar-collapsed #sidebar { display: none; }
 .sidebar-section h3 { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 10px; }
@@ -84,11 +84,12 @@ body {
   color: var(--text);
 }
 .date-inputs input:focus { outline: none; border-color: var(--brand); }
-.checkbox-list { display: flex; flex-direction: column; gap: 6px; }
+.checkbox-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .checkbox-list label {
-  display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text);
-  padding: 3px 4px; border-radius: 4px;
+  display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text);
+  padding: 3px 4px; border-radius: 4px; min-width: 0;
 }
+.checkbox-list label .lbl { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
 .checkbox-list label:hover { background: var(--row-hover); }
 .checkbox-list input { accent-color: var(--brand); }
 #category-list { max-height: 240px; overflow-y: auto; }
@@ -724,7 +725,7 @@ function renderSidebar() {
   $("#category-title").textContent = o.category_label || "分类";
   // 收/支
   $("#direction-list").innerHTML = o.directions.map((d) =>
-    `<label><input type="checkbox" value="${esc(d)}" ${f.directions.includes(d) ? "checked" : ""}> ${esc(d)}</label>`
+    `<label><input type="checkbox" value="${esc(d)}" ${f.directions.includes(d) ? "checked" : ""}> <span class="lbl">${esc(d)}</span></label>`
   ).join("");
   $("#direction-list").querySelectorAll("input").forEach((el) =>
     el.addEventListener("change", () => {
@@ -734,7 +735,7 @@ function renderSidebar() {
   // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
   if (currentSource === TOTAL) {
     $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
-      `<label><input type="checkbox" value="${s}" ${f.sources.includes(s) ? "checked" : ""}> ${esc(SOURCE_LABELS[s])}</label>`
+      `<label><input type="checkbox" value="${s}" ${f.sources.includes(s) ? "checked" : ""}> <span class="lbl">${esc(SOURCE_LABELS[s])}</span></label>`
     ).join("");
     $("#category-list").querySelectorAll("input").forEach((el) =>
       el.addEventListener("change", () => {
@@ -749,7 +750,7 @@ function renderSidebar() {
     return;
   }
   $("#category-list").innerHTML = o.categories.map((c) =>
-    `<label><input type="checkbox" value="${esc(c)}" ${f.categories.includes(c) ? "checked" : ""}> ${esc(c)}</label>`
+    `<label><input type="checkbox" value="${esc(c)}" ${f.categories.includes(c) ? "checked" : ""}> <span class="lbl">${esc(c)}</span></label>`
   ).join("") || '<div style="font-size:12px;color:#C4C7CC">暂无分类数据</div>';
   $("#category-list").querySelectorAll("input").forEach((el) =>
     el.addEventListener("change", () => {
