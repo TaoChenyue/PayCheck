@@ -154,10 +154,13 @@ body {
 #table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 10px; flex: 1; min-height: 0; overflow: auto; }
 #table-scroll { overflow: visible; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* sticky 写在 thead 上而非 th：新版本 Chromium 对表格单元格的 sticky 已失效
+   （TCY-27 验收缺陷修复） */
+thead { position: sticky; top: 0; z-index: 1; }
 thead th {
   background: var(--thead-bg); color: var(--text-2); font-weight: 500; text-align: left;
   padding: 12px 16px; white-space: nowrap; border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; user-select: none;
+  user-select: none;
 }
 thead th.sortable { cursor: pointer; }
 thead th.sortable:hover { color: var(--text); }
@@ -214,7 +217,7 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .skeleton-block { height: 14px; border-radius: 4px; background: linear-gradient(90deg, #F0F1F3 25%, #E8E9EC 50%, #F0F1F3 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-/* ---------- 总账户：来源徽标 / 忽略规则 / 折叠条 ---------- */
+/* ---------- 总账户：来源徽标 ---------- */
 .src-badge {
   display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
   color: #fff; font-weight: 600; white-space: nowrap;
