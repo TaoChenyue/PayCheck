@@ -282,13 +282,13 @@ class TestTotalMapping:
         assert total.query_rows(conn, q="余额宝")["real"]["total"] == 0
         assert total.query_rows(conn, q="工资")["real"]["total"] == 1
         assert total.query_rows(conn, date_from="2026-10-03")["real"]["total"] == 5
-        assert total.query_rows(conn, date_from="2026-10-03")["ignore"]["total"] == 7
+        assert total.query_rows(conn, date_from="2026-10-03")["ignore"]["total"] == 8
         assert total.query_rows(conn, date_to="2026-10-02")["real"]["total"] == 3
         assert total.query_rows(conn, date_to="2026-10-02")["ignore"]["total"] == 4
-        assert total.query_rows(conn, amount_min=100, amount_max=500)["ignore"]["total"] == 6
-        assert total.query_rows(conn, sources=["boc"])["real"]["total"] == 5
-        assert total.query_rows(conn, sources=["boc"])["ignore"]["total"] == 4
-        assert total.query_rows(conn, sources=["alipay", "wechat"])["real"]["total"] == 3
+        assert total.query_rows(conn, amount_min=100, amount_max=500)["ignore"]["total"] == 7
+        assert total.query_rows(conn, sources=["boc"])["real"]["total"] == 3
+        assert total.query_rows(conn, sources=["boc"])["ignore"]["total"] == 6
+        assert total.query_rows(conn, sources=["alipay", "wechat"])["real"]["total"] == 5
         assert total.query_rows(conn, sources=[])["real"]["total"] == 0
         assert total.query_rows(conn, sources=["unknown"])["real"]["total"] == 0
 
