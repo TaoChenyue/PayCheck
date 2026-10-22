@@ -1,10 +1,10 @@
-"""规则模块单元测试：校验、条件 SQL、自动命名、预设库与占位符（TCY-15）"""
+"""规则模块单元测试：校验、条件 SQL、自动命名、预设库与占位符、移除预设停用（TCY-15/TCY-24）"""
 
 from __future__ import annotations
 
 import pytest
 
-from paycheck_workbench import rules
+from paycheck_workbench import db, rules
 
 
 def _c(field, op, value):
@@ -100,11 +100,27 @@ class TestPresets:
     def test_all_presets_valid(self):
         """预设库自身全部通过校验（含白名单、操作符、动作）。"""
         ids = [p["id"] for p in rules.PRESETS]
-        assert len(ids) == len(set(ids)) == 10
+        assert len(ids) == len(set(ids)) == 8
         for preset in rules.PRESETS:
             assert preset["rules"], preset["id"]
             for rule in preset["rules"]:
                 rules.validate_rule(rule["source"], rule["conditions"], rule["action"])
+
+    def test_channel_presets_removed(self):
+        """P7/P8 已移除（渠道重复识别由配对算法接管）；REMOVED_PRESET_IDS 记录其 id。"""
+        ids = [p["id"] for p in rules.PRESETS]
+        assert "preset-channel-pay" not in ids
+        assert "preset-channel-refund" not in ids
+        assert rules.REMOVED_PRESET_IDS == ("preset-channel-pay", "preset-channel-refund")
+
+    def test_all_preset_actions_fold(self):
+        """动作统一「忽略」：预设内规则一律 fold。"""
+        for preset in rules.PRESETS:
+            for rule in preset["rules"]:
+                assert rule["action"] == "fold", rule["name"]
+
+    def test_action_labels_unified(self):
+        assert rules.ACTION_LABELS == {"fold": "忽略", "hide": "忽略"}
 
     def test_placeholders_only_in_p10(self):
         for preset in rules.PRESETS:
@@ -134,3 +150,25 @@ class TestPresets:
         assert specs[0]["conditions"][0]["value"] == "张三"
         # 预设原始条件未被修改
         assert preset["rules"][0]["conditions"][0]["value"] == "{本人姓名}"
+
+
+class TestRemovedPresetRetire:
+    def test_init_db_disables_removed_preset_rules(self, tmp_path):
+        """升级迁移：已导入的 P7/P8 实例按 preset_id 自动停用，保留可删、不参与求值。"""
+        db_path = tmp_path / "t.db"
+        db.init_db(db_path)
+        conn = db.connect(db_path)
+        kept = db.save_rule(conn, {"name": "花呗还款-银行侧", "source": "boc",
+                                   "preset_id": "preset-huabei",
+                                   "conditions": [{"field": "counterparty", "op": "eq", "value": "支付宝-还款"}],
+                                   "action": "fold", "enabled": True})
+        retired = db.save_rule(conn, {"name": "银行卡快捷支付-渠道行（支付宝）", "source": "boc",
+                                      "preset_id": "preset-channel-pay",
+                                      "conditions": [{"field": "tx_name", "op": "eq", "value": "网上快捷支付"}],
+                                      "action": "hide", "enabled": True})
+        # 升级时自动停用（init_db 幂等迁移）
+        db.init_db(db_path)
+        by_id = {r["id"]: r for r in db.list_rules(conn)}
+        assert by_id[retired["id"]]["enabled"] is False
+        assert by_id[kept["id"]]["enabled"] is True
+        conn.close()

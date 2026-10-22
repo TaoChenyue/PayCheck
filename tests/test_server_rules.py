@@ -1,4 +1,4 @@
-"""规则 API 与总账户三区结构 HTTP 端到端测试（TCY-15/TCY-18）"""
+"""规则 API 与总账户两区结构 HTTP 端到端测试（TCY-15/TCY-24）"""
 
 from __future__ import annotations
 
@@ -53,6 +53,20 @@ def _seed_boc(base_url):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _seed_alipay(base_url):
+    """与 BOC 快捷支付同日同金额的支付宝消费行（配对测试用）。"""
+    rows = "\r\n".join([
+        "2026-10-01 12:00:00,餐饮美食,示例面馆,,牛肉面,支出,8.80,,交易成功,A1,,",
+    ])
+    body = ("交易时间,交易分类,交易对方,对方账号,商品说明,收/支,金额,收/付款方式,交易状态,交易订单号,商家订单号,备注\r\n"
+            + rows + "\r\n").encode("utf-8")
+    req = urllib.request.Request(base_url + "/api/import/confirm", data=body, headers={
+        "Content-Type": "application/octet-stream", "X-Source": "alipay", "X-Filename": "a.csv",
+    })
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 RULE_PAYLOAD = {
     "name": "银行卡快捷支付-渠道行（支付宝）",
     "source": "boc",
@@ -70,6 +84,7 @@ class TestRulesApi:
         assert created["ok"]
         assert created["rule"]["name"] == "银行卡快捷支付-渠道行（支付宝）"
         assert created["rule"]["enabled"] is True
+        assert created["rule"]["action"] == "fold"  # 动作统一「忽略」：提交 hide 也归一化为 fold
 
         listed = _get(base_url + "/api/rules")
         assert listed["ok"]
@@ -78,7 +93,7 @@ class TestRulesApi:
         assert listed["rules"][0]["conditions"] == RULE_PAYLOAD["conditions"]
 
         updated = _send("PUT", base_url + f"/api/rules/{created['rule']['id']}",
-                        {**RULE_PAYLOAD, "enabled": False, "action": "fold"})
+                        {**RULE_PAYLOAD, "enabled": False})
         assert updated["rule"]["enabled"] is False
         assert updated["rule"]["action"] == "fold"
 
@@ -90,6 +105,7 @@ class TestRulesApi:
         payload = {**RULE_PAYLOAD, "name": ""}
         created = _send("POST", base_url + "/api/rules", payload)
         assert created["rule"]["name"] == "交易名称 等于「网上快捷支付」 且 对方账户名 开头是「支付宝」"
+        assert created["rule"]["action"] == "fold"
 
     def test_invalid_rule_400(self, base_url):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
@@ -122,7 +138,10 @@ class TestPresetsApi:
     def test_presets_listing(self, base_url):
         res = _get(base_url + "/api/presets")
         assert res["ok"]
-        assert len(res["presets"]) == 10
+        assert len(res["presets"]) == 8  # P7/P8 已移除
+        ids = {p["id"] for p in res["presets"]}
+        assert "preset-channel-pay" not in ids
+        assert "preset-channel-refund" not in ids
         by_id = {p["id"]: p for p in res["presets"]}
         p10 = by_id["preset-same-name"]
         assert p10["has_placeholder"] is True
@@ -130,29 +149,37 @@ class TestPresetsApi:
         p1 = by_id["preset-yuebao"]
         assert p1["hit_count"] == 0  # 空库
         assert p1["rule_count"] == 1
-        p7 = by_id["preset-channel-pay"]
-        assert p7["rule_count"] == 2
-        assert all(r["action"] == "hide" for r in p7["rules"])
+        for preset in res["presets"]:
+            assert all(r["action"] == "fold" for r in preset["rules"])
+
+    def test_import_removed_preset_400(self, base_url):
+        with pytest.raises(urllib.error.HTTPError) as excinfo:
+            _send("POST", base_url + "/api/rules/import", {
+                "preset_ids": ["preset-channel-pay"], "replacements": {},
+            })
+        assert excinfo.value.code == 400
 
     def test_import_creates_rules_and_skips_duplicates(self, base_url):
         _seed_boc(base_url)
         res = _send("POST", base_url + "/api/rules/import", {
-            "preset_ids": ["preset-channel-pay"], "replacements": {},
+            "preset_ids": ["preset-platform-income"], "replacements": {},
         })
         assert res["ok"]
-        assert len(res["created"]) == 2
+        assert len(res["created"]) == 4
         assert res["skipped"] == []
-        assert {r["preset_id"] for r in res["created"]} == {"preset-channel-pay"}
+        assert {r["preset_id"] for r in res["created"]} == {"preset-platform-income"}
+        assert all(r["action"] == "fold" for r in res["created"])
 
         again = _send("POST", base_url + "/api/rules/import", {
-            "preset_ids": ["preset-channel-pay"], "replacements": {},
+            "preset_ids": ["preset-platform-income"], "replacements": {},
         })
         assert again["created"] == []
-        assert len(again["skipped"]) == 2
+        assert len(again["skipped"]) == 4
 
         listed = _get(base_url + "/api/rules")
-        assert len(listed["rules"]) == 2
-        assert listed["rules"][0]["hit_count"] == 1
+        assert len(listed["rules"]) == 4
+        # 样本中无快捷提现/银联入账行，四条规则均 0 命中
+        assert all(r["hit_count"] == 0 for r in listed["rules"])
 
     def test_import_requires_placeholder_value(self, base_url):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
@@ -182,62 +209,76 @@ class TestTotalApi:
         assert res["categories"] == ["boc", "alipay", "wechat"]
         assert [c["key"] for c in res["columns"]] == [
             "time", "direction", "amount", "source", "counterparty", "summary", "mark"]
+        assert [c for c in res["columns"] if c["key"] == "mark"][0]["label"] == "标注"
 
-    def test_rows_total_three_zones(self, base_url):
-        """rows 返回三区结构：渠道行命中 hide 规则进流动区并标「重复记录」。"""
+    def test_rows_total_two_zones(self, base_url):
+        """rows 返回两区结构：命中规则的渠道行进忽略区标「忽略（规则名）」。"""
         _seed_boc(base_url)
         _send("POST", base_url + "/api/rules", RULE_PAYLOAD)
 
         res = _get(base_url + "/api/rows?source=total")
         assert res["ok"]
-        assert res["income"]["total"] == 1  # 工资行
-        assert res["income"]["rows"][0]["summary"] == "代发工资"
-        assert res["expense"]["total"] == 0
-        assert res["flow"]["total"] == 1  # 1 组
-        assert res["flow"]["row_total"] == 1
-        group = res["flow"]["groups"][0]
-        assert group["key"] == "支付宝 ↔ BOC|2026-10-01"
-        assert group["main"]["mark"] == "duplicate"
-        assert group["main"]["rule_names"] == ["银行卡快捷支付-渠道行（支付宝）"]
-        assert group["cross_ref"] is True
-        assert group["platform"] == "支付宝"
+        assert res["real"]["total"] == 1  # 工资行
+        assert res["real"]["rows"][0]["summary"] == "代发工资"
+        assert res["ignore"]["total"] == 1
+        row = res["ignore"]["rows"][0]
+        assert row["summary"] == "网上快捷支付"
+        assert row["mark"] == "path"
+        assert row["mark_label"] == "忽略（银行卡快捷支付-渠道行（支付宝））"
+        assert row["rule_names"] == ["银行卡快捷支付-渠道行（支付宝）"]
+
+    def test_rows_total_mirror_pairing(self, base_url):
+        """同日同金额配对端到端：银行侧进忽略区标镜像，平台侧主记录留真实区。"""
+        _seed_boc(base_url)
+        _seed_alipay(base_url)
+        res = _get(base_url + "/api/rows?source=total")
+        assert res["ok"]
+        assert res["real"]["total"] == 2  # 工资 + 支付宝消费（主记录）
+        assert {r["source"] for r in res["real"]["rows"]} == {"boc", "alipay"}
+        assert res["ignore"]["total"] == 1
+        mirror = res["ignore"]["rows"][0]
+        assert mirror["mark"] == "mirror"
+        assert mirror["mark_label"] == "镜像·支付宝"
+        assert mirror["source"] == "boc"
 
     def test_rows_total_zone_pagination(self, base_url):
         _seed_boc(base_url)
-        res = _get(base_url + "/api/rows?source=total&income_page=2&page_size=1")
-        assert res["income"]["page"] == 2
-        assert res["income"]["total"] == 1  # 仅工资行，第 2 页无数据
-        assert res["income"]["rows"] == []
-        assert res["expense"]["total"] == 1
-        assert res["flow"]["page"] == 1
-        assert res["expense"]["page"] == 1
+        res = _get(base_url + "/api/rows?source=total&real_page=2&page_size=1")
+        assert res["real"]["page"] == 2
+        assert res["real"]["total"] == 2  # 工资 + 快捷支付（未建规则，真实支出）
+        assert res["real"]["rows"] == []
+        assert res["ignore"]["total"] == 0
+        assert res["ignore"]["page"] == 1
 
     def test_rows_total_mapping_fields(self, base_url):
         _seed_boc(base_url)
         res = _get(base_url + "/api/rows?source=total")
-        wage = next(r for r in res["income"]["rows"] if r["summary"] == "代发工资")
+        wage = next(r for r in res["real"]["rows"] if r["summary"] == "代发工资")
         assert wage["source"] == "boc"
         assert wage["time"] == "2026-10-02 10:00:00"
         assert wage["direction"] == "收入"
         assert wage["raw"]["counterparty"] == "示例公司"
 
-    def test_summary_total_three_zones(self, base_url):
+    def test_summary_total_two_zones(self, base_url):
         _seed_boc(base_url)
-        _send("POST", base_url + "/api/rules", RULE_PAYLOAD)
+        _seed_alipay(base_url)
         summary = _get(base_url + "/api/summary?source=total")
         assert summary["ok"]
         assert summary["income"] == {"count": 1, "sum": 3000.00}
-        assert summary["expense"] == {"count": 0, "sum": 0.0}
-        assert summary["net"] == 3000.00
-        assert summary["count"] == 1
-        assert summary["flow"] == {"groups": 1, "rows": 1}
+        assert summary["expense"] == {"count": 1, "sum": 8.80}  # 平台侧主记录
+        assert summary["net"] == 2991.20
+        assert summary["count"] == 2
+        assert summary["ignore"] == {"count": 1, "mirror": 1, "transfer": 0, "neutral": 0}
 
     def test_rows_total_sources_filter(self, base_url):
         _seed_boc(base_url)
-        assert _get(base_url + "/api/rows?source=total&sources=alipay")["income"]["total"] == 0
+        _seed_alipay(base_url)
+        assert _get(base_url + "/api/rows?source=total&sources=alipay")["real"]["total"] == 1
+        # 来源只留 BOC：身份仍按全量数据计算，镜像行保持镜像
         boc = _get(base_url + "/api/rows?source=total&sources=boc")
-        assert boc["income"]["total"] == 1  # 工资行
-        assert boc["expense"]["total"] == 1  # 快捷支付行（未建规则，属真实支出）
+        assert boc["real"]["total"] == 1  # 工资行
+        assert boc["ignore"]["total"] == 1
+        assert boc["ignore"]["rows"][0]["mark"] == "mirror"
 
     def test_unknown_source_still_400(self, base_url):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
