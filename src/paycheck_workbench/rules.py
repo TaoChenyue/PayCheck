@@ -41,8 +41,8 @@ OPERATOR_LABELS: Dict[str, str] = {
     "not_contains": "不包含",
 }
 
-ACTIONS = ("fold", "hide")
-ACTION_LABELS = {"fold": "内部流动", "hide": "重复记录"}
+ACTIONS = ("fold", "hide")  # hide 仅兼容存量数据与旧客户端，语义同为「忽略」
+ACTION_LABELS = {"fold": "忽略", "hide": "忽略"}
 MAX_CONDITIONS = 5
 
 # 已被配对算法取代的预设（P7/P8）：升级时按 preset_id 自动停用其已导入实例

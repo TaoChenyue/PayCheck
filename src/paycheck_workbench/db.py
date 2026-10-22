@@ -1,4 +1,4 @@
-"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总、内部转账规则
+"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总、忽略规则
 
 表结构（设计 3.4）：
   <source>_transactions
@@ -7,7 +7,7 @@
     source_file   TEXT
     imported_at   TEXT
     dedup_key     TEXT UNIQUE   -- 去重键（设计 4.3）
-  transfer_rules（内部转账规则，设计 3.5）
+  transfer_rules（忽略规则，设计 3.5）
     id / name / source / conditions(JSON) / action / enabled / preset_id / created_at / updated_at
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from paycheck_workbench.parsing import ParseResult
-from paycheck_workbench.rules import conditions_sql, rule_key
+from paycheck_workbench.rules import REMOVED_PRESET_IDS, conditions_sql, rule_key
 from paycheck_workbench.sources import (
     SORT_COLUMNS,
     SOURCE_CONFIGS,
@@ -63,7 +63,7 @@ def _create_table(conn: sqlite3.Connection, cfg: SourceConfig) -> None:
 
 
 def _create_rules_table(conn: sqlite3.Connection) -> None:
-    """内部转账规则表（设计 3.5），幂等。"""
+    """忽略规则表（设计 3.5），幂等。"""
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS transfer_rules (
@@ -82,6 +82,19 @@ def _create_rules_table(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _retire_removed_presets(conn: sqlite3.Connection) -> None:
+    """升级迁移：按 preset_id 停用已移除预设（P7/P8）导入的规则实例（设计 §3.4）。
+
+    保留在规则列表可见、可删，但不参与求值（渠道重复识别已由配对算法接管）。
+    幂等：重复执行只会再次写入 enabled=0。
+    """
+    conn.execute(
+        "UPDATE transfer_rules SET enabled = 0 WHERE preset_id IN (?, ?)",
+        [*REMOVED_PRESET_IDS],
+    )
+    conn.commit()
+
+
 def init_db(db_path) -> None:
     """建库建表（幂等）。库文件目录不存在时自动创建。"""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -89,6 +102,7 @@ def init_db(db_path) -> None:
         for source in SOURCES:
             _create_table(conn, SOURCE_CONFIGS[source])
         _create_rules_table(conn)
+        _retire_removed_presets(conn)
 
 
 def source_counts(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -357,7 +371,7 @@ def distinct_categories(conn: sqlite3.Connection, source: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# 内部转账规则（transfer_rules）
+# 忽略规则（transfer_rules）
 # ---------------------------------------------------------------------------
 
 def _rule_dict(row: sqlite3.Row) -> dict:

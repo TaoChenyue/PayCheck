@@ -4,12 +4,12 @@ API：
   GET  /                      单页应用（static/index.html）
   GET  /api/meta              各源记录数、库路径、版本
   GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位（支持 source=total）
-  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 返回三区结构：income/expense/flow）
-  GET  /api/summary?source=... 汇总卡片（source=total 返回真实收入/真实支出/内部流动三口径）
+  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 返回两区结构：real/ignore）
+  GET  /api/summary?source=... 汇总卡片（source=total 返回真实口径 + 忽略区细分）
   POST /api/import/preview        解析单个文件，返回预览与去重比对（不写入）
   POST /api/import/confirm        解析单个文件并写入（幂等）
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
-  GET  /api/rules             内部转账规则列表（附实时命中笔数）
+  GET  /api/rules             忽略规则列表（附实时命中笔数）
   POST /api/rules             新建规则 · PUT /api/rules/{id} 改含启停 · DELETE /api/rules/{id}
   POST /api/rules/preview     草稿条件试算命中笔数
   GET  /api/presets           内置预设库（附预计命中笔数）
@@ -591,7 +591,7 @@ class Handler(BaseHTTPRequestHandler):
             result = db.import_parse_result(conn, source, parsed_result, file_name)
         self._send(200, {"ok": True, "file_name": file_name, **result})
 
-    # ---- 内部转账规则 API ----
+    # ---- 忽略规则 API ----
 
     def _read_json(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -603,10 +603,14 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError("请求体不是有效 JSON") from exc
 
     def _validate_rule_body(self, body) -> dict:
-        """校验并规整规则请求体；名称留空按条件自动生成。"""
+        """校验并规整规则请求体；名称留空按条件自动生成。
+
+        动作统一「忽略」：新规则固定存 fold，存量 hide 规则更新时一并归一化
+        （设计 §4.2，存储与 API 兼容——旧客户端仍可提交 hide，服务端不再区分语义）。
+        """
         source = body.get("source") or ""
         conditions = body.get("conditions") or []
-        action = body.get("action") or "fold"
+        action = "fold"
         try:
             rules.validate_rule(source, conditions, action)
         except rules.RuleError as exc:
