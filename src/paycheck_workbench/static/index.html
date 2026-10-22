@@ -203,6 +203,7 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 72px 20px; text-align: center;
 }
+#empty-state[hidden] { display: none; }  /* hidden 属性优先于 display:flex（有数据时隐藏空态块） */
 #empty-state .empty-title { font-size: 16px; font-weight: 600; }
 #empty-state .empty-desc { font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
@@ -228,6 +229,8 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 }
 .zone-title { font-weight: 600; white-space: nowrap; }
 .zone-sub { font-size: 12px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zone-sub.zone-sum.income { color: var(--income); }   /* 区头小计：收入绿 / 支出红（设计 §2.1） */
+.zone-sub.zone-sum.expense { color: var(--expense); }
 .zone-collapse { margin-left: auto; color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .zone-table-wrap { overflow-x: auto; }
 .zone-empty { padding: 18px 16px; color: #C4C7CC; font-size: 13px; }
@@ -258,6 +261,7 @@ tr.grp-hint-row td { padding: 6px 16px; background: var(--page-bg); }
 }
 .zone-pagination button:disabled { opacity: .4; cursor: not-allowed; }
 #total-tools { display: flex; align-items: center; gap: 8px; }
+#total-tools[hidden] { display: none; }  /* hidden 属性优先于 display:flex（规则设置仅总账户页签可见） */
 
 /* ---------- 规则设置弹窗 ---------- */
 #rules-modal-mask {
@@ -707,6 +711,7 @@ async function loadSummary() {
   const res = await api("/api/summary?" + p.toString());
   if (!res.ok) throw new Error(res.error || "汇总失败");
   renderCards(res);
+  refreshZoneSubs();  // 区头小计与卡片口径同步刷新（设计 §2.1）
 }
 async function refreshAll() {
   try {
@@ -941,18 +946,40 @@ function theadCellHtml(c, sortable) {
   if (sortable && c.sort && s.key === c.sort && s.order) icon = `<span class="sort-icon">${s.order === "desc" ? "▼" : "▲"}</span>`;
   return `<th class="${sortable && c.sort ? "sortable" : ""}" data-sort="${c.sort || ""}">${esc(c.label)}${icon}</th>`;
 }
+function zoneSubInfo(zoneKey) {
+  // 区头小计：汇总响应到达后显示「合计 ±金额 · N 笔」（收入绿/支出红，设计 §2.1），否则显示条数
+  const sum = lastSummary ? lastSummary[zoneKey] : null;
+  if (sum) {
+    const sign = zoneKey === "income" ? "+" : "−";
+    return {
+      text: `合计 ${sign}${fmtMoney(sum.sum)} · ${sum.count.toLocaleString()} 笔`,
+      cls: `zone-sub zone-sum ${zoneKey}`,
+    };
+  }
+  const z = lastTotal ? lastTotal[zoneKey] : null;
+  return { text: `共 ${z ? z.total.toLocaleString() : 0} 条`, cls: "zone-sub" };
+}
+function refreshZoneSubs() {
+  // rows 先于 summary 渲染时，汇总到达后同步真实区小计（避免区头滞后一代）
+  if (currentSource !== TOTAL || !lastTotal) return;
+  for (const zone of ["income", "expense"]) {
+    const el = document.querySelector(`#total-zones .zone-head[data-zone="${zone}"] .zone-sub`);
+    if (!el) continue;
+    const info = zoneSubInfo(zone);
+    el.className = info.cls;
+    el.textContent = info.text;
+  }
+}
 function zoneHtml(zoneKey, title, cols) {
   const z = lastTotal[zoneKey];
-  const sum = lastSummary ? lastSummary[zoneKey] : null;
-  const sign = zoneKey === "income" ? "+" : "−";
-  const sub = sum ? `合计 ${sign}${fmtMoney(sum.sum)} · ${sum.count.toLocaleString()} 笔` : `共 ${z.total.toLocaleString()} 条`;
+  const sub = zoneSubInfo(zoneKey);
   const collapsed = collapsedZones[zoneKey];
   const body = z.total === 0
     ? `<div class="zone-empty">该区无记录</div>`
     : `<div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, true)).join("")}</tr></thead><tbody>${z.rows.map((row) => zoneRowHtml(row, cols)).join("")}</tbody></table></div>`;
   return `
     <div class="zone-head" data-zone="${zoneKey}">
-      <span class="zone-title">${esc(title)}</span><span class="zone-sub">${sub}</span>
+      <span class="zone-title">${esc(title)}</span><span class="${sub.cls}">${sub.text}</span>
       <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
     </div>
     <div class="zone-body" data-zone="${zoneKey}" ${collapsed ? "hidden" : ""}>
