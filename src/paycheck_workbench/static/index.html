@@ -942,6 +942,10 @@ function renderTable(res) {
 function clearSelection(renderBar) {
   selectedRows.clear();
   selectAllFiltered = false;
+  // 同步取消行勾选框与表头全选的视觉勾选（TCY-28 复验 D2）
+  document.querySelectorAll("#table-body .row-check").forEach((cb) => { cb.checked = false; });
+  const headCheck = $("#head-check");
+  if (headCheck) headCheck.checked = false;
   if (renderBar !== false && lastRows) renderBatchBar(lastRows);
 }
 function scopeFilters() {
