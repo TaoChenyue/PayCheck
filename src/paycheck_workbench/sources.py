@@ -81,8 +81,8 @@ class SourceConfig:
         return bool(self.neutral_direction)
 
 
-def _col(key, label, kind, visible=True, sort=None):
-    return {"key": key, "label": label, "kind": kind, "visible": visible, "sort": sort}
+def _col(key, label, kind, visible=True, sort=None, fixed=False):
+    return {"key": key, "label": label, "kind": kind, "visible": visible, "sort": sort, "fixed": fixed}
 
 
 SOURCE_CONFIGS: Dict[str, SourceConfig] = {
@@ -212,11 +212,13 @@ TOTAL_DIRECTIONS = ["支出", "收入", "不计收支"]
 TOTAL_NEUTRAL = "不计收支"
 
 TOTAL_COLUMNS = [
+    _col("checkbox", "☑", "checkbox", fixed=True),  # 行勾选（批量操作），固定显示、不进列设置
     _col("time", "时间", "datetime", sort="datetime"),
     _col("direction", "收·支", "direction"),
     _col("amount", "金额", "amount", sort="amount"),
     _col("source", "来源", "source"),
     _col("counterparty", "对方", "text", sort="counterparty"),
     _col("summary", "摘要", "text"),
-    _col("mark", "标注", "mark"),  # 仅忽略区（镜像 / 划转路径 / 不计收支）
+    _col("counted", "属性", "counted"),  # 不计灰标，点击切换计入↔不计
+    _col("tags", "标签", "tags"),  # 已打标签 chips + 「+」打标签
 ]
