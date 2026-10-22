@@ -149,8 +149,10 @@ body {
 #colset-panel input { accent-color: var(--brand); }
 
 /* ---------- 表格 ---------- */
-#table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-#table-scroll { overflow-x: auto; }
+/* 面板自身为滚动容器（flex:1 + min-height:0 + overflow:auto）：行数多时不再被
+   列布局收缩裁切，sticky 表头吸附面板顶部（TCY-27 设计 §5-①） */
+#table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 10px; flex: 1; min-height: 0; overflow: auto; }
+#table-scroll { overflow: visible; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 thead th {
   background: var(--thead-bg); color: var(--text-2); font-weight: 500; text-align: left;
@@ -220,117 +222,79 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .src-badge.s-boc { background: #C8102E; }
 .src-badge.s-ali { background: #1677FF; }
 .src-badge.s-wx { background: #07C160; }
-/* ---------- 总账户：两区（真实收支/忽略区） ---------- */
-.zone { background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
-.zone:last-child { margin-bottom: 0; }
-.zone-head {
-  display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-  border-bottom: 1px solid var(--border); cursor: pointer; user-select: none;
-}
-.zone-title { font-weight: 600; white-space: nowrap; }
-.zone-sub { font-size: 12px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zone-sum.income { color: var(--income); }   /* 区头小计：收入绿 / 支出红（设计 §2.1） */
-.zone-sum.expense { color: var(--danger); }  /* 支出小计用红色；不动 --expense 以免影响全站支出金额显示 */
-.zone-collapse { margin-left: auto; color: var(--text-2); font-size: 12px; white-space: nowrap; }
-.zone-table-wrap { overflow-x: auto; }
-.zone-empty { padding: 18px 16px; color: #C4C7CC; font-size: 13px; }
-.zonedesc { padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--page-bg); border-bottom: 1px solid var(--border); }
-/* 忽略区标注标签（设计 §2.2）：镜像 / 划转路径 / 不计收支 */
-.tag.mirror { background: #FFF7E8; color: #B25E09; border: 1px solid #E8C98A; }
-.tag.path {
-  background: color-mix(in srgb, var(--brand) 10%, #fff); color: var(--brand);
-  border: 1px solid color-mix(in srgb, var(--brand) 40%, #fff);
-}
-.zone-pagination {
-  display: flex; align-items: center; justify-content: flex-end; gap: 12px;
-  font-size: 13px; color: var(--text-2); padding: 10px 16px; border-top: 1px solid var(--border);
-}
-.zone-pagination button {
-  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 12px; cursor: pointer;
-}
-.zone-pagination button:disabled { opacity: .4; cursor: not-allowed; }
 #total-tools { display: flex; align-items: center; gap: 8px; }
-#total-tools[hidden] { display: none; }  /* hidden 属性优先于 display:flex（规则设置仅总账户页签可见） */
+#total-tools[hidden] { display: none; }  /* hidden 属性优先于 display:flex（标签管理仅总账户页签可见） */
 
-/* ---------- 规则设置弹窗 ---------- */
-#rules-modal-mask {
+/* ---------- 总账户：勾选 / 批量操作栏 / 属性 / 标签 ---------- */
+th.check-head { width: 40px; }
+.row-check { accent-color: var(--brand); cursor: pointer; }
+tr.uncounted td { color: #9A9DA3; }                     /* 「不计」行整行置灰 */
+tr.uncounted .money.income, tr.uncounted .money.expense { color: #9A9DA3; }
+tr.uncounted .tag.income, tr.uncounted .tag.expense { background: #F2F3F5; color: #8C8C8C; }
+tr.uncounted .src-badge { opacity: .55; }
+td[data-act="toggle-counted"] { cursor: pointer; }
+td[data-act="toggle-counted"]:hover { background: var(--row-hover); }
+.tag.row-tag { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: default; }
+.tag.row-tag .chip-x {
+  border: none; background: none; cursor: pointer; font-size: 12px; line-height: 1;
+  color: inherit; opacity: .7; padding: 0;
+}
+.tag.row-tag .chip-x:hover { opacity: 1; }
+.tag-add {
+  border: 1px dashed var(--border); background: none; border-radius: 999px; cursor: pointer;
+  padding: 1px 7px; font-size: 12px; color: var(--text-2);
+}
+.tag-add:hover { color: var(--brand); border-color: var(--brand); }
+.tag-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+#batch-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #F5F3FF; border: 1px solid #D9D0FF; border-radius: 8px; padding: 6px 10px; font-size: 13px;
+}
+#batch-bar[hidden] { display: none; }
+#batch-bar .bar-count { font-weight: 600; white-space: nowrap; }
+#batch-bar .bar-note { color: var(--text-2); white-space: nowrap; }
+#batch-bar .bar-link { border: none; background: none; color: var(--brand); cursor: pointer; text-decoration: underline; padding: 0; font-size: 13px; }
+#batch-bar .bar-spacer { margin-left: auto; }
+#batch-bar .btn { padding: 4px 12px; font-size: 13px; }
+
+/* ---------- 标签管理 / 打标签弹窗 ---------- */
+#tags-modal-mask, #tagpick-modal-mask {
   position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 120;
   display: flex; align-items: center; justify-content: center;
 }
-#rules-modal-mask[hidden] { display: none; }
-#rules-modal {
-  background: #fff; border-radius: 12px; width: min(880px, 94vw); max-height: 88vh; overflow-y: auto;
+#tags-modal-mask[hidden], #tagpick-modal-mask[hidden] { display: none; }
+#tags-modal, #tagpick-modal {
+  background: #fff; border-radius: 12px; width: min(560px, 94vw); max-height: 88vh; overflow-y: auto;
   display: flex; flex-direction: column;
 }
-#rules-modal-header {
+#tags-modal-header, #tagpick-modal-header {
   display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
   font-size: 16px; font-weight: 600;
 }
-#rules-modal-header .close { margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2); }
-#rules-modal-body { padding: 20px; }
-#rules-banner {
-  border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 14px; border: 1px solid;
-  display: flex; gap: 10px; align-items: center;
+#tags-modal-header .close, #tagpick-modal-header .close {
+  margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2);
 }
-#rules-banner.success { background: #EDFBF4; border-color: #B8ECD5; color: #007A52; }
-#rules-banner.warn { background: #FFF9E6; border-color: #F2DEB3; color: #8A6D1F; }
-#rules-banner .banner-close { margin-left: auto; cursor: pointer; border: none; background: none; color: inherit; font-size: 14px; }
-.rules-toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
-.rule-group { margin-bottom: 18px; }
-.rule-group h4 { font-size: 13px; color: var(--text-2); font-weight: 600; margin-bottom: 8px; }
-.rule-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: #fff; }
-.rule-item.off { opacity: .55; }
-.rule-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.rule-name { font-weight: 600; }
-.rule-cond { color: var(--text-2); font-size: 12px; margin-top: 4px; }
-.rule-hit { font-size: 12px; color: var(--text-2); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.rule-ops { display: flex; gap: 6px; align-items: center; }
-.rule-ops button {
-  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 2px 8px;
-  font-size: 12px; cursor: pointer; color: var(--text-2);
+#tags-modal-body, #tagpick-modal-body { padding: 20px; }
+.tm-create, .tp-create { display: flex; gap: 8px; margin-bottom: 14px; }
+.tm-create input, .tp-create input {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
 }
-.rule-ops button:hover { color: var(--brand); border-color: var(--brand); }
-.rule-ops button.danger:hover { color: var(--danger); border-color: var(--danger); }
-.rule-detail { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--text-2); }
-.rule-detail .cond-line { margin: 2px 0; }
-.switch { position: relative; display: inline-block; width: 34px; height: 18px; vertical-align: middle; cursor: pointer; flex-shrink: 0; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.switch .slider { position: absolute; inset: 0; background: #C4C7CC; border-radius: 999px; transition: .15s; }
-.switch .slider::before {
-  content: ""; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px;
-  background: #fff; border-radius: 50%; transition: .15s;
+.tm-create input:focus, .tp-create input:focus { outline: none; border-color: var(--brand); }
+.tm-list, .tp-list { display: flex; flex-direction: column; gap: 8px; }
+.tm-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.tm-item .tm-name { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; font-size: 13px; }
+.tm-item .tm-name:hover, .tm-item .tm-name:focus { border-color: var(--border); outline: none; }
+.tm-item .tm-count { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tm-item .btn { padding: 3px 10px; font-size: 12px; }
+.tm-item .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.tp-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
 }
-.switch input:checked + .slider { background: var(--brand); }
-.switch input:checked + .slider::before { transform: translateX(16px); }
-.rule-form { display: flex; flex-direction: column; gap: 12px; }
-.rule-form .f-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.rule-form .f-label { font-size: 13px; color: var(--text-2); min-width: 72px; flex-shrink: 0; }
-.rule-form input.txt, .rule-form select.sel {
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
-  color: var(--text); background: #fff;
-}
-.rule-form input.txt:focus, .rule-form select.sel:focus { outline: none; border-color: var(--brand); }
-.rule-form .cond-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.rule-form .cond-row select, .rule-form .cond-row input {
-  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: #fff;
-}
-.rule-form .cond-row select:focus, .rule-form .cond-row input:focus { outline: none; border-color: var(--brand); }
-.rule-form .cond-val { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
-.rule-form .cond-val input { width: 100%; }
-.rule-form .hint { font-size: 12px; color: var(--text-2); }
-.hit-preview { font-size: 12px; color: var(--text-2); margin-left: auto; font-variant-numeric: tabular-nums; }
-.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
-.preset-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
-.preset-head { display: flex; align-items: center; gap: 8px; }
-.preset-name { font-weight: 600; }
-.preset-desc { font-size: 12px; color: var(--text-2); margin-top: 4px; }
-.preset-meta { font-size: 12px; color: var(--text-2); margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.preset-rules { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
-.preset-rule { font-size: 12px; color: var(--text-2); margin: 4px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.badge {
-  display: inline-block; font-size: 11px; border-radius: 999px; padding: 0 8px;
-  border: 1px solid var(--border); color: var(--text-2); white-space: nowrap;
-}
+.tp-item:hover { background: var(--row-hover); }
+.tp-item input { accent-color: var(--brand); }
+.tm-empty { color: #C4C7CC; text-align: center; padding: 16px 0; font-size: 13px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
 /* ---------- 导入弹窗 ---------- */
 #modal-mask {
@@ -454,6 +418,16 @@ tr.bf-error td { color: var(--danger); }
       <h3>收/支</h3>
       <div class="checkbox-list" id="direction-list"></div>
     </div>
+    <div class="sidebar-section" id="counted-section" hidden>
+      <h3>属性</h3>
+      <div class="checkbox-list" id="counted-list"></div>
+      <div class="sidebar-note">不计行已整行置灰；仅计入收支的账单参与汇总</div>
+    </div>
+    <div class="sidebar-section" id="tags-section" hidden>
+      <h3>标签</h3>
+      <div class="checkbox-list" id="tag-filter-list"></div>
+      <div class="sidebar-note">命中任一勾选标签即显示；无标签行仅全部未勾选时显示</div>
+    </div>
     <div class="sidebar-section">
       <h3 id="category-title">分类</h3>
       <div class="checkbox-list" id="category-list"></div>
@@ -475,7 +449,7 @@ tr.bf-error td { color: var(--danger); }
     <div id="toolbar">
       <input type="search" id="search" placeholder="搜索…">
       <div id="total-tools" hidden>
-        <button class="btn" id="btn-rules">规则设置</button>
+        <button class="btn" id="btn-tags-manage">🏷 标签管理</button>
       </div>
       <div id="colset">
         <button class="btn" id="btn-colset">列设置 ▾</button>
@@ -488,16 +462,13 @@ tr.bf-error td { color: var(--danger); }
         <option value="200">200 条/页</option>
       </select>
     </div>
+    <div id="batch-bar" hidden></div>
     <div id="table-wrap">
       <div id="table-scroll">
         <table id="table">
           <thead><tr id="table-head"></tr></thead>
           <tbody id="table-body"></tbody>
         </table>
-      </div>
-      <div id="total-zones" hidden>
-        <section class="zone" id="zone-real"></section>
-        <section class="zone" id="zone-ignore"></section>
       </div>
       <div id="empty-state" hidden>
         <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#C4C7CC" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
@@ -521,12 +492,21 @@ tr.bf-error td { color: var(--danger); }
   </div>
 </div>
 
-<div id="rules-modal-mask" hidden>
-  <div id="rules-modal">
-    <div id="rules-modal-header">规则设置
-      <button class="close" id="btn-rules-close">×</button>
+<div id="tags-modal-mask" hidden>
+  <div id="tags-modal">
+    <div id="tags-modal-header">标签管理
+      <button class="close" id="btn-tags-modal-close">×</button>
     </div>
-    <div id="rules-modal-body"></div>
+    <div id="tags-modal-body"></div>
+  </div>
+</div>
+
+<div id="tagpick-modal-mask" hidden>
+  <div id="tagpick-modal">
+    <div id="tagpick-modal-header">打标签<span id="tagpick-count"></span>
+      <button class="close" id="btn-tagpick-close">×</button>
+    </div>
+    <div id="tagpick-modal-body"></div>
   </div>
 </div>
 
@@ -555,10 +535,9 @@ let modalFile = null;           // 已选文件（单文件流程）
 let modalFiles = null;          // 批量模式的有效文件列表
 let modalWarn = null;           // 类型不符/同名被跳过的文件提示
 let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
-let lastSummary = null;       // 最近一次汇总响应（总账户区头合计展示）
-let lastTotal = null;         // 最近一次总账户两区响应
-let collapsedZones = { real: false, ignore: false };  // 总账户区块收起状态
-let totalZonePages = { real: 1, ignore: 1 };  // 总账户两区各自独立分页
+let selectedRows = new Set(); // 总账户勾选的行 id（当前页范围）
+let selectAllFiltered = false; // 全量模式：批量操作作用于整个筛选结果
+let tagsCache = [];           // 标签组列表（总账户侧栏/弹窗共用）
 
 const TOTAL = "total";
 const TAB_ORDER = ["boc", "alipay", "wechat", TOTAL];
@@ -567,7 +546,8 @@ const TOTAL_LABEL = "总账户";
 
 function freshFilters() {
   return { q: "", date_from: "", date_to: "", directions: [], categories: [],
-           amount_min: "", amount_max: "", sources: ["boc", "alipay", "wechat"] };
+           amount_min: "", amount_max: "", sources: ["boc", "alipay", "wechat"],
+           counted: ["1", "0"], tags: [] };  // 属性两档默认全选
 }
 for (const s of TAB_ORDER) {
   filtersBySource[s] = freshFilters();
@@ -615,20 +595,6 @@ function dirTagHtml(row) {
 function srcBadgeHtml(source) {
   return `<span class="src-badge ${SRC_BADGE_CLS[source] || ""}">${esc(SOURCE_LABELS[source] || source)}</span>`;
 }
-function markHtml(row) {
-  // 忽略区标注（设计 §2.2）：镜像（同日同金额配对）/ 划转路径 / 不计收支
-  if (row.mark === "mirror") {
-    const platform = (row.mark_label || "").replace("镜像·", "");
-    return `<span class="tag mirror" title="同日同金额配对（${esc(platform)}）">${esc(row.mark_label)}</span>`;
-  }
-  if (row.mark === "path") {
-    const names = esc((row.rule_names || []).join("、"));
-    const title = names ? ` title="命中规则：${names}"` : "";
-    return `<span class="tag path"${title}>${esc(row.mark_label)}</span>`;
-  }
-  if (row.mark === "neutral") return `<span class="tag neutral">${esc(row.mark_label || "不计收支")}</span>`;
-  return '<span class="empty-val">—</span>';
-}
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
   catch (e) {
@@ -673,8 +639,10 @@ function filterQuery() {
   if (f.directions.length) p.set("directions", f.directions.join(","));
   if (currentSource === TOTAL) {
     if (f.sources.length) p.set("sources", f.sources.join(","));
-    p.set("real_page", totalZonePages.real);
-    p.set("ignore_page", totalZonePages.ignore);
+    // 属性：两档全选不发参数（不过滤）；勾一档发 1/0；全不勾发空值（匹配 0 行）
+    if (f.counted.length === 1) p.set("counted", f.counted[0]);
+    else if (f.counted.length === 0) p.set("counted", "");
+    if (f.tags.length) p.set("tags", f.tags.join(","));
   } else if (f.categories.length) {
     p.set("categories", f.categories.join(","));
   }
@@ -683,12 +651,13 @@ function filterQuery() {
   return p;
 }
 async function loadRows() {
+  clearSelection(false);
   const p = filterQuery();
   p.set("page", pageBySource[currentSource]);
   p.set("page_size", pageSizeBySource[currentSource]);
   const s = sortBySource[currentSource];
   if (s.order) { p.set("sort", s.key); p.set("order", s.order); }
-  if (currentSource === TOTAL) showTotalSkeleton(); else showSkeleton();
+  showSkeleton();
   const res = await api("/api/rows?" + p.toString());
   if (!res.ok) throw new Error(res.error || "查询失败");
   renderTable(res);
@@ -698,11 +667,11 @@ async function loadSummary() {
   const res = await api("/api/summary?" + p.toString());
   if (!res.ok) throw new Error(res.error || "汇总失败");
   renderCards(res);
-  refreshZoneSubs();  // 区头小计与卡片口径同步刷新（设计 §2.1）
 }
 async function refreshAll() {
   try {
     await Promise.all([loadMeta(), loadOptions(currentSource, true)]);
+    if (currentSource === TOTAL) await loadTags();
     renderTabs(); renderSidebar(); renderToolbar();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) { showErrorBanner(e.message); }
@@ -738,6 +707,27 @@ function renderSidebar() {
       f.directions = [...$("#direction-list").querySelectorAll("input:checked")].map((i) => i.value);
       onFilterChange();
     }));
+  // 总账户专属区块：属性 / 标签（其余页签隐藏）
+  $("#counted-section").hidden = currentSource !== TOTAL;
+  $("#tags-section").hidden = currentSource !== TOTAL;
+  if (currentSource === TOTAL) {
+    $("#counted-list").innerHTML = [["1", "计入"], ["0", "不计"]].map(([v, label]) =>
+      `<label><input type="checkbox" value="${v}" ${f.counted.includes(v) ? "checked" : ""}> <span class="lbl">${esc(label)}</span></label>`
+    ).join("");
+    $("#counted-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.counted = [...$("#counted-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+    $("#tag-filter-list").innerHTML = tagsCache.map((t) =>
+      `<label><input type="checkbox" value="${t.id}" ${f.tags.includes(String(t.id)) ? "checked" : ""}> <span class="tag-dot" style="background:${esc(t.color)}"></span> <span class="lbl">${esc(t.name)}</span></label>`
+    ).join("") || '<div style="font-size:12px;color:#C4C7CC">暂无标签，可在工具栏「标签管理」中创建</div>';
+    $("#tag-filter-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.tags = [...$("#tag-filter-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+  }
   // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
   if (currentSource === TOTAL) {
     $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
@@ -776,7 +766,7 @@ function renderToolbar() {
   $("#search").placeholder = o.search_placeholder || "搜索…";
   $("#search").value = filtersBySource[currentSource].q;
   $("#total-tools").hidden = currentSource !== TOTAL;
-  $("#colset-panel").innerHTML = o.columns.map((c) =>
+  $("#colset-panel").innerHTML = o.columns.filter((c) => !c.fixed).map((c) =>
     `<label><input type="checkbox" value="${esc(c.key)}" ${vis.has(c.key) ? "checked" : ""}> ${esc(c.label)}</label>`
   ).join("");
   $("#colset-panel").querySelectorAll("input").forEach((el) =>
@@ -793,6 +783,9 @@ function renderTableHead() {
   const s = sortBySource[currentSource];
   const head = $("#table-head");
   head.innerHTML = o.columns.filter((c) => vis.has(c.key)).map((c) => {
+    if (c.kind === "checkbox") {
+      return '<th class="check-head"><input type="checkbox" id="head-check" title="全选当前页"></th>';
+    }
     const sortable = c.sort ? " sortable" : "";
     let icon = "";
     if (c.sort && s.key === c.sort && s.order) icon = `<span class="sort-icon">${s.order === "desc" ? "▼" : "▲"}</span>`;
@@ -800,6 +793,15 @@ function renderTableHead() {
   }).join("");
   head.querySelectorAll("th.sortable").forEach((th) =>
     th.addEventListener("click", () => cycleSort(th.dataset.sort)));
+  const headCheck = head.querySelector("#head-check");
+  if (headCheck) headCheck.addEventListener("click", () => {
+    // 表头 ☑ 全选当前页（勾选页级选择，退出全量模式）
+    selectAllFiltered = false;
+    if (headCheck.checked) (lastRows ? lastRows.rows : []).forEach((r) => selectedRows.add(r.id));
+    else selectedRows.clear();
+    document.querySelectorAll("#table-body .row-check").forEach((cb) => { cb.checked = headCheck.checked; });
+    renderBatchBar(lastRows);
+  });
 }
 function cycleSort(sortKey) {
   const s = sortBySource[currentSource];
@@ -812,7 +814,6 @@ function cycleSort(sortKey) {
   loadRows();
 }
 function renderCards(summary) {
-  lastSummary = summary;
   if (currentSource === TOTAL) { renderTotalCards(summary); return; }
   const o = optionsCache[currentSource];
   const cards = [];
@@ -831,21 +832,38 @@ function renderCards(summary) {
   ).join("");
 }
 function renderTotalCards(s) {
-  // 真实口径：真实收入 / 真实支出 / 净收支 / 真实笔数（副文本 = 忽略区笔数 · 镜像 · 划转）
+  // 计入口径（设计 v2 §1）：收入合计 / 支出合计 / 净收支 / 计入笔数（副文本 = 不计入笔数）
   const net = s.net;
   const cards = [
-    { cls: "income", title: "真实收入", value: "+" + fmtMoney(s.income.sum), sub: `${s.income.count.toLocaleString()} 笔` },
-    { cls: "expense", title: "真实支出", value: "−" + fmtMoney(s.expense.sum), sub: `${s.expense.count.toLocaleString()} 笔` },
-    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "真实收入 − 真实支出" },
-    { cls: "", title: "真实笔数", value: s.count.toLocaleString(), sub: `忽略区 ${s.ignore.count.toLocaleString()} 笔 · 镜像 ${s.ignore.mirror.toLocaleString()} · 划转 ${s.ignore.transfer.toLocaleString()}` },
+    { cls: "income", title: "收入合计", value: "+" + fmtMoney(s.income.sum), sub: `${s.income.count.toLocaleString()} 笔` },
+    { cls: "expense", title: "支出合计", value: "−" + fmtMoney(s.expense.sum), sub: `${s.expense.count.toLocaleString()} 笔` },
+    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "收入 − 支出" },
+    { cls: "", title: "计入笔数", value: s.count.toLocaleString(), sub: `不计入 ${s.not_counted.toLocaleString()} 笔` },
   ];
   $("#cards").innerHTML = cards.map((c) =>
     `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
   ).join("");
 }
+function countedHtml(row) {
+  // 属性列：不计行显示灰标「不计」，计入行显示「—」；点击切换计入↔不计
+  if (row.counted) return '<span class="empty-val">—</span>';
+  return '<span class="tag neutral">不计</span>';
+}
+function tagsHtml(row) {
+  // 标签列：已打标签 chips（带组颜色，chip 上 × 可移除）+ 末尾「+」打标签
+  const chips = (row.tags || []).map((t) =>
+    `<span class="tag row-tag" data-tag="${t.id}" title="移除「${esc(t.name)}」"
+       style="background:${esc(t.color)}1F;color:${esc(t.color)};border:1px solid ${esc(t.color)}66">
+       ${esc(t.name)}<button class="chip-x" data-act="tag-remove" data-tag="${t.id}" data-name="${esc(t.name)}">×</button></span>`
+  ).join("");
+  return `${chips}<button class="tag-add" data-act="tag-add">＋</button>`;
+}
 function cellHtml(row, col) {
   const o = optionsCache[currentSource];
   const v = row[col.key];
+  if (col.kind === "checkbox") {
+    return `<input type="checkbox" class="row-check" data-id="${esc(row.id)}">`;
+  }
   if (col.kind === "datetime") {
     let text = v || "";
     if (col.key === "datetime" && o.time_col) {
@@ -857,7 +875,8 @@ function cellHtml(row, col) {
   if (col.kind === "direction") return dirTagHtml(row);
   if (col.kind === "amount") return moneyHtml(row);
   if (col.kind === "source") return srcBadgeHtml(row.source);
-  if (col.kind === "mark") return markHtml(row);
+  if (col.kind === "counted") return countedHtml(row);
+  if (col.kind === "tags") return tagsHtml(row);
   if (col.kind === "balance") return v ? `<span class="num">${fmtMoney(v)}</span>` : '<span class="empty-val">—</span>';
   if (col.kind === "status") return statusHtml(v);
   if (col.kind === "copy") {
@@ -870,16 +889,13 @@ function cellHtml(row, col) {
   return `<span title="${esc(v)}">${esc(display)}</span>`;
 }
 function renderTableBodyKeep() {
-  // 列显隐变化时仅重绘表格（行数据已在 lastRows / lastTotal 中）
-  if (currentSource === TOTAL) { if (lastTotal) renderTotalZones(); return; }
+  // 列显隐变化时仅重绘表格（行数据已在 lastRows 中）
   if (lastRows) renderTable(lastRows);
 }
 let lastRows = null;
 function renderTable(res) {
-  if (currentSource === TOTAL) { lastTotal = res; renderTotalZones(); return; }
   lastRows = res;
   $("#table-scroll").style.display = "";
-  $("#total-zones").hidden = true;
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const cols = o.columns.filter((c) => vis.has(c.key));
@@ -890,152 +906,143 @@ function renderTable(res) {
     body.innerHTML = "";
     renderEmptyState(res);
     renderPagination(res);
+    renderBatchBar(res);
     return;
   }
   $("#empty-state").hidden = true;
   body.innerHTML = res.rows.map((row) => {
     const tds = cols.map((col) => {
       const cls = (col.kind === "amount" || col.kind === "balance") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
-      return `<td${cls}>${cellHtml(row, col)}</td>`;
+      const act = col.kind === "counted" ? ' data-act="toggle-counted"' : "";
+      return `<td${cls}${act}>${cellHtml(row, col)}</td>`;
     }).join("");
-    return `<tr class="data-row" data-id="${row.id}">${tds}</tr>
+    const uncounted = currentSource === TOTAL && !row.counted ? " uncounted" : "";
+    return `<tr class="data-row${uncounted}" data-id="${row.id}">${tds}</tr>
             <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
   }).join("");
   body.querySelectorAll("tr.data-row").forEach((tr) => {
     tr.addEventListener("click", (ev) => {
-      if (ev.target.classList.contains("copy-btn")) return;
+      if (ev.target.closest("input, button, [data-act]")) return;
       toggleDetail(tr.dataset.id);
     });
   });
   body.querySelectorAll(".copy-btn").forEach((btn) =>
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+  if (currentSource === TOTAL) bindTotalRowEvents();
+  const headCheck = $("#head-check");
+  if (headCheck) headCheck.checked = false;
   renderPagination(res);
+  renderBatchBar(res);
 }
-/* ---- 总账户两区：真实收支 / 忽略区 ---- */
-function renderTotalZones() {
-  const res = lastTotal;
-  $("#table-scroll").style.display = "none";
-  $("#empty-state").hidden = true;
-  $("#total-zones").hidden = false;
-  const o = optionsCache[TOTAL];
-  const vis = visibleColsBySource[TOTAL];
-  const dataCols = o.columns.filter((c) => vis.has(c.key) && c.key !== "mark");
-  const ignoreCols = o.columns.filter((c) => vis.has(c.key));
-  $("#zone-real").innerHTML = zoneHtml("real", "真实收支", dataCols);
-  $("#zone-ignore").innerHTML = ignoreZoneHtml(ignoreCols);
-  bindZoneEvents();
+
+/* ---- 总账户：勾选批量操作 / 属性切换 / 标签 ---- */
+function clearSelection(renderBar) {
+  selectedRows.clear();
+  selectAllFiltered = false;
+  if (renderBar !== false && lastRows) renderBatchBar(lastRows);
 }
-function theadCellHtml(c, sortable) {
-  const s = sortBySource[TOTAL];
-  let icon = "";
-  if (sortable && c.sort && s.key === c.sort && s.order) icon = `<span class="sort-icon">${s.order === "desc" ? "▼" : "▲"}</span>`;
-  return `<th class="${sortable && c.sort ? "sortable" : ""}" data-sort="${c.sort || ""}">${esc(c.label)}${icon}</th>`;
+function scopeFilters() {
+  // 与 /api/rows 一致的筛选参数（filter scope 作用于整个筛选结果）
+  const f = filtersBySource[TOTAL];
+  return {
+    q: f.q || undefined,
+    date_from: f.date_from || undefined,
+    date_to: f.date_to || undefined,
+    directions: f.directions.length ? f.directions : undefined,
+    sources: f.sources.length ? f.sources : undefined,
+    amount_min: f.amount_min || undefined,
+    amount_max: f.amount_max || undefined,
+    counted: f.counted.length === 2 ? undefined : f.counted,
+    tags: f.tags.length ? f.tags.map(Number) : undefined,
+  };
 }
-function zoneSubInfo(zoneKey) {
-  // 区头小计（设计 §2.1/§2.2）：真实收支区显示「合计 收入 +X · N 笔 / 支出 −Y · M 笔」
-  // （收入绿/支出红），忽略区显示「N 笔 · 镜像 M · 划转 K · 不计收支 L」；汇总未到时显示条数
-  if (zoneKey === "real" && lastSummary && lastSummary.income && lastSummary.expense) {
-    return `合计 收入 <span class="zone-sum income">+${fmtMoney(lastSummary.income.sum)} · ${lastSummary.income.count.toLocaleString()} 笔</span> / 支出 <span class="zone-sum expense">−${fmtMoney(lastSummary.expense.sum)} · ${lastSummary.expense.count.toLocaleString()} 笔</span>`;
+function currentScope() {
+  if (selectAllFiltered) return { scope: "filter", filters: scopeFilters() };
+  return { scope: "ids", ids: [...selectedRows] };
+}
+function renderBatchBar(res) {
+  // 勾选 ≥1 行出现；筛选结果多于当前页时提供「选择全部筛选结果」全量模式
+  const bar = $("#batch-bar");
+  if (currentSource !== TOTAL || (!selectedRows.size && !selectAllFiltered)) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
   }
-  if (zoneKey === "ignore" && lastSummary && lastSummary.ignore) {
-    const ig = lastSummary.ignore;
-    return `${ig.count.toLocaleString()} 笔 · 镜像 ${ig.mirror.toLocaleString()} · 划转 ${ig.transfer.toLocaleString()} · 不计收支 ${ig.neutral.toLocaleString()} · 不计入收支`;
-  }
-  const z = lastTotal ? lastTotal[zoneKey] : null;
-  return `共 ${z ? z.total.toLocaleString() : 0} 条`;
+  bar.hidden = false;
+  const total = res ? res.total : 0;
+  const pageCount = res && res.rows ? res.rows.length : 0;
+  const selText = selectAllFiltered
+    ? `已选全部筛选结果（${total.toLocaleString()} 条）`
+    : `已选 ${selectedRows.size.toLocaleString()} 条`;
+  const allLink = (!selectAllFiltered && total > pageCount)
+    ? '<button class="bar-link" id="bar-select-all">选择全部筛选结果</button>' : "";
+  bar.innerHTML = `
+    <span class="bar-count">${selText}</span>
+    <span class="bar-note">${selectAllFiltered ? "" : `（当前页 ${pageCount} / 筛选共 ${total.toLocaleString()} 条）`}</span>
+    ${allLink}
+    <span class="bar-spacer"></span>
+    <button class="btn" id="bar-counted-in">设为计入</button>
+    <button class="btn" id="bar-counted-out">设为不计</button>
+    <button class="btn" id="bar-tag">打标签…</button>
+    <button class="btn" id="bar-clear">清除</button>`;
+  bar.querySelector("#bar-counted-in").addEventListener("click", () => setCounted(currentScope(), 1));
+  bar.querySelector("#bar-counted-out").addEventListener("click", () => setCounted(currentScope(), 0));
+  bar.querySelector("#bar-tag").addEventListener("click", () => openTagPick(currentScope()));
+  bar.querySelector("#bar-clear").addEventListener("click", clearSelection);
+  const all = bar.querySelector("#bar-select-all");
+  if (all) all.addEventListener("click", () => { selectAllFiltered = true; renderBatchBar(res); });
 }
-function refreshZoneSubs() {
-  // rows 先于 summary 渲染时，汇总到达后同步两区小计（避免区头滞后一代）
-  if (currentSource !== TOTAL || !lastTotal) return;
-  for (const zone of ["real", "ignore"]) {
-    const el = document.querySelector(`#total-zones .zone-head[data-zone="${zone}"] .zone-sub`);
-    if (!el) continue;
-    el.innerHTML = zoneSubInfo(zone);
-  }
-}
-function zoneHtml(zoneKey, title, cols) {
-  const z = lastTotal[zoneKey];
-  const collapsed = collapsedZones[zoneKey];
-  const body = z.total === 0
-    ? `<div class="zone-empty">该区无记录</div>`
-    : `<div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, true)).join("")}</tr></thead><tbody>${z.rows.map((row) => zoneRowHtml(row, cols)).join("")}</tbody></table></div>`;
-  return `
-    <div class="zone-head" data-zone="${zoneKey}">
-      <span class="zone-title">${esc(title)}</span><span class="zone-sub">${zoneSubInfo(zoneKey)}</span>
-      <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
-    </div>
-    <div class="zone-body" data-zone="${zoneKey}" ${collapsed ? "hidden" : ""}>
-      ${body}
-      ${z.total > 0 ? zonePaginationHtml(zoneKey) : ""}
-    </div>`;
-}
-function zoneRowHtml(row, cols) {
-  const tds = cols.map((col) => {
-    const cls = (col.kind === "amount") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
-    return `<td${cls}>${cellHtml(row, col)}</td>`;
-  }).join("");
-  return `<tr class="data-row" data-id="${row.id}">${tds}</tr>
-          <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
-}
-function ignoreZoneHtml(cols) {
-  const z = lastTotal.ignore;
-  const collapsed = collapsedZones.ignore;
-  const body = z.total === 0
-    ? `<div class="zone-empty">该区无记录</div>`
-    : `<div class="zonedesc">这里面的账单都不计入真实收支：要么是支付平台与银行卡的重复记录（镜像），要么是资金在你自己账户之间的划转。</div>
-       <div class="zone-table-wrap"><table><thead><tr>${cols.map((c) => theadCellHtml(c, true)).join("")}</tr></thead><tbody>${z.rows.map((row) => zoneRowHtml(row, cols)).join("")}</tbody></table></div>`;
-  return `
-    <div class="zone-head" data-zone="ignore">
-      <span class="zone-title">忽略区</span><span class="zone-sub">${zoneSubInfo("ignore")}</span>
-      <span class="zone-collapse">${collapsed ? "展开 ▾" : "收起 ▴"}</span>
-    </div>
-    <div class="zone-body" data-zone="ignore" ${collapsed ? "hidden" : ""}>
-      ${body}
-      ${z.total > 0 ? zonePaginationHtml("ignore") : ""}
-    </div>`;
-}
-function zonePaginationHtml(zoneKey) {
-  const z = lastTotal[zoneKey];
-  const page = totalZonePages[zoneKey];
-  const pages = Math.max(1, Math.ceil(z.total / z.page_size));
-  return `<div class="zone-pagination">
-    <span>第 ${page} 页，共 ${pages} 页 · ${z.total.toLocaleString()} 条</span>
-    <button data-act="prev" ${page <= 1 ? "disabled" : ""}>上一页</button>
-    <button data-act="next" ${page >= pages ? "disabled" : ""}>下一页</button>
-  </div>`;
-}
-function bindZoneEvents() {
-  // 区块头点击收起/展开该区
-  document.querySelectorAll("#total-zones .zone-head").forEach((head) => {
-    const zone = head.dataset.zone;
-    head.addEventListener("click", () => {
-      collapsedZones[zone] = !collapsedZones[zone];
-      const body = document.querySelector(`#total-zones .zone-body[data-zone="${zone}"]`);
-      if (body) body.hidden = collapsedZones[zone];
-      const fold = head.querySelector(".zone-collapse");
-      if (fold) fold.textContent = collapsedZones[zone] ? "展开 ▾" : "收起 ▴";
-    });
+async function setCounted(scope, counted, silent) {
+  const res = await api("/api/total/overrides", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...scope, counted }),
   });
-  // 两区各自独立分页
-  document.querySelectorAll("#total-zones .zone-pagination").forEach((bar) => {
-    const zone = bar.parentElement.dataset.zone;
-    bar.querySelectorAll("button").forEach((btn) =>
-      btn.addEventListener("click", () => {
-        if (btn.disabled) return;
-        totalZonePages[zone] += btn.dataset.act === "next" ? 1 : -1;
-        loadRows();
-      }));
-  });
-  // 两区表头排序与行详情（沿用现有交互）
-  document.querySelectorAll("#zone-real th.sortable, #zone-ignore th.sortable").forEach((th) =>
-    th.addEventListener("click", () => cycleSort(th.dataset.sort)));
-  document.querySelectorAll("#zone-real tr.data-row, #zone-ignore tr.data-row").forEach((tr) =>
-    tr.addEventListener("click", (ev) => {
-      if (ev.target.classList.contains("copy-btn")) return;
-      toggleDetail(tr.dataset.id);
+  if (!res.ok) { showErrorBanner(res.error || "操作失败"); return false; }
+  if (!silent) addBanner("success", `已将 ${res.updated.toLocaleString()} 条设为${counted ? "计入" : "不计"}`, null);
+  await refreshRowsAndSummary();
+  return true;
+}
+async function refreshRowsAndSummary() {
+  try { await Promise.all([loadRows(), loadSummary()]); }
+  catch (e) { showErrorBanner(e.message); }
+}
+function bindTotalRowEvents() {
+  // 勾选列：行内 checkbox 切换（表头为当前页全选，见 renderTableHead）
+  document.querySelectorAll("#table-body .row-check").forEach((cb) =>
+    cb.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (cb.checked) selectedRows.add(cb.dataset.id); else selectedRows.delete(cb.dataset.id);
+      renderBatchBar(lastRows);
     }));
-  document.querySelectorAll("#zone-real .copy-btn, #zone-ignore .copy-btn").forEach((btn) =>
-    btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+  // 属性列点击切换计入↔不计（单行快速修改，即时保存）
+  document.querySelectorAll('#table-body td[data-act="toggle-counted"]').forEach((td) =>
+    td.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const tr = td.closest("tr");
+      const row = (lastRows ? lastRows.rows : []).find((r) => String(r.id) === String(tr.dataset.id));
+      if (!row) return;
+      await setCounted({ scope: "ids", ids: [row.id] }, row.counted ? 0 : 1, true);
+    }));
+  // 标签列：「+」打标签（同一弹层，单行 scope）
+  document.querySelectorAll('[data-act="tag-add"]').forEach((btn) =>
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openTagPick({ scope: "ids", ids: [btn.closest("tr").dataset.id] });
+    }));
+  // chip × 移除单行标签
+  document.querySelectorAll('[data-act="tag-remove"]').forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const id = btn.closest("tr").dataset.id;
+      const res = await api("/api/tags/apply", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "ids", action: "remove", group_ids: [Number(btn.dataset.tag)], ids: [id] }),
+      });
+      if (!res.ok) { showErrorBanner(res.error || "移除标签失败"); return; }
+      await refreshRowsAndSummary();
+    }));
 }
 function toggleDetail(id) {
   const detailRow = document.querySelector(`tr.detail-row[data-for="${id}"]`);
@@ -1047,11 +1054,6 @@ function toggleDetail(id) {
   if (!willOpen) return;
   let row = null;
   if (lastRows && lastRows.rows) row = lastRows.rows.find((r) => String(r.id) === String(id)) || null;
-  if (!row && lastTotal) {
-    // 总账户两区：行位于真实收支/忽略区的当前页
-    const totalRows = (lastTotal.real.rows || []).concat(lastTotal.ignore.rows || []);
-    row = totalRows.find((r) => String(r.id) === String(id)) || null;
-  }
   if (!row) return;
   if (currentSource === TOTAL) {
     renderTotalDetail(detailRow.querySelector("td"), row);
@@ -1091,9 +1093,6 @@ function renderTotalDetail(td, row) {
     const copy = (c.kind === "copy" && v) ? `<button class="copy-btn" data-copy="${esc(v)}">复制</button>` : "";
     return `<div class="detail-item"><div class="k">${esc(c.label)}</div><div class="v">${v ? esc(v) : "—"}${copy}</div></div>`;
   });
-  if (row.rule_names && row.rule_names.length) {
-    items.push(`<div class="detail-item"><div class="k">命中规则</div><div class="v">${esc(row.rule_names.join("、"))}</div></div>`);
-  }
   items.push(`<div class="detail-item"><div class="k">来源文件</div><div class="v">${esc(row.source_file)}</div></div>`);
   items.push(`<div class="detail-item"><div class="k">导入时间</div><div class="v">${esc(row.imported_at)}</div></div>`);
   td.innerHTML = `<div class="detail-grid">${items.join("")}</div>`;
@@ -1135,19 +1134,7 @@ function showSkeleton() {
   body.innerHTML = Array.from({ length: n }).map(() =>
     `<tr class="skeleton-row"><td colspan="12"><div class="skeleton-block"></div></td></tr>`).join("");
   $("#pagination").innerHTML = "";
-}
-function showTotalSkeleton() {
-  $("#table-scroll").style.display = "none";
-  $("#empty-state").hidden = true;
-  $("#total-zones").hidden = false;
-  const titles = { real: "真实收支", ignore: "忽略区" };
-  for (const zone of ["real", "ignore"]) {
-    const el = $(`#zone-${zone}`);
-    el.innerHTML = `<div class="zone-head"><span class="zone-title">${titles[zone]}</span></div>
-      <div class="zone-body" style="padding:14px 16px">
-        <div class="skeleton-block"></div><div class="skeleton-block" style="margin-top:10px;width:60%"></div>
-      </div>`;
-  }
+  $("#batch-bar").hidden = true;
 }
 function showErrorBanner(message) {
   addBanner("error", message, false);
@@ -1181,8 +1168,9 @@ async function switchTab(source) {
   try {
     await loadOptions(source, false);
     if (source === TOTAL) {
-      // 总账户行详情展开依赖各源列信息
+      // 总账户行详情展开依赖各源列信息；侧栏标签区块依赖标签列表
       await Promise.all(["boc", "alipay", "wechat"].map((s) => loadOptions(s, false)));
+      await loadTags();
     }
     renderSidebar(); renderToolbar();
     await Promise.all([loadRows(), loadSummary()]);
@@ -1190,13 +1178,9 @@ async function switchTab(source) {
 }
 const onFilterChange = debounce(() => {
   pageBySource[currentSource] = 1;
-  resetTotalPages();
   updatePresetActive();
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }, 300);
-function resetTotalPages() {
-  totalZonePages = { real: 1, ignore: 1 };
-}
 function updatePresetActive() {
   const f = filtersBySource[currentSource];
   const presets = ["this-month", "last-month", "recent-3m"];
@@ -1247,390 +1231,161 @@ function resetFilters() {
   filtersBySource[currentSource] = freshFilters();
   renderSidebar();
   pageBySource[currentSource] = 1;
-  resetTotalPages();
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }
 
-/* ================= 规则设置弹窗 ================= */
-const RULE_SOURCE_OPTIONS = [["boc", "BOC"], ["alipay", "支付宝"], ["wechat", "微信"]];
-const OP_LABELS = { eq: "等于", in: "任一等于", contains: "包含", starts: "开头是", not_contains: "不包含" };
-const OP_OPTIONS = Object.entries(OP_LABELS);
-const ACTION_LABELS = { fold: "忽略", hide: "忽略" };
-const FIELD_LABELS = { tx_name: "交易名称", counterparty: "对方账户名", memo: "附言", channel: "渠道", tx_type: "类型" };
-const FIELD_OPTIONS = {
-  boc: [["tx_name", "交易名称"], ["counterparty", "对方账户名"], ["memo", "附言"], ["channel", "渠道"], ["tx_type", "类型"]],
-  alipay: [["交易分类", "交易分类"], ["交易对方", "交易对方"], ["商品说明", "商品说明"], ["收/付款方式", "收/付款方式"],
-           ["交易状态", "交易状态"], ["备注", "备注"], ["收/支", "收/支"]],
-  wechat: [["交易类型", "交易类型"], ["交易对方", "交易对方"], ["商品", "商品"], ["支付方式", "支付方式"],
-           ["当前状态", "当前状态"], ["备注", "备注"], ["收/支", "收/支"]],
-};
-const MAX_CONDITIONS = 5;
-
-let rulesList = null;             // GET /api/rules 缓存
-let presetsData = null;           // GET /api/presets 缓存
-let expandedRules = new Set();    // 规则列表展开的行
-let editingRule = null;           // 表单草稿（id 非空为编辑）
-let presetChecked = new Set();    // 预设导入勾选
-let presetExpanded = new Set();   // 预设展开查看规则
-let placeholderValues = {};       // 预设占位符填写值 {占位符: 值}
-
-const fieldLabel = (f) => FIELD_LABELS[f] || f;
-function condLine(c) {
-  return `${fieldLabel(c.field)} ${OP_LABELS[c.op] || c.op}「${c.value}」`;
+/* ================= 标签：管理弹窗 / 打标签弹层 ================= */
+async function loadTags() {
+  const res = await api("/api/tags");
+  if (!res.ok) throw new Error(res.error || "获取标签失败");
+  tagsCache = res.tags || [];
+  return tagsCache;
 }
-function conditionSummary(conditions) {
-  return conditions.map(condLine).join(" 且 ");
+function pruneTagFilter() {
+  // 标签被删除后从筛选状态中移除
+  const f = filtersBySource[TOTAL];
+  f.tags = f.tags.filter((id) => tagsCache.some((t) => String(t.id) === id));
 }
 
-function openRulesModal() {
-  $("#rules-modal-mask").hidden = false;
-  loadRulesView();
+/* ---- 标签管理弹窗 ---- */
+function openTagsModal() {
+  $("#tags-modal-mask").hidden = false;
+  loadTagsManage().catch((e) => showErrorBanner(e.message));
 }
-function closeRulesModal() {
-  $("#rules-modal-mask").hidden = true;
+function closeTagsModal() {
+  $("#tags-modal-mask").hidden = true;
 }
-async function loadRulesView() {
-  try {
-    const [r, p] = await Promise.all([api("/api/rules"), api("/api/presets")]);
-    if (!r.ok) throw new Error(r.error || "获取规则失败");
-    if (!p.ok) throw new Error(p.error || "获取预设失败");
-    rulesList = r.rules;
-    presetsData = p.presets;
-    renderRulesList();
-  } catch (e) {
-    $("#rules-modal-body").innerHTML = `<div style="color:var(--danger);text-align:center;padding:24px 0">${esc(e.message)}</div>`;
-  }
+async function loadTagsManage() {
+  await loadTags();
+  renderTagsManage();
 }
-function presetNameOf(presetId) {
-  const p = (presetsData || []).find((x) => x.id === presetId);
-  return p ? p.name : presetId;
-}
-function showRulesBanner(message, type) {
-  $("#rules-modal-body").insertAdjacentHTML("afterbegin",
-    `<div id="rules-banner" class="${type}"><span>${esc(message)}</span><button class="banner-close">×</button></div>`);
-  const banner = $("#rules-banner");
-  banner.querySelector(".banner-close").addEventListener("click", () => banner.remove());
-  setTimeout(() => banner.remove(), 6000);
-}
-async function refreshAfterRuleChange() {
-  // 规则写操作成功 → 弹窗列表与总账户视图立即按新规则重查（设计 §5.5）
-  await loadRulesView();
-  if (currentSource === TOTAL) {
-    try { await Promise.all([loadRows(), loadSummary()]); }
-    catch (e) { showErrorBanner(e.message); }
-  }
-}
-async function saveRule(rule) {
-  const isEdit = rule.id != null;
-  const body = {
-    name: rule.name || "", source: rule.source, conditions: rule.conditions,
-    action: rule.action, enabled: rule.enabled,
-  };
-  const res = await api(isEdit ? `/api/rules/${rule.id}` : "/api/rules", {
-    method: isEdit ? "PUT" : "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) { alert(res.error || "保存失败"); return null; }
-  return res.rule;
-}
-
-/* ---- 规则列表 ---- */
-function renderRulesList() {
-  const groups = RULE_SOURCE_OPTIONS.map(([source]) => ({
-    source,
-    rules: (rulesList || []).filter((r) => r.source === source),
-  })).filter((g) => g.rules.length);
-  $("#rules-modal-body").innerHTML = `
-    <div class="rules-toolbar">
-      <button class="btn btn-primary" id="btn-rule-new">新建规则</button>
-      <button class="btn" id="btn-rule-import">从预设导入</button>
+function renderTagsManage() {
+  $("#tags-modal-body").innerHTML = `
+    <div class="tm-create">
+      <input id="tm-new-name" placeholder="新标签名">
+      <button class="btn btn-primary" id="tm-create">创建</button>
     </div>
-    ${groups.map(renderRuleGroup).join("") || '<div style="color:#C4C7CC;text-align:center;padding:24px 0">还没有规则，点击「新建规则」或「从预设导入」</div>'}`;
-  $("#btn-rule-new").addEventListener("click", () => openRuleForm(null));
-  $("#btn-rule-import").addEventListener("click", openPresetView);
-  bindRuleListEvents();
-}
-function renderRuleGroup(group) {
-  return `<div class="rule-group"><h4>${esc(SOURCE_LABELS[group.source])}</h4>${group.rules.map(renderRuleItem).join("")}</div>`;
-}
-function renderRuleItem(rule) {
-  const expanded = expandedRules.has(rule.id);
-  const hitText = rule.enabled ? `命中 ${rule.hit_count.toLocaleString()} 笔` : "未启用";
-  const presetTag = rule.preset_id ? '<span class="badge">来自预设</span>' : "";
-  const detail = expanded ? `<div class="rule-detail">
-    ${rule.conditions.map((c) => `<div class="cond-line">· ${esc(condLine(c))}</div>`).join("")}
-    ${rule.preset_id ? `<div class="cond-line">来源预设：${esc(presetNameOf(rule.preset_id))}</div>` : ""}
-  </div>` : "";
-  return `<div class="rule-item ${rule.enabled ? "" : "off"}" data-id="${rule.id}">
-    <div class="rule-head">
-      ${srcBadgeHtml(rule.source)}
-      <span class="rule-name">${esc(rule.name)}</span>${presetTag}
-      <span class="rule-hit">${hitText}</span>
-      <label class="switch" title="启用/停用"><input type="checkbox" ${rule.enabled ? "checked" : ""} data-act="toggle"><span class="slider"></span></label>
-      <span class="rule-ops">
-        <button data-act="expand">${expanded ? "收起" : "详情"}</button>
-        <button data-act="edit">编辑</button>
-        <button data-act="copy">复制</button>
-        <button data-act="delete" class="danger">删除</button>
-      </span>
-    </div>
-    <div class="rule-cond">${esc(conditionSummary(rule.conditions))}</div>
-    ${detail}
-  </div>`;
-}
-function bindRuleListEvents() {
-  document.querySelectorAll("#rules-modal-body .rule-item").forEach((item) => {
+    <div class="tm-list">${tagsCache.map(renderTagManageItem).join("") || '<div class="tm-empty">还没有标签，在上方输入名称创建</div>'}</div>`;
+  $("#tm-create").addEventListener("click", createTagFromManage);
+  $("#tm-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createTagFromManage(); });
+  document.querySelectorAll("#tags-modal-body .tm-item").forEach((item) => {
     const id = Number(item.dataset.id);
-    const rule = rulesList.find((r) => r.id === id);
-    item.querySelector('[data-act="toggle"]').addEventListener("change", async (e) => {
-      const saved = await saveRule({ ...rule, enabled: e.target.checked });  // 启停直接切换，不弹确认
-      if (!saved) { e.target.checked = !e.target.checked; return; }
-      await refreshAfterRuleChange();
+    const tag = tagsCache.find((t) => t.id === id);
+    item.querySelector('[data-act="rename"]').addEventListener("click", async () => {
+      const name = item.querySelector(".tm-name").value.trim();
+      if (!name) { alert("标签名不能为空"); return; }
+      const res = await api(`/api/tags/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) { alert(res.error || "改名失败"); return; }
+      await afterTagMutation();
     });
-    item.querySelector('[data-act="expand"]').addEventListener("click", () => {
-      expandedRules.has(id) ? expandedRules.delete(id) : expandedRules.add(id);
-      renderRulesList();
-    });
-    item.querySelector('[data-act="edit"]').addEventListener("click", () => openRuleForm(rule));
-    item.querySelector('[data-act="copy"]').addEventListener("click", () =>
-      openRuleForm({ ...rule, id: null, name: rule.name + "（副本）", enabled: true }));
     item.querySelector('[data-act="delete"]').addEventListener("click", async () => {
-      if (!confirm(`删除规则「${rule.name}」？删除后汇总口径立即变化。`)) return;
-      const res = await api(`/api/rules/${rule.id}`, { method: "DELETE" });
+      if (!confirm(`删除标签「${tag.name}」？仅解除标签，不影响账单。`)) return;
+      const res = await api(`/api/tags/${id}`, { method: "DELETE" });
       if (!res.ok) { alert(res.error || "删除失败"); return; }
-      await refreshAfterRuleChange();
+      await afterTagMutation();
     });
   });
 }
-
-/* ---- 新建 / 编辑表单 ---- */
-function openRuleForm(rule) {
-  editingRule = rule ? {
-    id: rule.id, name: rule.name, source: rule.source,
-    conditions: rule.conditions.map((c) => ({ ...c })),
-    action: "fold", enabled: rule.enabled,  // 编辑同样固定「忽略」，存量 hide 更新时归一化
-  } : {
-    id: null, name: "", source: "boc",
-    conditions: [{ field: FIELD_OPTIONS.boc[0][0], op: "eq", value: "" }],
-    action: "fold", enabled: true,  // 动作固定「忽略」（提交值 fold，设计 §4.2）
-  };
-  renderRuleForm();
-  scheduleHitPreview();
-}
-function syncCondHint(rowEl, op) {
-  // 操作符切换时即时增删「in」的值分隔提示，无需整表重渲染
-  const box = rowEl.querySelector(".cond-val");
-  let hint = box.querySelector(".hint");
-  if (op === "in") {
-    if (!hint) {
-      hint = document.createElement("div");
-      hint.className = "hint";
-      hint.textContent = "多个值用 | 分隔";
-      box.appendChild(hint);
-    }
-  } else if (hint) {
-    hint.remove();
-  }
-}
-function renderCondRow(c, i) {
-  const r = editingRule;
-  const fields = FIELD_OPTIONS[r.source].map(([v, l]) => `<option value="${v}" ${c.field === v ? "selected" : ""}>${l}</option>`).join("");
-  const ops = OP_OPTIONS.map(([v, l]) => `<option value="${v}" ${c.op === v ? "selected" : ""}>${l}</option>`).join("");
-  const hint = c.op === "in" ? '<div class="hint">多个值用 | 分隔</div>' : "";
-  return `<div class="cond-row" data-i="${i}">
-    <select class="field">${fields}</select>
-    <select class="op">${ops}</select>
-    <div class="cond-val"><input class="value" value="${esc(c.value)}" placeholder="条件值">${hint}</div>
-    <button class="btn cond-del" ${r.conditions.length <= 1 ? "disabled" : ""}>×</button>
+function renderTagManageItem(t) {
+  return `<div class="tm-item" data-id="${t.id}">
+    <span class="tag-dot" style="background:${esc(t.color)}"></span>
+    <input class="tm-name" value="${esc(t.name)}">
+    <span class="tm-count">${t.row_count.toLocaleString()} 条</span>
+    <button class="btn" data-act="rename">改名</button>
+    <button class="btn danger" data-act="delete">删除</button>
   </div>`;
 }
-function renderRuleForm() {
-  const r = editingRule;
-  const sourceOptions = RULE_SOURCE_OPTIONS.map(([v, l]) => `<option value="${v}" ${r.source === v ? "selected" : ""}>${l}</option>`).join("");
-  $("#rules-modal-body").innerHTML = `
-    <div class="rule-form">
-      <div class="f-row">
-        <span class="f-label">规则名称</span>
-        <input class="txt" id="f-name" placeholder="留空按条件自动生成" value="${esc(r.name)}" style="flex:1;min-width:220px">
-        <span class="f-label" style="min-width:auto">作用数据源</span>
-        <select class="sel" id="f-source">${sourceOptions}</select>
-      </div>
-      <div class="f-row"><span class="f-label">条件</span>
-        <div style="flex:1;display:flex;flex-direction:column;gap:8px" id="f-conds">${r.conditions.map(renderCondRow).join("")}</div>
-      </div>
-      <div class="f-row">
-        <span class="f-label"></span>
-        <button class="btn" id="f-add-cond" ${r.conditions.length >= MAX_CONDITIONS ? "disabled" : ""}>＋ 添加条件（AND）</button>
-        <span class="hint">单条规则内条件为 AND 关系；OR 场景请新建多条规则。条件最多 ${MAX_CONDITIONS} 条</span>
-      </div>
-      <div class="f-row">
-        <span class="f-label">命中处理</span>
-        <span class="hint">命中后移入忽略区（不计入真实收支）</span>
-        <span class="hit-preview" id="f-hit">—</span>
-      </div>
-      <div class="form-actions">
-        <button class="btn" id="f-cancel">取消</button>
-        <button class="btn btn-primary" id="f-save">保存</button>
-      </div>
-    </div>`;
-  $("#f-name").addEventListener("input", (e) => { r.name = e.target.value.trim(); });
-  $("#f-source").addEventListener("change", (e) => {
-    r.source = e.target.value;
-    const fields = FIELD_OPTIONS[r.source].map(([v]) => v);  // 字段白名单跟随数据源
-    r.conditions = r.conditions.map((c) => ({ ...c, field: fields.includes(c.field) ? c.field : fields[0] }));
-    renderRuleForm();
-    scheduleHitPreview();
-  });
-  $("#f-add-cond").addEventListener("click", () => {
-    r.conditions.push({ field: FIELD_OPTIONS[r.source][0][0], op: "contains", value: "" });
-    renderRuleForm();
-    scheduleHitPreview();
-  });
-  document.querySelectorAll("#f-conds .cond-row").forEach((rowEl) => {
-    const idx = Number(rowEl.dataset.i);
-    rowEl.querySelector("select.field").addEventListener("change", (e) => { r.conditions[idx].field = e.target.value; scheduleHitPreview(); });
-    rowEl.querySelector("select.op").addEventListener("change", (e) => {
-      r.conditions[idx].op = e.target.value;
-      syncCondHint(rowEl, e.target.value);  // 提示即时出现/消失
-      scheduleHitPreview();
-    });
-    rowEl.querySelector("input.value").addEventListener("input", (e) => { r.conditions[idx].value = e.target.value; scheduleHitPreview(); });
-    rowEl.querySelector(".cond-del").addEventListener("click", () => {
-      r.conditions.splice(idx, 1);
-      renderRuleForm();
-      scheduleHitPreview();
-    });
-  });
-  $("#f-cancel").addEventListener("click", () => loadRulesView());
-  $("#f-save").addEventListener("click", submitRuleForm);
-}
-function draftConditions() {
-  return editingRule.conditions.map((c) => ({ ...c, value: c.value.trim() }));
-}
-function conditionsComplete(conditions) {
-  return conditions.every((c) =>
-    c.value && (c.op !== "in" || c.value.split("|").some((v) => v.trim())));
-}
-const scheduleHitPreview = debounce(() => previewRuleHits(), 300);  // 实时命中预览（300ms 防抖）
-async function previewRuleHits() {
-  const el = $("#f-hit");
-  if (!el) return;
-  const conditions = draftConditions();
-  if (!conditionsComplete(conditions)) { el.textContent = "—"; return; }
-  try {
-    const res = await api("/api/rules/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source: editingRule.source, conditions }),
-    });
-    el.textContent = res.ok ? `预计命中 ${res.hit_count.toLocaleString()} 笔` : (res.error || "试算失败");
-  } catch (e) { el.textContent = "试算失败"; }
-}
-async function submitRuleForm() {
-  const r = editingRule;
-  const conditions = draftConditions();
-  if (!conditionsComplete(conditions)) { alert("请填写所有条件值"); return; }
-  const saved = await saveRule({
-    id: r.id, name: r.name, source: r.source, conditions,
-    action: r.action, enabled: r.enabled,
-  });
-  if (!saved) return;
-  closeRulesModal();  // 保存 → 关闭弹窗 → 视图立即按新规则重查
-  await refreshAfterRuleChange();
-}
-
-/* ---- 从预设导入 ---- */
-async function openPresetView() {
-  presetChecked = new Set();
-  presetExpanded = new Set();
-  placeholderValues = {};
-  try {
-    const res = await api("/api/presets");
-    if (!res.ok) { alert(res.error || "获取预设失败"); return; }
-    presetsData = res.presets;
-    renderPresetList();
-  } catch (e) { alert("网络错误：" + e.message); }
-}
-function placeholderFields() {
-  const keys = new Set();
-  for (const pid of presetChecked) {
-    const p = presetsData.find((x) => x.id === pid);
-    if (!p) continue;
-    for (const r of p.rules) {
-      for (const c of r.conditions) {
-        const matches = c.value.match(/\{[^{}]+\}/g);
-        if (matches) matches.forEach((k) => keys.add(k));
-      }
-    }
-  }
-  return [...keys];
-}
-function renderPresetList() {
-  const items = presetsData.map((p) => {
-    const checked = presetChecked.has(p.id);
-    const expanded = presetExpanded.has(p.id);
-    const hit = p.hit_count == null ? "填写占位符后统计" : `预计命中 ${p.hit_count.toLocaleString()} 笔`;
-    const rulesHtml = expanded ? `<div class="preset-rules">${p.rules.map((r) =>
-      `<div class="preset-rule">${srcBadgeHtml(r.source)}<span>${esc(r.name)}</span>
-       <span>${esc(conditionSummary(r.conditions))} · ${esc(ACTION_LABELS[r.action])}</span>
-       ${r.enabled ? "" : '<span class="badge">默认不启用</span>'}</div>`).join("")}</div>` : "";
-    return `<div class="preset-item" data-id="${p.id}">
-      <div class="preset-head">
-        <input type="checkbox" data-act="check" ${checked ? "checked" : ""}>
-        <span class="preset-name">${esc(p.name)}</span>
-        <span class="preset-meta">${p.rule_count} 条规则 · ${hit}</span>
-        <button class="btn" data-act="expand" style="padding:2px 8px;font-size:12px">${expanded ? "收起" : "查看规则"}</button>
-      </div>
-      <div class="preset-desc">${esc(p.description)}</div>
-      ${rulesHtml}
-    </div>`;
-  }).join("");
-  const placeholderInputs = placeholderFields().map((key) => `
-    <div class="f-row"><span class="f-label">${esc(key.slice(1, -1))}</span>
-      <input class="txt" data-ph="${esc(key)}" value="${esc((placeholderValues[key] || ""))}" placeholder="用于规则条件中的占位符 ${esc(key)}"></div>`).join("");
-  $("#rules-modal-body").innerHTML = `
-    <div class="rules-toolbar"><button class="btn" id="btn-preset-back">← 返回规则列表</button></div>
-    <div id="preset-list">${items}</div>
-    ${placeholderInputs ? `<div class="rule-group"><h4>占位符填写</h4>${placeholderInputs}</div>` : ""}
-    <div class="form-actions">
-      <button class="btn btn-primary" id="btn-preset-import" ${presetChecked.size ? "" : "disabled"}>导入所选预设</button>
-    </div>`;
-  $("#btn-preset-back").addEventListener("click", () => loadRulesView());
-  document.querySelectorAll("#preset-list .preset-item").forEach((item) => {
-    const pid = item.dataset.id;
-    item.querySelector('[data-act="check"]').addEventListener("change", (e) => {
-      e.target.checked ? presetChecked.add(pid) : presetChecked.delete(pid);
-      renderPresetList();  // 占位符填写区随勾选变化
-    });
-    item.querySelector('[data-act="expand"]').addEventListener("click", () => {
-      presetExpanded.has(pid) ? presetExpanded.delete(pid) : presetExpanded.add(pid);
-      renderPresetList();
-    });
-  });
-  document.querySelectorAll("#rules-modal-body input[data-ph]").forEach((el) =>
-    el.addEventListener("input", (e) => { placeholderValues[e.target.dataset.ph] = e.target.value; }));
-  $("#btn-preset-import").addEventListener("click", submitPresetImport);
-}
-async function submitPresetImport() {
-  const keys = placeholderFields();
-  const replacements = {};
-  for (const key of keys) {
-    const value = (placeholderValues[key] || "").trim();
-    if (!value) { alert(`请填写占位符「${key}」对应的内容`); return; }
-    replacements[key.slice(1, -1)] = value;
-  }
-  const res = await api("/api/rules/import", {
+async function createTagFromManage() {
+  const input = $("#tm-new-name");
+  const name = input.value.trim();
+  if (!name) { alert("标签名不能为空"); return; }
+  const res = await api("/api/tags", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ preset_ids: [...presetChecked], replacements }),
+    body: JSON.stringify({ name }),
   });
-  if (!res.ok) { alert(res.error || "导入失败"); return; }
-  const skipped = res.skipped || [];
-  const message = `已导入 ${res.created.length} 条规则，生成可编辑副本`
-    + (skipped.length ? `，跳过 ${skipped.length} 条（同名同条件已存在）` : "");
-  await refreshAfterRuleChange();
-  showRulesBanner(message, skipped.length ? "warn" : "success");
+  if (!res.ok) { alert(res.error || "创建失败"); return; }
+  input.value = "";
+  await afterTagMutation();
+}
+async function afterTagMutation() {
+  // 标签变更后：弹窗列表 / 侧栏标签区块 / 当前视图（标签列与筛选）同步刷新
+  await loadTags();
+  pruneTagFilter();
+  renderTagsManage();
+  renderSidebar();
+  if (currentSource === TOTAL) await refreshRowsAndSummary();
+}
+
+/* ---- 打标签弹层（批量栏「打标签…」与行内「+」共用） ---- */
+let tagPickScope = null;      // 当前打标签作用范围（ids / filter scope）
+let tagPickChecked = new Set();
+async function openTagPick(scope) {
+  tagPickScope = scope;
+  tagPickChecked = new Set();
+  try { await loadTags(); } catch (e) { showErrorBanner(e.message); return; }
+  renderTagPick();
+  $("#tagpick-modal-mask").hidden = false;
+  $("#tagpick-count").textContent = scope.scope === "filter" ? "（整个筛选结果）" : `（${scope.ids.length} 条）`;
+}
+function closeTagPick() {
+  $("#tagpick-modal-mask").hidden = true;
+  tagPickScope = null;
+}
+function renderTagPick() {
+  $("#tagpick-modal-body").innerHTML = `
+    <div class="tp-list">${tagsCache.map((t) =>
+      `<label class="tp-item"><input type="checkbox" value="${t.id}" ${tagPickChecked.has(t.id) ? "checked" : ""}>
+       <span class="tag-dot" style="background:${esc(t.color)}"></span> ${esc(t.name)}</label>`).join("")
+      || '<div class="tm-empty">还没有标签，在下方新建后自动勾选</div>'}</div>
+    <div class="tp-create">
+      <input id="tp-new-name" placeholder="新标签名（创建后自动勾选）">
+      <button class="btn" id="tp-create">＋ 新建</button>
+    </div>
+    <div class="form-actions">
+      <button class="btn" id="tp-cancel">取消</button>
+      <button class="btn btn-primary" id="tp-apply" ${tagPickChecked.size ? "" : "disabled"}>应用（增量追加）</button>
+    </div>`;
+  document.querySelectorAll("#tagpick-modal-body .tp-item input").forEach((cb) =>
+    cb.addEventListener("change", () => {
+      cb.checked ? tagPickChecked.add(Number(cb.value)) : tagPickChecked.delete(Number(cb.value));
+      renderTagPick();
+    }));
+  $("#tp-cancel").addEventListener("click", closeTagPick);
+  $("#tp-apply").addEventListener("click", submitTagPick);
+  $("#tp-create").addEventListener("click", createTagFromPick);
+  $("#tp-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createTagFromPick(); });
+}
+async function createTagFromPick() {
+  const input = $("#tp-new-name");
+  const name = input.value.trim();
+  if (!name) { alert("标签名不能为空"); return; }
+  const res = await api("/api/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) { alert(res.error || "创建失败"); return; }
+  await loadTags();
+  tagPickChecked.add(res.tag.id);
+  renderTagPick();
+  renderSidebar();  // 侧栏标签区块同步
+}
+async function submitTagPick() {
+  const res = await api("/api/tags/apply", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...tagPickScope, action: "add", group_ids: [...tagPickChecked] }),
+  });
+  if (!res.ok) { showErrorBanner(res.error || "打标签失败"); return; }
+  addBanner("success", `已为 ${res.updated.toLocaleString()} 条打标签`, null);
+  closeTagPick();
+  await loadTags();
+  await refreshRowsAndSummary();
 }
 
 /* ================= 导入流程 ================= */
@@ -2055,21 +1810,21 @@ $("#btn-import-empty").addEventListener("click", openModal);
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
 $("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
-$("#btn-rules").addEventListener("click", openRulesModal);
-$("#btn-rules-close").addEventListener("click", closeRulesModal);
-$("#rules-modal-mask").addEventListener("click", (e) => { if (e.target.id === "rules-modal-mask") closeRulesModal(); });
+$("#btn-tags-manage").addEventListener("click", openTagsModal);
+$("#btn-tags-modal-close").addEventListener("click", closeTagsModal);
+$("#tags-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tags-modal-mask") closeTagsModal(); });
+$("#btn-tagpick-close").addEventListener("click", closeTagPick);
+$("#tagpick-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tagpick-modal-mask") closeTagPick(); });
 $("#btn-collapse").addEventListener("click", () => $("#layout").classList.toggle("sidebar-collapsed"));
 $("#btn-reset").addEventListener("click", resetFilters);
 $("#search").addEventListener("input", debounce((e) => {
   filtersBySource[currentSource].q = e.target.value.trim();
   pageBySource[currentSource] = 1;
-  resetTotalPages();
   loadRows().then(loadSummary).catch((err) => showErrorBanner(err.message));
 }, 300));
 $("#pagesize").addEventListener("change", (e) => {
   pageSizeBySource[currentSource] = Number(e.target.value);
   pageBySource[currentSource] = 1;
-  resetTotalPages();
   loadRows();
 });
 $("#date-from").addEventListener("change", (e) => { filtersBySource[currentSource].date_from = e.target.value; onFilterChange(); });
