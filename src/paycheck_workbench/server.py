@@ -277,7 +277,7 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _api_options(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
         if source == TOTAL_SOURCE:
             self._send(200, {
@@ -344,7 +344,7 @@ class Handler(BaseHTTPRequestHandler):
         return {v for v in raw.split(",") if v in ("0", "1")}
 
     def _api_rows(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
         if source == TOTAL_SOURCE:
             filters = self._filter_params(query)
@@ -381,7 +381,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, **result})
 
     def _api_summary(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
         if source == TOTAL_SOURCE:
             filters = self._filter_params(query)

@@ -226,6 +226,19 @@ class TestTotalApi:
         not_counted_param_absent = _get(base_url + "/api/rows?source=total")
         assert not_counted_param_absent["total"] == 4
 
+    def test_rows_total_counted_empty_matches_nothing(self, base_url):
+        """属性两档全不勾（counted= 空值参数）→ 匹配 0 行（TCY-28 复验 D1 回归）。"""
+        _seed_boc(base_url)
+        _seed_alipay(base_url)
+        rows = _get(base_url + "/api/rows?source=total&counted=")
+        assert rows["total"] == 0
+        assert rows["rows"] == []
+        summary = _get(base_url + "/api/summary?source=total&counted=")
+        assert summary["income"] == {"count": 0, "sum": 0.0}
+        assert summary["expense"] == {"count": 0, "sum": 0.0}
+        assert summary["count"] == 0
+        assert summary["not_counted"] == 0
+
     def test_summary_total_counted_scope(self, base_url):
         _seed_boc(base_url)
         _seed_alipay(base_url)
