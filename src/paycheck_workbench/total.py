@@ -1,13 +1,12 @@
-"""总账户虚拟源：三源统一字段映射、筛选、内部转账规则求值与三区划分（TCY-15/TCY-18）
+"""总账户虚拟源：三源统一字段映射、筛选、忽略规则求值与两区划分（TCY-15/TCY-24）
 
-规则仅在查询时求值（不落库打标）：本地库数千行级，全量取回后在内存中完成
-统一映射 → 筛选 → 启用规则匹配 → 三区划分 → 分区排序 → 分页，避免多表 UNION
-下复杂 SQL 与打标数据过期的一致性问题。
+规则与配对仅在查询时计算（不落库打标）：本地库数千行级，全量取回后在内存中完成
+统一映射 → 启用规则求值 → 同日同金额配对 → 两区划分 → 筛选 → 分区排序 → 分页，
+避免多表 UNION 下复杂 SQL 与打标数据过期的一致性问题。
 
-三区口径（TCY-20 设计 §2）：
-  未命中任何启用规则，方向=收入 → 真实收入
-  未命中任何启用规则，方向=支出 → 真实支出
-  命中启用规则（fold/hide）或未命中的不计收支行 → 内部流动
+两区口径（TCY-23 设计 §2）：
+  未被配对、未命中启用规则，方向=收入/支出 → 真实收支
+  配对成功的银行侧渠道行 / 命中启用忽略规则 / 未命中的不计收支行 → 忽略区
 """
 
 from __future__ import annotations
@@ -25,29 +24,32 @@ from paycheck_workbench.sources import (
 
 _TOTAL_SORT_KEYS = {"datetime", "amount", "counterparty"}
 
-# 通道对映射（TCY-20 设计 §3.1）：内置预设规则名 → 通道对（服务器常量，随预设维护）。
-# 自定义规则自成一个通道对（名 = 规则名）；未命中规则的不计收支行按来源归组。
-FLOW_PAIRS: Dict[str, str] = {
-    "余额宝-转入转出": "支付宝 ↔ BOC",
-    "支付宝余额-提现": "支付宝 ↔ BOC",
-    "支付宝小荷包": "支付宝 ↔ BOC",
-    "银行卡快捷支付-渠道行（支付宝）": "支付宝 ↔ BOC",
-    "银行卡渠道退款（支付宝）": "支付宝 ↔ BOC",
-    "平台提现入账": "支付宝 ↔ BOC",
-    "基金/平台入账（蚂蚁）": "支付宝 ↔ BOC",
-    "基金/平台入账（支付宝）": "支付宝 ↔ BOC",
-    "零钱通-转入转出": "微信 ↔ BOC",
-    "微信零钱-充值提现": "微信 ↔ BOC",
-    "银行卡快捷支付-渠道行（财付通）": "微信 ↔ BOC",
-    "银行卡渠道退款（财付通）": "微信 ↔ BOC",
-    "基金/平台入账（财付通）": "微信 ↔ BOC",
-    "花呗还款-支付宝侧": "花呗",
-    "花呗还款-银行侧": "花呗",
-    "同名账户互转": "同名账户",
+# 银行渠道行候选（设计 §3.2）：BOC 中 tx_name 为「网上快捷支付 / 网上快捷退款」的行
+_MIRROR_TX_NAMES = ("网上快捷支付", "网上快捷退款")
+
+# 划转路径对端（设计 §4.1）：内置预设规则名 → 对端展示名；服务器常量，随预设维护，不落库。
+# 「@counterparty」表示对端按行对方前缀推断（支付宝 / 财付通）。
+TRANSFER_PATHS: Dict[str, str] = {
+    "余额宝-转入转出": "银行卡（余额宝）",
+    "零钱通-转入转出": "银行卡（零钱通）",
+    "微信零钱-充值提现": "银行卡（零钱）",
+    "支付宝余额-提现": "银行卡（余额）",
+    "花呗还款-支付宝侧": "花呗（还款）",
+    "花呗还款-银行侧": "支付宝（花呗还款）",
+    "支付宝小荷包": "小荷包",
+    "平台提现入账": "@counterparty",
+    "基金/平台入账（蚂蚁）": "支付宝",
+    "基金/平台入账（支付宝）": "支付宝",
+    "基金/平台入账（财付通）": "微信",
+    "同名账户互转": "本人其他账户",
 }
 
-# 跨区引用提示的平台名（设计 §3.2）：渠道重复组的真身在真实支出区
-PAIR_PLATFORMS = {"支付宝 ↔ BOC": "支付宝", "微信 ↔ BOC": "微信"}
+# 划转标注中的本端名（设计 §4.1）：行来源 → 展示名（BOC 显示为「银行卡」）
+TRANSFER_SELF: Dict[str, str] = {
+    SOURCE_BOC: "银行卡",
+    SOURCE_ALIPAY: "支付宝",
+    SOURCE_WECHAT: "微信",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -179,22 +181,27 @@ def apply_rules(conn, rows: List[dict], rules: List[dict]) -> None:
                     row["_hits"].append(rule)
 
 
-def _zone_of(row: dict) -> str:
-    """三区划分（TCY-20 设计 §2）：命中规则或不计收支未命中 → flow，其余按方向进真实区。"""
+def _zone_of(row: dict, mirrored: Dict[int, str]) -> str:
+    """两区划分（设计 §2）：镜像 / 命中启用规则 / 不计收支等未命中行 → 忽略区，
+    其余按方向进真实收支区。"""
+    if row["_id"] in mirrored or row["_hits"]:
+        return "ignore"
+    if row["direction"] in ("收入", "支出"):
+        return "real"
+    return "ignore"  # 不计收支（含微信中性交易映射）等未命中行，不污染真实收支
+
+
+def _mark_of(row: dict, mirrored: Dict[int, str]) -> dict:
+    """忽略区行标注（设计 §2，优先级：镜像 > 划转路径 > 不计收支）。"""
+    platform = mirrored.get(row["_id"])
+    if platform:
+        label = "支付宝" if platform == SOURCE_ALIPAY else "微信"
+        return {"mark": "mirror", "mark_label": f"镜像·{label}"}
     if row["_hits"]:
-        return "flow"
-    if row["direction"] == "收入":
-        return "income"
-    if row["direction"] == "支出":
-        return "expense"
-    return "flow"  # 不计收支（含微信中性交易映射）等未命中行，不污染真实收支
-
-
-def _mark_of(row: dict) -> dict:
-    """内部流动行标记（存储值不变，仅含义重新表述）：hide→重复记录、fold→内部流动。"""
-    names = [h["name"] for h in row["_hits"]]
-    label = "duplicate" if any(h["action"] == "hide" for h in row["_hits"]) else "flow"
-    return {"mark": label, "rule_names": names}
+        names = [h["name"] for h in row["_hits"]]
+        path = _transfer_path(row)
+        return {"mark": "path", "mark_label": path or f"忽略（{names[0]}）", "rule_names": names}
+    return {"mark": "neutral", "mark_label": "不计收支"}
 
 
 def _amount(row: dict) -> float:
@@ -223,84 +230,106 @@ def sort_rows(rows: List[dict], sort: str, order: str) -> None:
 
 
 def _public(row: dict) -> dict:
-    return {k: v for k, v in row.items() if k not in ("_id", "_hits")}
+    return {k: v for k, v in row.items() if k not in ("_id", "_hits", "_zone", "_mark")}
 
 
-def _flow_public(row: dict) -> dict:
-    """内部流动行对外字段：统一字段 + 标记与命中规则名。"""
+def _ignore_public(row: dict) -> dict:
+    """忽略区行对外字段：统一字段 + 标注（镜像 / 划转路径 / 不计收支）。"""
     public = _public(row)
-    public.update(_mark_of(row))
+    public.update(row["_mark"])
     return public
 
 
-def _pair_of(row: dict) -> str:
-    """行所属通道对：优先取命中规则的内置映射，其次自定义规则名，未命中按来源归组。"""
-    names = [h["name"] for h in row["_hits"]]
-    for name in names:
-        if name in FLOW_PAIRS:
-            return FLOW_PAIRS[name]
-    if names:
-        return names[0]  # 自定义规则自成一个通道对（名 = 规则名）
-    return SOURCE_CONFIGS[row["source"]].label
+def pair_mirrors(rows: List[dict]) -> Dict[int, str]:
+    """同日同渠道同金额逐笔配对（设计 §3.2，独立算法，默认开启、无开关）。
 
-
-def _pick_main(rows_desc: List[dict]) -> dict:
-    """组主记录（设计 §3.2）：组内方向=收入的最新一行 → 支出最新 → 时间最新。"""
-    for row in rows_desc:
-        if row["direction"] == "收入":
-            return row
-    for row in rows_desc:
-        if row["direction"] == "支出":
-            return row
-    return rows_desc[0]
-
-
-def _group_flows(rows: List[dict]) -> List[dict]:
-    """内部流动行按「通道对 × 日期」分组（聚合级，不逐笔配对），组按主记录时间倒序。"""
-    buckets: Dict[Tuple[str, str], List[dict]] = {}
-    for row in rows:
-        buckets.setdefault((_pair_of(row), row["date"]), []).append(row)
-    groups: List[dict] = []
-    for (pair, date), members in buckets.items():
-        desc = sorted(members, key=lambda r: r["time"] or "", reverse=True)
-        main = _pick_main(desc)
-        others = [r for r in desc if r is not main]
-        others.sort(key=lambda r: r["time"] or "")  # 成员时间正序
-        has_dup = any(_mark_of(r)["mark"] == "duplicate" for r in members)
-        has_platform = any(r["source"] in (SOURCE_ALIPAY, SOURCE_WECHAT) for r in members)
-        platform = PAIR_PLATFORMS.get(pair, "")
-        main_public = _flow_public(main)
-        main_public["member_count"] = len(others)
-        groups.append({
-            "key": f"{pair}|{date}",
-            "pair": pair,
-            "date": date,
-            "main": main_public,
-            "members": [_flow_public(r) for r in others],
-            # 渠道重复行的真身在真实支出区：组内只有银行侧行时提示跨区引用（设计 §3.2）
-            "cross_ref": bool(has_dup and not has_platform and platform),
-            "platform": platform,
-        })
-    groups.sort(key=lambda g: g["main"]["time"] or "", reverse=True)
-    return groups
-
-
-def _zone_rows(conn, selected, **filters) -> Tuple[List[dict], List[dict], List[dict]]:
-    """取回所选源并返回三区行列表（income, expense, flow）。
-
-    真实区应用收/支筛选；流动区不按方向筛选（TCY-20 设计 §3.4），筛选后重新
-    分组与主记录递补由分组层处理。
+    候选 = BOC 中 tx_name 为「网上快捷支付 / 网上快捷退款」的渠道行；平台侧 = 全部
+    支付宝 / 微信行（不限方向）。渠道按 BOC 行 counterparty 前缀判定（「支付宝」→
+    支付宝、「财付通」→ 微信，其余无渠道分组、不参与）。按（日期 × 渠道）分组，
+    组内同金额按时间升序一对一配对（金额唯一时即直接配对）。
+    返回 {银行行 _id: 平台来源}：银行行进忽略区标镜像，平台行不动（主记录）。
     """
-    base = fetch_rows(conn, selected)
+    banks: List[Tuple[dict, str]] = []
+    for row in rows:
+        if row["source"] == SOURCE_BOC and row["raw"].get("tx_name", "") in _MIRROR_TX_NAMES:
+            counterparty = row["counterparty"] or ""
+            channel = None
+            if counterparty.startswith("支付宝"):
+                channel = SOURCE_ALIPAY
+            elif counterparty.startswith("财付通"):
+                channel = SOURCE_WECHAT
+            if channel:
+                banks.append((row, channel))
+    bank_buckets: Dict[Tuple[str, str], List[dict]] = {}
+    for row, channel in banks:
+        bank_buckets.setdefault((row["date"], channel), []).append(row)
+    platform_buckets: Dict[Tuple[str, str], List[dict]] = {}
+    for row in rows:
+        if row["source"] in (SOURCE_ALIPAY, SOURCE_WECHAT):
+            platform_buckets.setdefault((row["date"], row["source"]), []).append(row)
+    mirrored: Dict[int, str] = {}
+    for (_date, channel), bank_rows in bank_buckets.items():
+        platform_rows = platform_buckets.get((_date, channel), [])
+        if not platform_rows:
+            continue
+        bank_rows.sort(key=lambda r: r["time"] or "")
+        platform_rows.sort(key=lambda r: r["time"] or "")
+        plats_by_amount: Dict[float, List[dict]] = {}
+        for p in platform_rows:
+            plats_by_amount.setdefault(abs(_amount(p)), []).append(p)
+        for bank in bank_rows:
+            queue = plats_by_amount.get(abs(_amount(bank)))
+            if not queue:
+                continue  # 金额对不上 → 未配对（按 DP2 留真实收支区）
+            platform = queue.pop(0)  # 时间升序一一对应
+            mirrored[bank["_id"]] = platform["source"]
+    return mirrored
+
+
+def _transfer_path(row: dict) -> str:
+    """内置规则命中行的划转路径标注（设计 §4.1）：「对端 + 行方向 + 行来源」组合。
+
+    收入 = 对端 → 本端；支出 = 本端 → 对端；其余（不计收支）= 本端 ↔ 对端。
+    规则名不在 TRANSFER_PATHS（自定义规则）时返回空串（标注「忽略（规则名）」）。
+    """
+    name = next((h["name"] for h in row["_hits"] if h["name"] in TRANSFER_PATHS), None)
+    if name is None:
+        return ""
+    peer = TRANSFER_PATHS[name]
+    if peer == "@counterparty":
+        counterparty = row["counterparty"] or ""
+        if counterparty.startswith("支付宝"):
+            peer = "支付宝"
+        elif counterparty.startswith("财付通"):
+            peer = "微信"
+        else:
+            peer = "支付平台"
+    self_name = TRANSFER_SELF[row["source"]]
+    if row["direction"] == "收入":
+        return f"{peer} → {self_name}"
+    if row["direction"] == "支出":
+        return f"{self_name} → {peer}"
+    return f"{self_name} ↔ {peer}"
+
+
+def _zone_rows(conn, selected, **filters) -> Tuple[List[dict], List[dict]]:
+    """取回三源并返回两区行列表（real, ignore）。
+
+    配对与分区身份在全量数据上计算（设计 §3.1）：筛选（含来源多选）只决定显示，
+    边界行身份不随筛选变化。收/支筛选统一作用于两区（忽略区按行方向过滤）。
+    """
+    base = fetch_rows(conn, SOURCES)
     rules = [r for r in db.list_rules(conn) if r["enabled"]]
     apply_rules(conn, base, rules)
-    real = filter_rows(base, **filters)
-    flow_filters = {**filters, "directions": None}
-    flow = filter_rows(base, **flow_filters)
-    income = [r for r in real if _zone_of(r) == "income"]
-    expense = [r for r in real if _zone_of(r) == "expense"]
-    flow_rows = [r for r in flow if _zone_of(r) == "flow"]
-    return income, expense, flow_rows
+    mirrored = pair_mirrors(base)
+    for row in base:
+        row["_zone"] = _zone_of(row, mirrored)
+        row["_mark"] = _mark_of(row, mirrored)
+    visible = [r for r in base if r["source"] in selected]
+    visible = filter_rows(visible, **filters)
+    real = [r for r in visible if r["_zone"] == "real"]
+    ignore = [r for r in visible if r["_zone"] == "ignore"]
+    return real, ignore
 
 
 def query_rows(
@@ -315,48 +344,35 @@ def query_rows(
     amount_max: Optional[float] = None,
     sort: str = "datetime",
     order: str = "desc",
-    income_page: int = 1,
-    expense_page: int = 1,
-    flow_page: int = 1,
+    real_page: int = 1,
+    ignore_page: int = 1,
     page_size: int = db._DEFAULT_PAGE_SIZE,
 ) -> dict:
-    """总账户明细查询：统一映射 + 筛选 + 启用规则求值 → 三区结构 + 各区独立分页。
-
-    真实收入/真实支出区沿用排序与按行分页；内部流动区固定按组主记录时间倒序、
-    按组数分页（TCY-20 设计 §3.3）。
-    """
+    """总账户明细查询：统一映射 + 规则求值 + 配对 → 两区结构 + 各区独立按行分页。"""
     if page_size not in db._PAGE_SIZES:
         page_size = db._DEFAULT_PAGE_SIZE
     if sort not in _TOTAL_SORT_KEYS:
         sort = "datetime"
     selected = [s for s in (sources if sources is not None else SOURCES) if s in SOURCE_CONFIGS]
-    income, expense, flow_rows = _zone_rows(
+    real, ignore = _zone_rows(
         conn, selected,
         q=q, date_from=date_from, date_to=date_to, directions=directions,
         amount_min=amount_min, amount_max=amount_max,
     )
-    sort_rows(income, sort, order)
-    sort_rows(expense, sort, order)
+    sort_rows(real, sort, order)
+    sort_rows(ignore, sort, order)
 
-    def page_of(rows: List[dict], page: int) -> dict:
+    def page_of(rows: List[dict], page: int, public) -> dict:
         page = max(page, 1)
         offset = (page - 1) * page_size
         return {
             "total": len(rows), "page": page, "page_size": page_size,
-            "rows": [_public(r) for r in rows[offset : offset + page_size]],
+            "rows": [public(r) for r in rows[offset : offset + page_size]],
         }
 
-    groups = _group_flows(flow_rows)
-    flow_page = max(flow_page, 1)
-    flow_offset = (flow_page - 1) * page_size
     return {
-        "income": page_of(income, income_page),
-        "expense": page_of(expense, expense_page),
-        "flow": {
-            "total": len(groups), "page": flow_page, "page_size": page_size,
-            "row_total": len(flow_rows),
-            "groups": groups[flow_offset : flow_offset + page_size],
-        },
+        "real": page_of(real, real_page, _public),
+        "ignore": page_of(ignore, ignore_page, _ignore_public),
     }
 
 
@@ -371,10 +387,10 @@ def query_summary(
     amount_min: Optional[float] = None,
     amount_max: Optional[float] = None,
 ) -> dict:
-    """总账户汇总（真实口径，TCY-20 设计 §1）：真实收入 / 真实支出 / 净收支 / 真实笔数，
-    另返回内部流动的组数与行数（不计入真实收支），取代旧的 counted/transfer/hidden 三口径。"""
+    """总账户汇总（真实口径，设计 §2.3）：真实收入 / 真实支出 / 净收支 / 真实笔数，
+    忽略区返回笔数与细分（镜像 / 划转 / 不计收支，不计入真实收支）。"""
     selected = [s for s in (sources if sources is not None else SOURCES) if s in SOURCE_CONFIGS]
-    income, expense, flow_rows = _zone_rows(
+    real, ignore = _zone_rows(
         conn, selected,
         q=q, date_from=date_from, date_to=date_to, directions=directions,
         amount_min=amount_min, amount_max=amount_max,
@@ -383,11 +399,19 @@ def query_summary(
     def agg(rows: List[dict]) -> dict:
         return {"count": len(rows), "sum": round(sum(_amount(r) for r in rows), 2)}
 
+    income = [r for r in real if r["direction"] == "收入"]
+    expense = [r for r in real if r["direction"] == "支出"]
     income_agg, expense_agg = agg(income), agg(expense)
+    marks = [r["_mark"]["mark"] for r in ignore]
     return {
         "income": income_agg,
         "expense": expense_agg,
         "net": round(income_agg["sum"] - expense_agg["sum"], 2),
         "count": income_agg["count"] + expense_agg["count"],
-        "flow": {"groups": len(_group_flows(flow_rows)), "rows": len(flow_rows)},
+        "ignore": {
+            "count": len(ignore),
+            "mirror": marks.count("mirror"),
+            "transfer": marks.count("path"),
+            "neutral": marks.count("neutral"),
+        },
     }
