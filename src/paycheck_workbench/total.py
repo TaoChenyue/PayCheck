@@ -181,19 +181,19 @@ def apply_rules(conn, rows: List[dict], rules: List[dict]) -> None:
                     row["_hits"].append(rule)
 
 
-def _zone_of(row: dict, mirrored: Dict[int, str]) -> str:
+def _zone_of(row: dict, mirrored: Dict[str, str]) -> str:
     """两区划分（设计 §2）：镜像 / 命中启用规则 / 不计收支等未命中行 → 忽略区，
     其余按方向进真实收支区。"""
-    if row["_id"] in mirrored or row["_hits"]:
+    if row["id"] in mirrored or row["_hits"]:
         return "ignore"
     if row["direction"] in ("收入", "支出"):
         return "real"
     return "ignore"  # 不计收支（含微信中性交易映射）等未命中行，不污染真实收支
 
 
-def _mark_of(row: dict, mirrored: Dict[int, str]) -> dict:
+def _mark_of(row: dict, mirrored: Dict[str, str]) -> dict:
     """忽略区行标注（设计 §2，优先级：镜像 > 划转路径 > 不计收支）。"""
-    platform = mirrored.get(row["_id"])
+    platform = mirrored.get(row["id"])
     if platform:
         label = "支付宝" if platform == SOURCE_ALIPAY else "微信"
         return {"mark": "mirror", "mark_label": f"镜像·{label}"}
@@ -240,14 +240,14 @@ def _ignore_public(row: dict) -> dict:
     return public
 
 
-def pair_mirrors(rows: List[dict]) -> Dict[int, str]:
+def pair_mirrors(rows: List[dict]) -> Dict[str, str]:
     """同日同渠道同金额逐笔配对（设计 §3.2，独立算法，默认开启、无开关）。
 
     候选 = BOC 中 tx_name 为「网上快捷支付 / 网上快捷退款」的渠道行；平台侧 = 全部
     支付宝 / 微信行（不限方向）。渠道按 BOC 行 counterparty 前缀判定（「支付宝」→
     支付宝、「财付通」→ 微信，其余无渠道分组、不参与）。按（日期 × 渠道）分组，
     组内同金额按时间升序一对一配对（金额唯一时即直接配对）。
-    返回 {银行行 _id: 平台来源}：银行行进忽略区标镜像，平台行不动（主记录）。
+    返回 {银行行统一 id: 平台来源}：银行行进忽略区标镜像，平台行不动（主记录）。
     """
     banks: List[Tuple[dict, str]] = []
     for row in rows:
@@ -267,7 +267,7 @@ def pair_mirrors(rows: List[dict]) -> Dict[int, str]:
     for row in rows:
         if row["source"] in (SOURCE_ALIPAY, SOURCE_WECHAT):
             platform_buckets.setdefault((row["date"], row["source"]), []).append(row)
-    mirrored: Dict[int, str] = {}
+    mirrored: Dict[str, str] = {}
     for (_date, channel), bank_rows in bank_buckets.items():
         platform_rows = platform_buckets.get((_date, channel), [])
         if not platform_rows:
@@ -282,7 +282,7 @@ def pair_mirrors(rows: List[dict]) -> Dict[int, str]:
             if not queue:
                 continue  # 金额对不上 → 未配对（按 DP2 留真实收支区）
             platform = queue.pop(0)  # 时间升序一一对应
-            mirrored[bank["_id"]] = platform["source"]
+            mirrored[bank["id"]] = platform["source"]
     return mirrored
 
 
