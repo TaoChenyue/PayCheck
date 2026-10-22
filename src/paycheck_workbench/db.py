@@ -1,26 +1,28 @@
-"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总、忽略规则
+"""SQLite 存储层：三源明细表、去重导入、筛选查询、汇总、收支覆盖与标签组
 
-表结构（设计 3.4）：
+表结构（设计 3.4 / TCY-27 设计 v2）：
   <source>_transactions
     id            INTEGER PRIMARY KEY AUTOINCREMENT
     ...源明细列全部保留原样（TEXT）...
     source_file   TEXT
     imported_at   TEXT
     dedup_key     TEXT UNIQUE   -- 去重键（设计 4.3）
-  transfer_rules（忽略规则，设计 3.5）
-    id / name / source / conditions(JSON) / action / enabled / preset_id / created_at / updated_at
+  total_overrides（收支属性覆盖，稀疏：只存用户动过的行）
+    source + row_id 联合主键 / counted / updated_at
+  tag_groups（标签组：名称唯一 + 自动 8 色循环）
+    id / name / color / created_at
+  row_tags（行 ↔ 标签组多对多）
+    group_id + source + row_id 联合主键 / created_at
 """
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from paycheck_workbench.parsing import ParseResult
-from paycheck_workbench.rules import REMOVED_PRESET_IDS, conditions_sql, rule_key
 from paycheck_workbench.sources import (
     SORT_COLUMNS,
     SOURCE_CONFIGS,
@@ -62,36 +64,51 @@ def _create_table(conn: sqlite3.Connection, cfg: SourceConfig) -> None:
     conn.commit()
 
 
-def _create_rules_table(conn: sqlite3.Connection) -> None:
-    """忽略规则表（设计 3.5），幂等。"""
+def _create_overrides_table(conn: sqlite3.Connection) -> None:
+    """收支属性覆盖旁表（TCY-27 设计 v2 §2），幂等。只存用户动过的行。"""
     conn.execute(
         """
-        CREATE TABLE IF NOT EXISTS transfer_rules (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
+        CREATE TABLE IF NOT EXISTS total_overrides (
             source TEXT NOT NULL,
-            conditions TEXT NOT NULL,
-            action TEXT NOT NULL DEFAULT 'fold',
-            enabled INTEGER NOT NULL DEFAULT 1,
-            preset_id TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            row_id INTEGER NOT NULL,
+            counted INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (source, row_id)
         )
         """
     )
     conn.commit()
 
 
-def _retire_removed_presets(conn: sqlite3.Connection) -> None:
-    """升级迁移：按 preset_id 停用已移除预设（P7/P8）导入的规则实例（设计 §3.4）。
-
-    保留在规则列表可见、可删，但不参与求值（渠道重复识别已由配对算法接管）。
-    幂等：重复执行只会再次写入 enabled=0。
-    """
+def _create_tag_tables(conn: sqlite3.Connection) -> None:
+    """标签组与行标签表（TCY-27 设计 v2 §4），幂等。"""
     conn.execute(
-        "UPDATE transfer_rules SET enabled = 0 WHERE preset_id IN (?, ?)",
-        [*REMOVED_PRESET_IDS],
+        """
+        CREATE TABLE IF NOT EXISTS tag_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS row_tags (
+            group_id INTEGER NOT NULL,
+            source TEXT NOT NULL,
+            row_id INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (group_id, source, row_id)
+        )
+        """
+    )
+    conn.commit()
+
+
+def _drop_transfer_rules(conn: sqlite3.Connection) -> None:
+    """升级迁移：规则体系整体废弃（TCY-27），旧规则实例一并删除。幂等。"""
+    conn.execute("DROP TABLE IF EXISTS transfer_rules")
     conn.commit()
 
 
@@ -101,8 +118,9 @@ def init_db(db_path) -> None:
     with connect(db_path) as conn:
         for source in SOURCES:
             _create_table(conn, SOURCE_CONFIGS[source])
-        _create_rules_table(conn)
-        _retire_removed_presets(conn)
+        _create_overrides_table(conn)
+        _create_tag_tables(conn)
+        _drop_transfer_rules(conn)
 
 
 def source_counts(conn: sqlite3.Connection) -> Dict[str, int]:
@@ -371,85 +389,133 @@ def distinct_categories(conn: sqlite3.Connection, source: str) -> List[str]:
 
 
 # ---------------------------------------------------------------------------
-# 忽略规则（transfer_rules）
+# 收支属性覆盖（total_overrides）
 # ---------------------------------------------------------------------------
 
-def _rule_dict(row: sqlite3.Row) -> dict:
-    rule = dict(row)
-    rule["conditions"] = json.loads(rule["conditions"])
-    rule["enabled"] = bool(rule["enabled"])
-    return rule
+def fetch_overrides(conn: sqlite3.Connection) -> Dict[str, int]:
+    """全部覆盖：{source:row_id → counted}。本地单用户库，全量取出供查询合并。"""
+    rows = conn.execute("SELECT source, row_id, counted FROM total_overrides").fetchall()
+    return {f"{r['source']}:{r['row_id']}": r["counted"] for r in rows}
 
 
-def list_rules(conn: sqlite3.Connection) -> List[dict]:
-    """全部规则（按源、名称排序）。"""
-    rows = conn.execute("SELECT * FROM transfer_rules ORDER BY source, name, id").fetchall()
-    return [_rule_dict(r) for r in rows]
-
-
-def get_rule(conn: sqlite3.Connection, rule_id: int) -> Optional[dict]:
-    row = conn.execute("SELECT * FROM transfer_rules WHERE id = ?", [rule_id]).fetchone()
-    return _rule_dict(row) if row else None
-
-
-def save_rule(conn: sqlite3.Connection, rule: dict, rule_id: Optional[int] = None) -> dict:
-    """新建或整体更新规则（更新含启停开关）。返回落库后的规则。"""
+def set_overrides(
+    conn: sqlite3.Connection, keys: List[Tuple[str, int]], counted: int
+) -> int:
+    """批量设属性（upsert）：覆盖存在则更新，否则插入。返回写入行数。"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    if rule_id is None:
+    conn.executemany(
+        """
+        INSERT INTO total_overrides (source, row_id, counted, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(source, row_id) DO UPDATE SET
+            counted = excluded.counted, updated_at = excluded.updated_at
+        """,
+        [(source, row_id, counted, now) for source, row_id in keys],
+    )
+    conn.commit()
+    return len(keys)
+
+
+# ---------------------------------------------------------------------------
+# 标签组（tag_groups / row_tags）
+# ---------------------------------------------------------------------------
+
+# 自动分配色板（8 色循环，设计 v2 §4）
+TAG_COLORS = ["#1677FF", "#00B578", "#FF8F1F", "#D83931", "#7C4DFF", "#0FB8C8", "#E033FF", "#B25E09"]
+
+
+def _tag_dict(row: sqlite3.Row) -> dict:
+    tag = dict(row)
+    tag["row_count"] = tag.get("row_count") or 0
+    return tag
+
+
+def list_tag_groups(conn: sqlite3.Connection) -> List[dict]:
+    """全部标签组（含已打行数）。"""
+    rows = conn.execute(
+        """
+        SELECT g.id, g.name, g.color, g.created_at, COUNT(rt.row_id) AS row_count
+        FROM tag_groups g LEFT JOIN row_tags rt ON rt.group_id = g.id
+        GROUP BY g.id ORDER BY g.id
+        """
+    ).fetchall()
+    return [_tag_dict(r) for r in rows]
+
+
+def get_tag_group(conn: sqlite3.Connection, group_id: int) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM tag_groups WHERE id = ?", [group_id]).fetchone()
+    return _tag_dict(row) if row else None
+
+
+def create_tag_group(conn: sqlite3.Connection, name: str) -> dict:
+    """新建标签组：颜色按现有组数 8 色循环自动分配。重名抛 DataError。"""
+    count = conn.execute("SELECT COUNT(*) AS n FROM tag_groups").fetchone()["n"]
+    color = TAG_COLORS[count % len(TAG_COLORS)]
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
         cur = conn.execute(
-            """
-            INSERT INTO transfer_rules (name, source, conditions, action, enabled, preset_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                rule["name"], rule["source"], json.dumps(rule["conditions"], ensure_ascii=False),
-                rule["action"], int(bool(rule.get("enabled", True))), rule.get("preset_id"), now, now,
-            ],
+            "INSERT INTO tag_groups (name, color, created_at) VALUES (?, ?, ?)",
+            [name, color, now],
         )
-        rule_id = cur.lastrowid
+    except sqlite3.IntegrityError as exc:
+        raise DataError(f"标签「{name}」已存在") from exc
+    conn.commit()
+    return get_tag_group(conn, cur.lastrowid)
+
+
+def update_tag_group(conn: sqlite3.Connection, group_id: int, name: str) -> Optional[dict]:
+    """改名；组不存在返回 None，重名抛 DataError。"""
+    if get_tag_group(conn, group_id) is None:
+        return None
+    try:
+        conn.execute("UPDATE tag_groups SET name = ? WHERE id = ?", [name, group_id])
+    except sqlite3.IntegrityError as exc:
+        raise DataError(f"标签「{name}」已存在") from exc
+    conn.commit()
+    return get_tag_group(conn, group_id)
+
+
+def delete_tag_group(conn: sqlite3.Connection, group_id: int) -> None:
+    """删除标签组并连带删除全部行关联（账单行本身不动）。"""
+    conn.execute("DELETE FROM tag_groups WHERE id = ?", [group_id])
+    conn.execute("DELETE FROM row_tags WHERE group_id = ?", [group_id])
+    conn.commit()
+
+
+def fetch_row_tags(conn: sqlite3.Connection) -> Dict[str, List[dict]]:
+    """全部行标签：{source:row_id → [{id, name, color}, ...]}（按组 id 排序）。"""
+    rows = conn.execute(
+        """
+        SELECT rt.source, rt.row_id, g.id, g.name, g.color
+        FROM row_tags rt JOIN tag_groups g ON g.id = rt.group_id
+        ORDER BY g.id
+        """
+    ).fetchall()
+    by_row: Dict[str, List[dict]] = {}
+    for r in rows:
+        key = f"{r['source']}:{r['row_id']}"
+        by_row.setdefault(key, []).append({"id": r["id"], "name": r["name"], "color": r["color"]})
+    return by_row
+
+
+def apply_tags(
+    conn: sqlite3.Connection,
+    keys: List[Tuple[str, int]],
+    group_ids: List[int],
+    action: str,
+) -> int:
+    """批量打标签（add，重复打幂等）或移除标签（remove）。返回作用行数。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    rows = [(group_id, source, row_id, now) for source, row_id in keys for group_id in group_ids]
+    if action == "add":
+        conn.executemany(
+            "INSERT OR IGNORE INTO row_tags (group_id, source, row_id, created_at) VALUES (?, ?, ?, ?)",
+            rows,
+        )
     else:
-        existing = get_rule(conn, rule_id)
-        preset_id = existing["preset_id"] if existing and "preset_id" not in rule else rule.get("preset_id")
-        conn.execute(
-            """
-            UPDATE transfer_rules
-            SET name = ?, source = ?, conditions = ?, action = ?, enabled = ?, preset_id = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            [
-                rule["name"], rule["source"], json.dumps(rule["conditions"], ensure_ascii=False),
-                rule["action"], int(bool(rule.get("enabled", True))), preset_id, now, rule_id,
-            ],
+        conn.executemany(
+            "DELETE FROM row_tags WHERE group_id = ? AND source = ? AND row_id = ?",
+            [(g, s, r) for g, s, r, _ in rows],
         )
     conn.commit()
-    return get_rule(conn, rule_id)
-
-
-def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
-    conn.execute("DELETE FROM transfer_rules WHERE id = ?", [rule_id])
-    conn.commit()
-
-
-def find_duplicate_rule(conn: sqlite3.Connection, name: str, conditions: List[dict]) -> Optional[dict]:
-    """同名且同条件（AND 顺序无关）的既有规则；预设导入时用于跳过。"""
-    key = rule_key(conditions)
-    for rule in list_rules(conn):
-        if rule["name"] == name and rule_key(rule["conditions"]) == key:
-            return rule
-    return None
-
-
-def count_rule_hits(conn: sqlite3.Connection, rule: dict) -> int:
-    """规则在当前库中的命中笔数（查询时求值，不落库打标，设计 §3.6）。"""
-    cfg = SOURCE_CONFIGS[rule["source"]]
-    where, params = conditions_sql(rule["conditions"])
-    row = conn.execute(f'SELECT COUNT(*) AS n FROM "{cfg.table}"{where}', params).fetchone()
-    return row["n"] if row else 0
-
-
-def rule_match_ids(conn: sqlite3.Connection, rule: dict) -> set:
-    """规则命中的明细行 id 集合（总账户视图逐行打标用）。"""
-    cfg = SOURCE_CONFIGS[rule["source"]]
-    where, params = conditions_sql(rule["conditions"])
-    rows = conn.execute(f'SELECT id FROM "{cfg.table}"{where}', params).fetchall()
-    return {r["id"] for r in rows}
+    return len(keys)
