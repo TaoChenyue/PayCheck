@@ -318,8 +318,6 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .rule-form .cond-val { flex: 1; min-width: 140px; display: flex; flex-direction: column; gap: 2px; }
 .rule-form .cond-val input { width: 100%; }
 .rule-form .hint { font-size: 12px; color: var(--text-2); }
-.radio-line { display: flex; gap: 12px; align-items: center; font-size: 13px; flex-wrap: wrap; }
-.radio-line label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; min-width: auto; }
 .hit-preview { font-size: 12px; color: var(--text-2); margin-left: auto; font-variant-numeric: tabular-nums; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
 .preset-item { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
@@ -455,7 +453,6 @@ tr.bf-error td { color: var(--danger); }
     <div class="sidebar-section">
       <h3>收/支</h3>
       <div class="checkbox-list" id="direction-list"></div>
-      <div class="sidebar-note" id="direction-note" hidden>仅作用于真实收入 / 真实支出区</div>
     </div>
     <div class="sidebar-section">
       <h3 id="category-title">分类</h3>
@@ -741,7 +738,6 @@ function renderSidebar() {
       f.directions = [...$("#direction-list").querySelectorAll("input:checked")].map((i) => i.value);
       onFilterChange();
     }));
-  $("#direction-note").hidden = currentSource !== TOTAL;  // 收/支筛选不作用于内部流动区
   // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
   if (currentSource === TOTAL) {
     $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
@@ -1259,7 +1255,7 @@ function resetFilters() {
 const RULE_SOURCE_OPTIONS = [["boc", "BOC"], ["alipay", "支付宝"], ["wechat", "微信"]];
 const OP_LABELS = { eq: "等于", in: "任一等于", contains: "包含", starts: "开头是", not_contains: "不包含" };
 const OP_OPTIONS = Object.entries(OP_LABELS);
-const ACTION_LABELS = { fold: "内部流动", hide: "重复记录" };
+const ACTION_LABELS = { fold: "忽略", hide: "忽略" };
 const FIELD_LABELS = { tx_name: "交易名称", counterparty: "对方账户名", memo: "附言", channel: "渠道", tx_type: "类型" };
 const FIELD_OPTIONS = {
   boc: [["tx_name", "交易名称"], ["counterparty", "对方账户名"], ["memo", "附言"], ["channel", "渠道"], ["tx_type", "类型"]],
@@ -1379,7 +1375,7 @@ function renderRuleItem(rule) {
         <button data-act="delete" class="danger">删除</button>
       </span>
     </div>
-    <div class="rule-cond">${esc(conditionSummary(rule.conditions))} · ${esc(ACTION_LABELS[rule.action] || rule.action)}</div>
+    <div class="rule-cond">${esc(conditionSummary(rule.conditions))}</div>
     ${detail}
   </div>`;
 }
@@ -1413,11 +1409,11 @@ function openRuleForm(rule) {
   editingRule = rule ? {
     id: rule.id, name: rule.name, source: rule.source,
     conditions: rule.conditions.map((c) => ({ ...c })),
-    action: rule.action, enabled: rule.enabled,
+    action: "fold", enabled: rule.enabled,  // 编辑同样固定「忽略」，存量 hide 更新时归一化
   } : {
     id: null, name: "", source: "boc",
     conditions: [{ field: FIELD_OPTIONS.boc[0][0], op: "eq", value: "" }],
-    action: "fold", enabled: true,
+    action: "fold", enabled: true,  // 动作固定「忽略」（提交值 fold，设计 §4.2）
   };
   renderRuleForm();
   scheduleHitPreview();
@@ -1468,10 +1464,9 @@ function renderRuleForm() {
         <button class="btn" id="f-add-cond" ${r.conditions.length >= MAX_CONDITIONS ? "disabled" : ""}>＋ 添加条件（AND）</button>
         <span class="hint">单条规则内条件为 AND 关系；OR 场景请新建多条规则。条件最多 ${MAX_CONDITIONS} 条</span>
       </div>
-      <div class="f-row radio-line">
+      <div class="f-row">
         <span class="f-label">命中处理</span>
-        ${Object.entries(ACTION_LABELS).map(([v, l]) =>
-          `<label><input type="radio" name="f-action" value="${v}" ${r.action === v ? "checked" : ""}> ${l}（不计入真实收支）</label>`).join("")}
+        <span class="hint">命中后移入忽略区（不计入真实收支）</span>
         <span class="hit-preview" id="f-hit">—</span>
       </div>
       <div class="form-actions">
@@ -1507,8 +1502,6 @@ function renderRuleForm() {
       scheduleHitPreview();
     });
   });
-  document.querySelectorAll('input[name="f-action"]').forEach((el) =>
-    el.addEventListener("change", (e) => { r.action = e.target.value; }));
   $("#f-cancel").addEventListener("click", () => loadRulesView());
   $("#f-save").addEventListener("click", submitRuleForm);
 }
