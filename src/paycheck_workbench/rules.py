@@ -1,9 +1,12 @@
-"""内部转账筛选规则：字段白名单、操作符、条件求值 SQL 与内置预设库（TCY-15）
+"""忽略规则：字段白名单、操作符、条件求值 SQL 与内置预设库（TCY-15/TCY-24）
 
-- 规则 = 一组条件（AND）+ 命中处理（fold 内部流动 / hide 重复记录，存储值不变，仅含义重新表述）；OR 场景用多条规则表达
+- 规则 = 一组条件（AND）+ 动作统一「忽略」（存储 fold；存量 hide 按忽略同等处理，
+  存储与 API 兼容）；OR 场景用多条规则表达
 - 条件字段只取自该源明细表的物理列（白名单见 SOURCE_FIELDS）
 - 内置预设 = 打包的一组规则（可跨源）；导入后每条规则独立出现在规则列表，
   preset_id 仅作「来自预设」标识，不锁定内容
+- 渠道重复识别（原 P7/P8）已由同日同金额配对算法接管，两个预设随之移除；
+  已导入的实例按 preset_id 在升级时自动停用（REMOVED_PRESET_IDS）
 """
 
 from __future__ import annotations
@@ -41,6 +44,9 @@ OPERATOR_LABELS: Dict[str, str] = {
 ACTIONS = ("fold", "hide")
 ACTION_LABELS = {"fold": "内部流动", "hide": "重复记录"}
 MAX_CONDITIONS = 5
+
+# 已被配对算法取代的预设（P7/P8）：升级时按 preset_id 自动停用其已导入实例
+REMOVED_PRESET_IDS = ("preset-channel-pay", "preset-channel-refund")
 
 # P10 同名账户互转的占位符（导入时提示填写，设计 §4）
 PLACEHOLDER_NAME = "{本人姓名}"
@@ -178,12 +184,12 @@ def _cond(field: str, op: str, value: str) -> dict:
     return {"field": field, "op": op, "value": value}
 
 
-# ---- 内置预设库 P1–P10（条件、默认状态与动作，设计 §4）----
+# ---- 内置预设库（P1–P6、P9、P10；P7/P8 已由配对算法接管移除）----
 PRESETS: List[dict] = [
     {
         "id": "preset-yuebao",
         "name": "余额宝-转入转出",
-        "description": "余额宝收益发放/转入/转出等货币基金资金池变动，命中行标「内部流动」且不计入真实收支",
+        "description": "余额宝收益发放/转入/转出等货币基金资金池变动，命中行移入忽略区（不计入真实收支），标注「支付宝 ↔ 银行卡（余额宝）」",
         "rules": [
             {"name": "余额宝-转入转出", "source": SOURCE_ALIPAY,
              "conditions": [_cond("商品说明", "starts", "余额宝-")], "action": "fold", "enabled": True},
@@ -192,7 +198,7 @@ PRESETS: List[dict] = [
     {
         "id": "preset-lingqiantong",
         "name": "零钱通-转入转出",
-        "description": "银行卡↔零钱通、零钱↔零钱通互转，命中行标「内部流动」且不计入真实收支",
+        "description": "银行卡↔零钱通、零钱↔零钱通互转，命中行移入忽略区（不计入真实收支），标注「微信 ↔ 银行卡（零钱通）」",
         "rules": [
             {"name": "零钱通-转入转出", "source": SOURCE_WECHAT,
              "conditions": [_cond("交易类型", "contains", "零钱通")], "action": "fold", "enabled": True},
@@ -201,7 +207,7 @@ PRESETS: List[dict] = [
     {
         "id": "preset-wechat-recharge",
         "name": "微信零钱-充值提现",
-        "description": "银行卡↔微信零钱互转（零钱充值/零钱提现），命中行标「内部流动」且不计入真实收支",
+        "description": "银行卡↔微信零钱互转（零钱充值/零钱提现），命中行移入忽略区（不计入真实收支），标注「微信 ↔ 银行卡（零钱）」",
         "rules": [
             {"name": "微信零钱-充值提现", "source": SOURCE_WECHAT,
              "conditions": [_cond("交易类型", "in", "零钱充值|零钱提现")], "action": "fold", "enabled": True},
@@ -210,7 +216,7 @@ PRESETS: List[dict] = [
     {
         "id": "preset-alipay-withdraw",
         "name": "支付宝余额-提现",
-        "description": "余额提现到银行卡（余额宝路径已由「余额宝-转入转出」覆盖），兜底规则",
+        "description": "余额提现到银行卡（余额宝路径已由「余额宝-转入转出」覆盖），命中行移入忽略区（不计入真实收支），标注「支付宝 ↔ 银行卡（余额）」",
         "rules": [
             {"name": "支付宝余额-提现", "source": SOURCE_ALIPAY,
              "conditions": [_cond("交易分类", "eq", "账户存取")], "action": "fold", "enabled": True},
@@ -219,7 +225,7 @@ PRESETS: List[dict] = [
     {
         "id": "preset-huabei",
         "name": "花呗还款",
-        "description": "花呗还款的支付宝侧与银行侧两条记录，命中行标「内部流动」且不计入真实收支（花呗消费本身是真实支出，不在此列）",
+        "description": "花呗还款的支付宝侧与银行侧两条记录，命中行移入忽略区（不计入真实收支），标注「银行卡 → 支付宝（花呗还款）/ 支付宝 ↔ 花呗（还款）」（花呗消费本身是真实支出，不在此列）",
         "rules": [
             {"name": "花呗还款-支付宝侧", "source": SOURCE_ALIPAY,
              "conditions": [_cond("交易分类", "eq", "信用借还"), _cond("交易对方", "eq", "花呗")],
@@ -231,42 +237,16 @@ PRESETS: List[dict] = [
     {
         "id": "preset-xiaohebao",
         "name": "支付宝小荷包",
-        "description": "小荷包转入/转出。小荷包可能是共享资金池，转入可视作支出，默认不启用，确认后手动开启",
+        "description": "小荷包转入/转出。小荷包可能是共享资金池，转入可视作支出，默认不启用，确认后手动开启；命中行移入忽略区（不计入真实收支），标注「支付宝 ↔ 小荷包」",
         "rules": [
             {"name": "支付宝小荷包", "source": SOURCE_ALIPAY,
              "conditions": [_cond("交易对方", "contains", "小荷包")], "action": "fold", "enabled": False},
         ],
     },
     {
-        "id": "preset-channel-pay",
-        "name": "银行卡快捷支付-渠道行",
-        "description": "银行卡经支付宝/微信渠道消费的银行侧通道行，与平台侧明细重复，银行侧标「重复记录」，平台侧明细保留在真实收支（聚合级）",
-        "rules": [
-            {"name": "银行卡快捷支付-渠道行（支付宝）", "source": SOURCE_BOC,
-             "conditions": [_cond("tx_name", "eq", "网上快捷支付"), _cond("counterparty", "starts", "支付宝")],
-             "action": "hide", "enabled": True},
-            {"name": "银行卡快捷支付-渠道行（财付通）", "source": SOURCE_BOC,
-             "conditions": [_cond("tx_name", "eq", "网上快捷支付"), _cond("counterparty", "starts", "财付通")],
-             "action": "hide", "enabled": True},
-        ],
-    },
-    {
-        "id": "preset-channel-refund",
-        "name": "银行卡渠道退款",
-        "description": "渠道消费退款的银行侧记录，与平台侧退款行重复，银行侧标「重复记录」，平台侧明细保留在真实收支（聚合级）",
-        "rules": [
-            {"name": "银行卡渠道退款（支付宝）", "source": SOURCE_BOC,
-             "conditions": [_cond("tx_name", "eq", "网上快捷退款"), _cond("counterparty", "starts", "支付宝")],
-             "action": "hide", "enabled": True},
-            {"name": "银行卡渠道退款（财付通）", "source": SOURCE_BOC,
-             "conditions": [_cond("tx_name", "eq", "网上快捷退款"), _cond("counterparty", "starts", "财付通")],
-             "action": "hide", "enabled": True},
-        ],
-    },
-    {
         "id": "preset-platform-income",
         "name": "平台提现/基金入账",
-        "description": "余额宝转出到银行卡、平台代付入账的银行侧记录，命中行标「内部流动」且不计入真实收支",
+        "description": "余额宝转出到银行卡、平台代付入账的银行侧记录，命中行移入忽略区（不计入真实收支），标注「支付宝 / 微信 → 银行卡」",
         "rules": [
             {"name": "平台提现入账", "source": SOURCE_BOC,
              "conditions": [_cond("tx_name", "eq", "网上快捷提现")], "action": "fold", "enabled": True},
@@ -284,7 +264,7 @@ PRESETS: List[dict] = [
     {
         "id": "preset-same-name",
         "name": "同名账户互转",
-        "description": "本人名下其他账户互转（对方含本人姓名）。导入时填写本人姓名，默认不启用，确认后手动开启",
+        "description": "本人名下其他账户互转（对方含本人姓名）。导入时填写本人姓名，默认不启用，确认后手动开启；命中行移入忽略区（不计入真实收支），标注「银行卡 ↔ 本人其他账户」",
         "rules": [
             {"name": "同名账户互转", "source": SOURCE_BOC,
              "conditions": [_cond("counterparty", "contains", PLACEHOLDER_NAME)],
