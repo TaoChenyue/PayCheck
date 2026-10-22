@@ -230,7 +230,7 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .zone-title { font-weight: 600; white-space: nowrap; }
 .zone-sub { font-size: 12px; color: var(--text-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .zone-sub.zone-sum.income { color: var(--income); }   /* 区头小计：收入绿 / 支出红（设计 §2.1） */
-.zone-sub.zone-sum.expense { color: var(--expense); }
+.zone-sub.zone-sum.expense { color: var(--danger); }  /* 支出小计用红色；不动 --expense 以免影响全站支出金额显示 */
 .zone-collapse { margin-left: auto; color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .zone-table-wrap { overflow-x: auto; }
 .zone-empty { padding: 18px 16px; color: #C4C7CC; font-size: 13px; }
