@@ -20,6 +20,7 @@ gpu = ["paddlepaddle-gpu>=2.6.0"]
 
 [project.scripts]
 boc-pdf2csv = "boc_pdf2csv.cli:main"
+paycheck = "paycheck_workbench.cli:main"
 paycheck-workbench = "paycheck_workbench.cli:main"
 
 [dependency-groups]
