@@ -60,6 +60,20 @@ def test_pdf_to_transactions_no_cb_unchanged(monkeypatch, tmp_path):
     assert pipeline._pdf_to_transactions(pdf_path, device="cpu") == []
 
 
+def test_pdf_to_transactions_render_empty_emits_pdf_done(monkeypatch, tmp_path):
+    """渲染 0 图时收尾事件照发（服务端任务按 CLI 语义计为「成功、0 条交易」）。"""
+    monkeypatch.setattr(pipeline, "pdf_to_images", lambda *a, **k: [])
+
+    pdf_path = str(tmp_path / "样例.pdf")
+    Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
+    events = []
+    result = pipeline._pdf_to_transactions(
+        pdf_path, device="cpu", progress_cb=lambda e, info: events.append((e, info))
+    )
+    assert result == []
+    assert events[-1] == ("pdf_done", {"name": "样例.pdf", "transactions": 0, "duration_s": events[-1][1]["duration_s"]})
+
+
 def _fake_transactions(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None):
     # 模拟真实 _pdf_to_transactions 的 pdf_done 事件（其余事件由其内部发出，这里从简）
     if progress_cb:

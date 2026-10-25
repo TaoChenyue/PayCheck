@@ -66,6 +66,12 @@ def _pdf_to_transactions(
         image_paths = pdf_to_images(pdf_path, scale=scale, output_dir=tmpdir)
         if not image_paths:
             log.warning("PDF 渲染无输出: %s", pdf_path)
+            # 与 process_folder 的「写出表头 CSV、计为已处理」语义一致，收尾事件照发
+            _emit("pdf_done", {
+                "name": pdf_name,
+                "transactions": 0,
+                "duration_s": round(time.time() - start_time, 1),
+            })
             return []
 
         # 阶段二：图片 → OCR → 结构化
