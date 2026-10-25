@@ -18,7 +18,7 @@
 本项目包含两个工具：
 
 - **boc-pdf2csv**：中国银行（BOC）PDF 对账单 → 标准 CSV 的命令行转换工具。
-- **paycheck-workbench**：本地账单工作台（标准库 HTTP 服务）：BOC / 支付宝 / 微信三源原始账单导入 SQLite 后 HTML 展示，收支属性与标签统一在「总账户」视图管理（见「账单工作台」）。
+- **paycheck**（别名 paycheck-workbench）：本地账单工作台（标准库 HTTP 服务）：BOC / 支付宝 / 微信三源原始账单导入 SQLite 后 HTML 展示，收支属性与标签统一在「总账户」视图管理（见「账单工作台」）。
 
 整体工作流：**原始账单导入（数据源视图，只读）→ 总账户做收支与标签管理（三源合并视图）**。
 
@@ -38,7 +38,7 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 ## 安装
 
 ```bash
-# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版；含工作台 paycheck-workbench 全部依赖）
+# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版；含工作台 paycheck 全部依赖）
 uv sync
 
 # 安装 GPU 加速版（可选，CUDA 12.6）
@@ -183,20 +183,20 @@ tests/                     # pytest：解析层 / 存储层 / HTTP 服务 / 总�
 
 ---
 
-## 账单工作台（paycheck-workbench）
+## 账单工作台（paycheck）
 
 本地 Web 工具：BOC / 支付宝 / 微信三源账单的 HTML 展示 + SQLite 导入（Python 标准库 HTTP 服务，无 Web 框架）。
 
 ```bash
 # 启动并自动打开浏览器（默认库文件 paycheck.db，相对启动目录；端口 8765，仅绑定本机）
-uv run paycheck-workbench --open
+uv run paycheck --open
 # 自定义库文件与端口
-uv run paycheck-workbench --db ./my.db --port 8765
+uv run paycheck --db ./my.db --port 8765
 # 或通过模块运行
 uv run python -m paycheck_workbench
 ```
 
-> 同上：pip 安装后可直接运行 `paycheck-workbench`（不带 `uv run` 前缀）。
+> 同上：pip 安装后可直接运行 `paycheck`（不带 `uv run` 前缀）；旧入口 `paycheck-workbench` 保留为别名，仍可使用。
 
 功能：
 
