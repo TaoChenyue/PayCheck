@@ -8,9 +8,6 @@ dist/
 # Virtual environments
 .venv/
 
-# uv lock file (platform-specific)
-uv.lock
-
 # Runtime / temp
 log/
 tmp/
