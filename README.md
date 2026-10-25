@@ -38,7 +38,7 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 ## 安装
 
 ```bash
-# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版）
+# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版；含工作台 paycheck-workbench 全部依赖）
 uv sync
 
 # 安装 GPU 加速版（可选，CUDA 12.6）
@@ -58,30 +58,32 @@ uv pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12
 
 ```bash
 # 基本用法：文件夹内每个 PDF → 同名 CSV（已存在则跳过）
-boc-pdf2csv ./statements/
+uv run boc-pdf2csv ./statements/
 
 # 强制重新导出：同名 CSV 已存在时覆盖而不是跳过
-boc-pdf2csv ./statements/ --force
+uv run boc-pdf2csv ./statements/ --force
 
 # 调整渲染精度（低配机器可用 2.0）
-boc-pdf2csv ./statements/ --scale 2.0
+uv run boc-pdf2csv ./statements/ --scale 2.0
 
 # 延长超时（大批量文件）
-boc-pdf2csv ./statements/ --timeout 120
+uv run boc-pdf2csv ./statements/ --timeout 120
 
 # 无 GPU 机器使用 CPU 推理（默认强制 GPU）
-boc-pdf2csv ./statements/ --device cpu
+uv run boc-pdf2csv ./statements/ --device cpu
 
 # 查看版本 / 帮助
-boc-pdf2csv --version
-boc-pdf2csv --help
+uv run boc-pdf2csv --version
+uv run boc-pdf2csv --help
 
 # 详细日志
-boc-pdf2csv ./statements/ --verbose
+uv run boc-pdf2csv ./statements/ --verbose
 
 # 通过 Python 模块调用
-python -m boc_pdf2csv ./statements/
+uv run python -m boc_pdf2csv ./statements/
 ```
+
+> 以上示例基于推荐的 uv 安装方式；`pip install -e .` 安装后可直接运行 `boc-pdf2csv`（不带 `uv run` 前缀）。
 
 `2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则默认跳过此 PDF，删除对应 CSV 或加 `--force` 可重新转换（`--force` 会覆盖已有 CSV）。
 
@@ -173,13 +175,15 @@ src/boc_pdf2csv/
 本地 Web 工具：BOC / 支付宝 / 微信三源账单的 HTML 展示 + SQLite 导入（Python 标准库 HTTP 服务，无 Web 框架）。
 
 ```bash
-# 启动（默认库文件 paycheck.db，相对启动目录；端口 8765）
-paycheck-workbench
-# 自定义库文件与端口，并自动打开浏览器
-paycheck-workbench --db ./my.db --port 8765 --open
+# 启动并自动打开浏览器（默认库文件 paycheck.db，相对启动目录；端口 8765，仅绑定本机）
+uv run paycheck-workbench --open
+# 自定义库文件与端口
+uv run paycheck-workbench --db ./my.db --port 8765
 # 或通过模块运行
-python -m paycheck_workbench
+uv run python -m paycheck_workbench
 ```
+
+> 同上：pip 安装后可直接运行 `paycheck-workbench`（不带 `uv run` 前缀）。
 
 功能：
 
