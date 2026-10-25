@@ -1,7 +1,7 @@
 <p align="center">
-  <h1 align="center">📄 boc-pdf2csv</h1>
-  <p align="center"><strong>中国银行 PDF 对账单 → CSV 转换工具</strong></p>
-  <p align="center">纯 Python 命令行工具：PDF 渲染 → OCR 识别 → 结构化 CSV，无需任何 Web 框架</p>
+  <h1 align="center">📄 PayCheck</h1>
+  <p align="center"><strong>中国银行 PDF 对账单 → CSV 转换工具 + 本地账单工作台</strong></p>
+  <p align="center">PDF 渲染 → OCR → 结构化 CSV；三源账单 SQLite 导入 → HTML 展示、收支属性与标签管理（Python 标准库 HTTP 服务，无 Web 框架）</p>
 </p>
 
 <p align="center">
@@ -15,9 +15,14 @@
 
 ## 简介
 
-**boc-pdf2csv** 是一个独立的 Python 包，将中国银行（BOC）PDF 对账单批量转换为标准 CSV 文件。
+本项目包含两个工具：
 
-处理管线：
+- **boc-pdf2csv**：中国银行（BOC）PDF 对账单 → 标准 CSV 的命令行转换工具。
+- **paycheck-workbench**：本地账单工作台（标准库 HTTP 服务）：BOC / 支付宝 / 微信三源原始账单导入 SQLite 后 HTML 展示，收支属性与标签统一在「总账户」视图管理（见「账单工作台」）。
+
+整体工作流：**原始账单导入（数据源视图，只读）→ 总账户做收支与标签管理（三源合并视图）**。
+
+boc-pdf2csv 处理管线：
 
 ```
 PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → 交易去重排序 → CSV
