@@ -49,10 +49,10 @@ body {
 /* ---------- 布局 ---------- */
 #layout { display: flex; flex: 1; min-height: 0; }
 
-/* ---------- 左侧导航栏（总账户置顶 + 数据源分组） ---------- */
+/* ---------- 左侧导航栏（总账户置顶 + 数据源分组 + 筛选区块） ---------- */
 #sidenav {
   width: 200px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--border);
-  padding: 14px 10px; overflow-y: auto;
+  padding: 14px 10px; overflow-y: auto; overflow-x: hidden;  /* 侧栏仅纵向滚动，横向溢出裁剪 */
 }
 #sidenav-items { display: flex; flex-direction: column; gap: 2px; }
 .nav-group { font-size: 12px; color: #C4C7CC; padding: 14px 10px 4px; }
@@ -71,43 +71,55 @@ body {
   border-radius: 999px; padding: 1px 8px; font-size: 12px; font-variant-numeric: tabular-nums;
 }
 
-/* ---------- 页内筛选面板 ---------- */
+/* ---------- 左侧导航栏：筛选区块（数据源分组下方） ---------- */
+#filter-block {
+  margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; min-width: 0;
+}
+#filter-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: none; background: none; border-radius: 8px; padding: 9px 10px; cursor: pointer;
+  font-size: 14px; color: var(--text-2); text-align: left;
+}
+#filter-toggle:hover { background: var(--row-hover); }
+#filter-toggle .filter-caret { width: 10px; font-size: 11px; color: #C4C7CC; flex-shrink: 0; }
+#filter-toggle .filter-badge {
+  margin-left: auto; min-width: 18px; height: 18px; line-height: 18px;
+  border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; text-align: center;
+  padding: 0 5px; font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+#filter-toggle .filter-badge[hidden] { display: none; }
 #filter-panel {
-  flex-shrink: 0; background: #fff; border: 1px solid var(--border); border-radius: 10px;
-  padding: 16px; display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column; gap: 14px; padding: 6px 2px 10px; min-width: 0;
 }
 #filter-panel[hidden] { display: none; }
-.filter-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px 20px; }
-.filter-section h3 { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 10px; }
-.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.filter-section { min-width: 0; }
+.filter-section h3 { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .preset {
-  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 10px;
+  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 3px 8px;
   font-size: 12px; cursor: pointer; color: var(--text-2);
 }
 .preset:hover { border-color: var(--brand); color: var(--brand); }
 .preset.active { border-color: var(--brand); color: var(--brand); background: color-mix(in srgb, var(--brand) 6%, #fff); }
-.date-inputs { display: flex; align-items: center; gap: 6px; }
-.date-inputs input {
-  width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px;
-  color: var(--text);
+/* 侧栏宽度有限：字段纵向排列，输入框 min-width:0 可收缩，不产生横向溢出 */
+.date-inputs, .amount-inputs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.date-inputs input, .amount-inputs input {
+  width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; font-size: 13px; color: var(--text);
 }
-.date-inputs input:focus { outline: none; border-color: var(--brand); }
+.date-inputs input:focus, .amount-inputs input:focus { outline: none; border-color: var(--brand); }
 .checkbox-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .checkbox-list label {
   display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text);
   padding: 3px 4px; border-radius: 4px; min-width: 0;
 }
 .checkbox-list label .lbl { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
-.filter-note { font-size: 12px; color: #C4C7CC; margin-top: 8px; line-height: 1.5; }
+.filter-note { font-size: 12px; color: #C4C7CC; margin-top: 6px; line-height: 1.5; overflow-wrap: anywhere; }
 .checkbox-list label:hover { background: var(--row-hover); }
-.checkbox-list input { accent-color: var(--brand); }
-#category-list { max-height: 240px; overflow-y: auto; }
-.amount-inputs { display: flex; align-items: center; gap: 6px; }
-.amount-inputs input {
-  width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px;
-}
-.amount-inputs input:focus { outline: none; border-color: var(--brand); }
-.filter-actions { display: flex; justify-content: flex-end; }
+.checkbox-list input { accent-color: var(--brand); flex-shrink: 0; }
+#category-list { max-height: 240px; overflow-y: auto; overflow-x: hidden; }
+.filter-actions { display: flex; }
+#btn-reset { width: 100%; }
 
 /* ---------- 主区 ---------- */
 #main {
@@ -147,12 +159,6 @@ body {
   font-size: 13px;
 }
 #search:focus { outline: none; border-color: var(--brand); }
-#btn-filter .filter-badge {
-  display: inline-block; margin-left: 6px; min-width: 18px; height: 18px; line-height: 18px;
-  border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; text-align: center;
-  padding: 0 5px; font-variant-numeric: tabular-nums;
-}
-#btn-filter .filter-badge[hidden] { display: none; }
 #pagesize { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; }
 /* 列设置下拉 */
 #colset { position: relative; }
@@ -420,34 +426,13 @@ tr.bf-error td { color: var(--danger); }
 <div id="layout">
   <aside id="sidenav">
     <nav id="sidenav-items"></nav>
-  </aside>
-
-  <main id="main">
-    <div id="view-title">
-      <h2 id="view-title-name"></h2>
-      <span id="view-title-desc"></span>
-    </div>
-    <div id="banners"></div>
-    <div id="cards"></div>
-    <div id="toolbar">
-      <input type="search" id="search" placeholder="搜索…">
-      <div id="total-tools" hidden>
-        <button class="btn" id="btn-tags-manage">🏷 标签管理</button>
-      </div>
-      <button class="btn" id="btn-filter">筛选<span class="filter-badge" id="filter-badge" hidden></span></button>
-      <div id="colset">
-        <button class="btn" id="btn-colset">列设置 ▾</button>
-        <div id="colset-panel"></div>
-      </div>
-      <select id="pagesize">
-        <option value="10">10 条/页</option>
-        <option value="50" selected>50 条/页</option>
-        <option value="100">100 条/页</option>
-        <option value="200">200 条/页</option>
-      </select>
-    </div>
-    <div id="filter-panel">
-      <div class="filter-grid">
+    <div id="filter-block">
+      <button type="button" id="filter-toggle">
+        <span class="filter-caret" id="filter-caret">▾</span>
+        <span>筛选</span>
+        <span class="filter-badge" id="filter-badge" hidden></span>
+      </button>
+      <div id="filter-panel">
         <div class="filter-section">
           <h3>日期范围</h3>
           <div class="presets" id="presets">
@@ -457,9 +442,8 @@ tr.bf-error td { color: var(--danger); }
             <button class="preset" data-preset="custom">自定义</button>
           </div>
           <div class="date-inputs">
-            <input type="date" id="date-from">
-            <span>—</span>
-            <input type="date" id="date-to">
+            <input type="date" id="date-from" title="开始日期">
+            <input type="date" id="date-to" title="结束日期">
           </div>
         </div>
         <div class="filter-section">
@@ -485,14 +469,38 @@ tr.bf-error td { color: var(--danger); }
           <h3>金额区间</h3>
           <div class="amount-inputs">
             <input type="number" id="amount-min" placeholder="最小" step="0.01">
-            <span>—</span>
             <input type="number" id="amount-max" placeholder="最大" step="0.01">
           </div>
         </div>
+        <div class="filter-actions">
+          <button id="btn-reset" class="btn">重置筛选</button>
+        </div>
       </div>
-      <div class="filter-actions">
-        <button id="btn-reset" class="btn">重置筛选</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="view-title">
+      <h2 id="view-title-name"></h2>
+      <span id="view-title-desc"></span>
+    </div>
+    <div id="banners"></div>
+    <div id="cards"></div>
+    <div id="toolbar">
+      <input type="search" id="search" placeholder="搜索…">
+      <div id="total-tools" hidden>
+        <button class="btn" id="btn-tags-manage">🏷 标签管理</button>
       </div>
+      <div id="colset">
+        <button class="btn" id="btn-colset">列设置 ▾</button>
+        <div id="colset-panel"></div>
+      </div>
+      <select id="pagesize">
+        <option value="10">10 条/页</option>
+        <option value="50" selected>50 条/页</option>
+        <option value="100">100 条/页</option>
+        <option value="200">200 条/页</option>
+      </select>
     </div>
     <div id="batch-bar" hidden></div>
     <div id="table-wrap">
@@ -570,7 +578,7 @@ let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
 let selectedRows = new Set(); // 总账户勾选的行 id（当前页范围）
 let selectAllFiltered = false; // 全量模式：批量操作作用于整个筛选结果
 let tagsCache = [];           // 标签组列表（总账户筛选面板/弹窗共用）
-let filterPanelOpen = true;   // 筛选面板折叠态（会话内记住，不落库）
+let filterPanelOpen = true;   // 筛选区块折叠态（会话内记住，不落库）
 
 const TOTAL = "total";
 const TAB_ORDER = [TOTAL, "boc", "alipay", "wechat"];
@@ -826,11 +834,17 @@ function activeFilterCount() {
   return n;
 }
 function updateFilterBadge() {
-  // 面板折叠且存在激活筛选时，工具栏「筛选」按钮显示激活筛选数徽标
+  // 区块折叠且存在激活筛选时，侧栏「筛选」标题行显示激活筛选数徽标
   const badge = $("#filter-badge");
   const n = activeFilterCount();
   badge.hidden = filterPanelOpen || n === 0;
   badge.textContent = n;
+}
+function applyFilterPanelOpen() {
+  // 折叠态同步到面板显隐与标题行箭头，并刷新徽标
+  $("#filter-panel").hidden = !filterPanelOpen;
+  $("#filter-caret").textContent = filterPanelOpen ? "▾" : "▸";
+  updateFilterBadge();
 }
 function renderToolbar() {
   const o = optionsCache[currentSource];
@@ -1897,10 +1911,9 @@ $("#btn-import-empty").addEventListener("click", () => {
   if (currentSource === TOTAL) switchTab("boc");  // 总账户空态「去数据源导入」→ 跳转第一个数据源视图
   else openModal();
 });
-$("#btn-filter").addEventListener("click", () => {
+$("#filter-toggle").addEventListener("click", () => {
   filterPanelOpen = !filterPanelOpen;
-  $("#filter-panel").hidden = !filterPanelOpen;
-  updateFilterBadge();
+  applyFilterPanelOpen();
 });
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
@@ -1943,6 +1956,7 @@ document.addEventListener("click", (e) => {
       await loadTags();
     }
     renderNav(); renderFilterPanel(); renderToolbar();
+    applyFilterPanelOpen();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) {
     showErrorBanner(e.message);
