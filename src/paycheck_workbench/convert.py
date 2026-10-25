@@ -35,8 +35,13 @@ def gpu_available_cached() -> Optional[bool]:
 
 
 def _detect_gpu() -> bool:
-    """探测 paddle 是否具备可用 GPU（仅探测，不加载 OCR 模型）。"""
+    """探测 paddle 是否具备可用 GPU（仅探测，不加载 OCR 模型）。
+
+    torch 必须先于 paddle 导入：Windows 上 paddle 的 DLL 搜索路径会干扰 torch
+    加载自身的 shm.dll（WinError 127），与 ocr_engine 的导入顺序保持一致。
+    """
     try:
+        import torch  # noqa: F401
         import paddle
         return bool(
             paddle.device.is_compiled_with_cuda()
