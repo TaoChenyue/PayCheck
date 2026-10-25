@@ -3,12 +3,16 @@
 API：
   GET  /                      单页应用（static/index.html）
   GET  /api/meta              各源记录数、库路径、版本
-  GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位
-  GET  /api/rows?source=...   筛选 + 排序 + 分页查询
-  GET  /api/summary?source=... 汇总卡片（筛选联动）
+  GET  /api/options?source=   该源的逻辑列 / 筛选选项 / 分页档位（支持 source=total）
+  GET  /api/rows?source=...   筛选 + 排序 + 分页查询（source=total 为单表口径 + page 分页）
+  GET  /api/summary?source=... 汇总卡片（source=total 为计入口径：收入/支出/净收支/计入笔数）
   POST /api/import/preview        解析单个文件，返回预览与去重比对（不写入）
   POST /api/import/confirm        解析单个文件并写入（幂等）
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
+  PUT  /api/total/overrides   批量设收支属性（ids / filter 两种 scope，方向约束铁律）
+  GET  /api/tags              标签组列表（附已打行数）
+  POST /api/tags              新建标签组 · PUT /api/tags/{id} 改名 · DELETE /api/tags/{id}
+  PUT  /api/tags/apply        批量打/移除标签（ids / filter 两种 scope）
 """
 
 from __future__ import annotations
@@ -23,8 +27,17 @@ from typing import List, Optional, Tuple
 
 from paycheck_workbench import __version__
 from paycheck_workbench import db
+from paycheck_workbench import total
 from paycheck_workbench.parsing import ParseError, parse_file
-from paycheck_workbench.sources import ALLOWED_EXTENSIONS, SOURCE_CONFIGS, SOURCES
+from paycheck_workbench.sources import (
+    ALLOWED_EXTENSIONS,
+    SOURCE_CONFIGS,
+    SOURCES,
+    TOTAL_COLUMNS,
+    TOTAL_DIRECTIONS,
+    TOTAL_NEUTRAL,
+    TOTAL_SOURCE,
+)
 
 _INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024  # 单文件上限 64MB（本地账单规模远小于此）
@@ -226,9 +239,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_rows(parsed)
             elif parsed.path == "/api/summary":
                 self._api_summary(parsed)
+            elif parsed.path == "/api/tags":
+                self._api_tags()
             else:
                 self._send_error(404, "Not Found")
         except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
             self._send_error(500, f"数据库读取失败：{exc}")
@@ -260,8 +277,28 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _api_options(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            self._send(200, {
+                "ok": True,
+                "source": source,
+                "label": "总账户",
+                "columns": TOTAL_COLUMNS,
+                "directions": TOTAL_DIRECTIONS,
+                "neutral": TOTAL_NEUTRAL,
+                "category_label": "来源",
+                "categories": list(SOURCES),
+                "search_placeholder": "搜索对方 / 摘要",
+                "date_col": "",
+                "time_col": "",
+                "direction_col": "direction",
+                "amount_col": "amount",
+                "balance_col": "",
+                "page_sizes": list(db._PAGE_SIZES),
+                "default_page_size": db._DEFAULT_PAGE_SIZE,
+            })
+            return
         cfg = SOURCE_CONFIGS.get(source)
         if not cfg:
             raise ApiError(f"未知数据源：{source}")
@@ -298,9 +335,36 @@ class Handler(BaseHTTPRequestHandler):
             "amount_max": _parse_float(get("amount_max")),
         }
 
+    @staticmethod
+    def _parse_counted(query: dict) -> Optional[set]:
+        """属性筛选参数：缺省 None（不过滤）；「counted=」空值 → 空集合（匹配 0 行）。"""
+        if "counted" not in query:
+            return None
+        raw = query["counted"][0]
+        return {v for v in raw.split(",") if v in ("0", "1")}
+
     def _api_rows(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            filters = self._filter_params(query)
+            filters.pop("categories", None)  # 总账户的「分类」维度是来源多选
+            filters["counted"] = self._parse_counted(query)
+            filters["tags"] = _parse_list((query.get("tags") or [None])[0])
+            raw_sources = (query.get("sources") or [None])[0]
+            sources = _parse_list(raw_sources) if raw_sources else list(SOURCES)
+            with self._connect() as conn:
+                result = total.query_rows(
+                    conn,
+                    sort=(query.get("sort") or ["datetime"])[0],
+                    order=(query.get("order") or ["desc"])[0],
+                    page=_parse_int((query.get("page") or [None])[0], 1),
+                    page_size=_parse_int((query.get("page_size") or [None])[0], db._DEFAULT_PAGE_SIZE),
+                    sources=sources,
+                    **filters,
+                )
+            self._send(200, {"ok": True, **result})
+            return
         if source not in SOURCE_CONFIGS:
             raise ApiError(f"未知数据源：{source}")
         filters = self._filter_params(query)
@@ -317,8 +381,19 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"ok": True, **result})
 
     def _api_summary(self, parsed):
-        query = urllib.parse.parse_qs(parsed.query)
+        query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
         source = (query.get("source") or [""])[0]
+        if source == TOTAL_SOURCE:
+            filters = self._filter_params(query)
+            filters.pop("categories", None)
+            filters["counted"] = self._parse_counted(query)
+            filters["tags"] = _parse_list((query.get("tags") or [None])[0])
+            raw_sources = (query.get("sources") or [None])[0]
+            sources = _parse_list(raw_sources) if raw_sources else list(SOURCES)
+            with self._connect() as conn:
+                summary = total.query_summary(conn, sources=sources, **filters)
+            self._send(200, {"ok": True, "source": source, **summary})
+            return
         if source not in SOURCE_CONFIGS:
             raise ApiError(f"未知数据源：{source}")
         filters = self._filter_params(query)
@@ -337,9 +412,50 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_import_preview_batch()
             elif parsed.path == "/api/import/confirm":
                 self._api_import_confirm()
+            elif parsed.path == "/api/tags":
+                self._api_tags_create()
             else:
                 self._send_error(404, "Not Found")
         except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
+            self._send_error(400, str(exc))
+        except sqlite3.OperationalError as exc:
+            self._send_error(500, f"数据库写入失败：{exc}")
+
+    # ---- PUT / DELETE ----
+
+    def do_PUT(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            if parsed.path == "/api/total/overrides":
+                self._api_total_overrides()
+            elif parsed.path == "/api/tags/apply":
+                self._api_tags_apply()
+            else:
+                match = re.fullmatch(r"/api/tags/(\d+)", parsed.path)
+                if match:
+                    self._api_tags_update(int(match.group(1)))
+                else:
+                    self._send_error(404, "Not Found")
+        except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
+            self._send_error(400, str(exc))
+        except sqlite3.OperationalError as exc:
+            self._send_error(500, f"数据库写入失败：{exc}")
+
+    def do_DELETE(self):
+        parsed = urllib.parse.urlparse(self.path)
+        try:
+            match = re.fullmatch(r"/api/tags/(\d+)", parsed.path)
+            if match:
+                self._api_tags_delete(int(match.group(1)))
+            else:
+                self._send_error(404, "Not Found")
+        except ApiError as exc:
+            self._send_error(400, str(exc))
+        except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
             self._send_error(500, f"数据库写入失败：{exc}")
@@ -481,6 +597,88 @@ class Handler(BaseHTTPRequestHandler):
         with self._connect() as conn:
             result = db.import_parse_result(conn, source, parsed_result, file_name)
         self._send(200, {"ok": True, "file_name": file_name, **result})
+
+    # ---- 收支属性 / 标签 API ----
+
+    def _read_json(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ApiError("请求体为空")
+        try:
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ApiError("请求体不是有效 JSON") from exc
+
+    def _api_total_overrides(self):
+        """批量设收支属性。方向约束铁律：只改计入/不计，永不反向。
+
+        scope=ids    {"counted": 0, "scope": "ids", "ids": ["boc:1", ...]}
+        scope=filter {"counted": 1, "scope": "filter", "filters": {...与 /api/rows 一致}}
+        """
+        body = self._read_json()
+        counted = body.get("counted")
+        if counted not in (0, 1, True, False):
+            raise ApiError("counted 必须是 0 或 1")
+        counted = int(bool(counted))
+        with self._connect() as conn:
+            keys = total.resolve_scope_rows(conn, body)
+            updated = db.set_overrides(conn, keys, counted)
+        self._send(200, {"ok": True, "updated": updated})
+
+    def _api_tags(self):
+        with self._connect() as conn:
+            tags = db.list_tag_groups(conn)
+        self._send(200, {"ok": True, "tags": tags})
+
+    @staticmethod
+    def _tag_name_of(body) -> str:
+        name = (body.get("name") or "").strip()
+        if not name:
+            raise ApiError("标签名不能为空")
+        return name
+
+    def _api_tags_create(self):
+        name = self._tag_name_of(self._read_json())
+        with self._connect() as conn:
+            tag = db.create_tag_group(conn, name)
+        self._send(200, {"ok": True, "tag": tag})
+
+    def _api_tags_update(self, tag_id: int):
+        name = self._tag_name_of(self._read_json())
+        with self._connect() as conn:
+            tag = db.update_tag_group(conn, tag_id, name)
+            if tag is None:
+                raise ApiError("标签不存在")
+        self._send(200, {"ok": True, "tag": tag})
+
+    def _api_tags_delete(self, tag_id: int):
+        with self._connect() as conn:
+            if db.get_tag_group(conn, tag_id) is None:
+                raise ApiError("标签不存在")
+            db.delete_tag_group(conn, tag_id)
+        self._send(200, {"ok": True})
+
+    def _api_tags_apply(self):
+        """批量打（add，幂等）/ 移除（remove）标签。scope 同 overrides。"""
+        body = self._read_json()
+        action = body.get("action")
+        if action not in ("add", "remove"):
+            raise ApiError("action 必须是 add 或 remove")
+        raw_ids = body.get("group_ids") or []
+        try:
+            group_ids = [int(g) for g in raw_ids]
+        except (TypeError, ValueError) as exc:
+            raise ApiError("group_ids 必须是整数列表") from exc
+        if not group_ids:
+            raise ApiError("请选择标签")
+        with self._connect() as conn:
+            existing = {g["id"] for g in db.list_tag_groups(conn)}
+            unknown = [g for g in group_ids if g not in existing]
+            if unknown:
+                raise ApiError(f"标签不存在：{unknown}")
+            keys = total.resolve_scope_rows(conn, body)
+            applied = db.apply_tags(conn, keys, group_ids, action)
+        self._send(200, {"ok": True, "updated": applied})
 
 
 def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = False):

@@ -75,6 +75,85 @@ def test_init_creates_three_tables(conn):
     assert {"boc_transactions", "alipay_transactions", "wechat_transactions"} <= tables
 
 
+def test_init_creates_override_and_tag_tables_without_rules(conn):
+    """三张旁表建齐；transfer_rules 随规则体系废弃被迁移删除（TCY-27）。"""
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    assert {"total_overrides", "tag_groups", "row_tags"} <= tables
+    assert "transfer_rules" not in tables
+
+
+def test_init_drops_legacy_transfer_rules(conn):
+    """旧库升级：既有 transfer_rules 表（含数据）在 init_db 时删除。"""
+    conn.execute("CREATE TABLE transfer_rules (id INTEGER PRIMARY KEY, name TEXT)")
+    conn.execute("INSERT INTO transfer_rules (name) VALUES ('旧规则')")
+    conn.commit()
+    db.init_db(conn.execute("PRAGMA database_list").fetchone()["file"])  # 同一库文件重跑 init_db
+    tables = {r["name"] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    assert "transfer_rules" not in tables
+    assert {"total_overrides", "tag_groups", "row_tags"} <= tables
+
+
+class TestOverridesTable:
+    def test_set_fetch_upsert(self, conn):
+        db.import_parse_result(conn, SOURCE_BOC, _parsed(SOURCE_BOC, BOC_COLUMNS, _boc_rows()), "b.csv")
+        assert db.fetch_overrides(conn) == {}
+        assert db.set_overrides(conn, [("boc", 1), ("boc", 2)], 0) == 2
+        assert db.fetch_overrides(conn) == {"boc:1": 0, "boc:2": 0}
+        # upsert：同键改写不新增行
+        assert db.set_overrides(conn, [("boc", 1)], 1) == 1
+        assert db.fetch_overrides(conn) == {"boc:1": 1, "boc:2": 0}
+        assert conn.execute("SELECT COUNT(*) AS n FROM total_overrides").fetchone()["n"] == 2
+
+
+class TestTagGroupsTable:
+    def test_create_color_cycle(self, conn):
+        first = db.create_tag_group(conn, "差旅")
+        assert first["name"] == "差旅"
+        assert first["color"] == db.TAG_COLORS[0]
+        assert first["row_count"] == 0
+        for name in ["餐饮", "购物"]:
+            db.create_tag_group(conn, name)
+        colors = [g["color"] for g in db.list_tag_groups(conn)]
+        assert colors == db.TAG_COLORS[:3]
+
+    def test_duplicate_name_rejected(self, conn):
+        db.create_tag_group(conn, "差旅")
+        with pytest.raises(db.DataError):
+            db.create_tag_group(conn, "差旅")
+
+    def test_rename(self, conn):
+        group = db.create_tag_group(conn, "差旅")
+        updated = db.update_tag_group(conn, group["id"], "出差")
+        assert updated["name"] == "出差"
+        assert db.update_tag_group(conn, 999, "x") is None
+        db.create_tag_group(conn, "餐饮")
+        with pytest.raises(db.DataError):
+            db.update_tag_group(conn, group["id"], "餐饮")
+
+    def test_delete_cascades_row_tags(self, conn):
+        db.import_parse_result(conn, SOURCE_BOC, _parsed(SOURCE_BOC, BOC_COLUMNS, _boc_rows()), "b.csv")
+        group = db.create_tag_group(conn, "差旅")
+        db.apply_tags(conn, [("boc", 1), ("boc", 2)], [group["id"]], "add")
+        assert db.list_tag_groups(conn)[0]["row_count"] == 2
+        db.delete_tag_group(conn, group["id"])
+        assert db.list_tag_groups(conn) == []
+        assert db.fetch_row_tags(conn) == {}
+
+    def test_apply_tags_add_idempotent_and_remove(self, conn):
+        db.import_parse_result(conn, SOURCE_BOC, _parsed(SOURCE_BOC, BOC_COLUMNS, _boc_rows()), "b.csv")
+        a = db.create_tag_group(conn, "A")
+        b = db.create_tag_group(conn, "B")
+        assert db.apply_tags(conn, [("boc", 1), ("boc", 2)], [a["id"], b["id"]], "add") == 2
+        # 重复打幂等
+        db.apply_tags(conn, [("boc", 1)], [a["id"]], "add")
+        assert {k: len(v) for k, v in db.fetch_row_tags(conn).items()} == {"boc:1": 2, "boc:2": 2}
+        assert db.apply_tags(conn, [("boc", 1)], [b["id"]], "remove") == 1
+        assert {k: [t["name"] for t in v] for k, v in db.fetch_row_tags(conn).items()} == {
+            "boc:1": ["A"], "boc:2": ["A", "B"]}
+
+
 def test_boc_import_and_idempotent_reimport(conn):
     parsed = _parsed(SOURCE_BOC, BOC_COLUMNS, _boc_rows())
     first = db.import_parse_result(conn, SOURCE_BOC, parsed, "b.csv")

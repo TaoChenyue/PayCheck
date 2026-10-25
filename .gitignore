@@ -25,3 +25,7 @@ tmp/
 
 # Temp test data
 test_*.csv
+
+# Local runtime data (real data must never enter the repo)
+paycheck.db
+*.db

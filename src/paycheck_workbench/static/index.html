@@ -20,6 +20,7 @@
 body[data-source="boc"] { --brand: #C8102E; }
 body[data-source="alipay"] { --brand: #1677FF; }
 body[data-source="wechat"] { --brand: #07C160; }
+body[data-source="total"] { --brand: #7C4DFF; }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -35,24 +36,7 @@ body {
   background: #fff; border-bottom: 1px solid var(--border); flex-shrink: 0;
 }
 #topbar .brand { font-size: 17px; font-weight: 600; white-space: nowrap; }
-#btn-collapse {
-  border: none; background: none; cursor: pointer; font-size: 16px; color: var(--text-2);
-  padding: 4px 8px; border-radius: 6px; line-height: 1;
-}
-#btn-collapse:hover { background: var(--row-hover); }
-#tabs { display: flex; gap: 4px; flex: 1; min-width: 0; }
-.tab {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 8px;
-  cursor: pointer; color: var(--text-2); border: none; background: none; font-size: 14px;
-  white-space: nowrap;
-}
-.tab:hover { background: var(--row-hover); }
-.tab.active { color: var(--brand); background: color-mix(in srgb, var(--brand) 8%, #fff); font-weight: 600; }
-.tab .badge {
-  background: color-mix(in srgb, var(--brand) 12%, #fff); color: var(--brand);
-  border-radius: 999px; padding: 1px 8px; font-size: 12px; font-variant-numeric: tabular-nums;
-}
-.topbar-actions { display: flex; gap: 8px; }
+.topbar-actions { display: flex; gap: 8px; margin-left: auto; }
 .btn {
   border: 1px solid var(--border); background: #fff; color: var(--text); border-radius: 8px;
   padding: 7px 14px; cursor: pointer; font-size: 14px; white-space: nowrap;
@@ -64,45 +48,88 @@ body {
 
 /* ---------- 布局 ---------- */
 #layout { display: flex; flex: 1; min-height: 0; }
-#sidebar {
-  width: 280px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--border);
-  padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px;
+
+/* ---------- 左侧导航栏（总账户置顶 + 数据源分组 + 筛选区块） ---------- */
+#sidenav {
+  width: 200px; flex-shrink: 0; background: #fff; border-right: 1px solid var(--border);
+  padding: 14px 10px; overflow-y: auto; overflow-x: hidden;  /* 侧栏仅纵向滚动，横向溢出裁剪 */
 }
-#layout.sidebar-collapsed #sidebar { display: none; }
-.sidebar-section h3 { font-size: 13px; font-weight: 600; color: var(--text-2); margin-bottom: 10px; }
-.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+#sidenav-items { display: flex; flex-direction: column; gap: 2px; }
+.nav-group { font-size: 12px; color: #C4C7CC; padding: 14px 10px 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: none; background: none; border-radius: 8px; padding: 9px 10px; cursor: pointer;
+  font-size: 14px; color: var(--text-2); text-align: left;
+}
+.nav-item:hover { background: var(--row-hover); }
+.nav-item.active { background: color-mix(in srgb, var(--brand) 8%, #fff); color: var(--brand); font-weight: 600; }
+.nav-item.sub { padding-left: 28px; }
+.nav-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid #C4C7CC; flex-shrink: 0; }
+.nav-item.active .nav-dot { border-color: var(--brand); background: var(--brand); }
+.nav-item .badge {
+  margin-left: auto; background: color-mix(in srgb, var(--brand) 12%, #fff); color: var(--brand);
+  border-radius: 999px; padding: 1px 8px; font-size: 12px; font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 左侧导航栏：筛选区块（数据源分组下方） ---------- */
+#filter-block {
+  margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; min-width: 0;
+}
+#filter-toggle {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: none; background: none; border-radius: 8px; padding: 9px 10px; cursor: pointer;
+  font-size: 14px; color: var(--text-2); text-align: left;
+}
+#filter-toggle:hover { background: var(--row-hover); }
+#filter-toggle .filter-caret { width: 10px; font-size: 11px; color: #C4C7CC; flex-shrink: 0; }
+#filter-toggle .filter-badge {
+  margin-left: auto; min-width: 18px; height: 18px; line-height: 18px;
+  border-radius: 999px; background: var(--brand); color: #fff; font-size: 11px; text-align: center;
+  padding: 0 5px; font-variant-numeric: tabular-nums; flex-shrink: 0;
+}
+#filter-toggle .filter-badge[hidden] { display: none; }
+#filter-panel {
+  display: flex; flex-direction: column; gap: 14px; padding: 6px 2px 10px; min-width: 0;
+}
+#filter-panel[hidden] { display: none; }
+.filter-section { min-width: 0; }
+.filter-section h3 { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .preset {
-  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 4px 10px;
+  border: 1px solid var(--border); background: #fff; border-radius: 6px; padding: 3px 8px;
   font-size: 12px; cursor: pointer; color: var(--text-2);
 }
 .preset:hover { border-color: var(--brand); color: var(--brand); }
 .preset.active { border-color: var(--brand); color: var(--brand); background: color-mix(in srgb, var(--brand) 6%, #fff); }
-.date-inputs { display: flex; align-items: center; gap: 6px; }
-.date-inputs input {
-  width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px;
-  color: var(--text);
+/* 侧栏宽度有限：字段纵向排列，输入框 min-width:0 可收缩，不产生横向溢出 */
+.date-inputs, .amount-inputs { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.date-inputs input, .amount-inputs input {
+  width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 8px; font-size: 13px; color: var(--text);
 }
-.date-inputs input:focus { outline: none; border-color: var(--brand); }
-.checkbox-list { display: flex; flex-direction: column; gap: 6px; }
+.date-inputs input:focus, .amount-inputs input:focus { outline: none; border-color: var(--brand); }
+.checkbox-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .checkbox-list label {
-  display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text);
-  padding: 3px 4px; border-radius: 4px;
+  display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text);
+  padding: 3px 4px; border-radius: 4px; min-width: 0;
 }
+.checkbox-list label .lbl { min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.filter-note { font-size: 12px; color: #C4C7CC; margin-top: 6px; line-height: 1.5; overflow-wrap: anywhere; }
 .checkbox-list label:hover { background: var(--row-hover); }
-.checkbox-list input { accent-color: var(--brand); }
-#category-list { max-height: 240px; overflow-y: auto; }
-.amount-inputs { display: flex; align-items: center; gap: 6px; }
-.amount-inputs input {
-  width: 100%; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 13px;
-}
-.amount-inputs input:focus { outline: none; border-color: var(--brand); }
-#btn-reset { margin-top: auto; }
+.checkbox-list input { accent-color: var(--brand); flex-shrink: 0; }
+#category-list { max-height: 240px; overflow-y: auto; overflow-x: hidden; }
+.filter-actions { display: flex; }
+#btn-reset { width: 100%; }
 
 /* ---------- 主区 ---------- */
 #main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 16px 20px; gap: 14px;
   overflow-y: auto;
 }
+/* 视图标题行 */
+#view-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+#view-title h2 { font-size: 18px; font-weight: 600; white-space: nowrap; }
+#view-title-desc { font-size: 13px; color: var(--text-2); }
 #banners:empty { display: none; }
 .banner {
   border-radius: 8px; padding: 10px 14px; font-size: 13px; display: flex; gap: 10px;
@@ -146,13 +173,18 @@ body {
 #colset-panel input { accent-color: var(--brand); }
 
 /* ---------- 表格 ---------- */
-#table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-#table-scroll { overflow-x: auto; }
+/* 面板自身为滚动容器（flex:1 + min-height:0 + overflow:auto）：行数多时不再被
+   列布局收缩裁切，sticky 表头吸附面板顶部（TCY-27 设计 §5-①） */
+#table-wrap { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 10px; flex: 1; min-height: 0; overflow: auto; }
+#table-scroll { overflow: visible; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+/* sticky 写在 thead 上而非 th：新版本 Chromium 对表格单元格的 sticky 已失效
+   （TCY-27 验收缺陷修复） */
+thead { position: sticky; top: 0; z-index: 1; }
 thead th {
   background: var(--thead-bg); color: var(--text-2); font-weight: 500; text-align: left;
   padding: 12px 16px; white-space: nowrap; border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; user-select: none;
+  user-select: none;
 }
 thead th.sortable { cursor: pointer; }
 thead th.sortable:hover { color: var(--text); }
@@ -200,6 +232,7 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
   padding: 72px 20px; text-align: center;
 }
+#empty-state[hidden] { display: none; }  /* hidden 属性优先于 display:flex（有数据时隐藏空态块） */
 #empty-state .empty-title { font-size: 16px; font-weight: 600; }
 #empty-state .empty-desc { font-size: 13px; color: var(--text-2); line-height: 1.7; }
 
@@ -207,6 +240,88 @@ tr.detail-row td { background: #FAFBFC; padding: 14px 20px; cursor: default; }
 .skeleton-row td { padding: 12px 16px; }
 .skeleton-block { height: 14px; border-radius: 4px; background: linear-gradient(90deg, #F0F1F3 25%, #E8E9EC 50%, #F0F1F3 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ---------- 总账户：来源徽标 ---------- */
+.src-badge {
+  display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px;
+  color: #fff; font-weight: 600; white-space: nowrap;
+}
+.src-badge.s-boc { background: #C8102E; }
+.src-badge.s-ali { background: #1677FF; }
+.src-badge.s-wx { background: #07C160; }
+#total-tools { display: flex; align-items: center; gap: 8px; }
+#total-tools[hidden] { display: none; }  /* hidden 属性优先于 display:flex（标签管理仅总账户页签可见） */
+
+/* ---------- 总账户：勾选 / 批量操作栏 / 属性 / 标签 ---------- */
+th.check-head { width: 40px; }
+.row-check { accent-color: var(--brand); cursor: pointer; }
+tr.uncounted td { color: #9A9DA3; }                     /* 「不计」行整行置灰 */
+tr.uncounted .money.income, tr.uncounted .money.expense { color: #9A9DA3; }
+tr.uncounted .tag.income, tr.uncounted .tag.expense { background: #F2F3F5; color: #8C8C8C; }
+tr.uncounted .src-badge { opacity: .55; }
+td[data-act="toggle-counted"] { cursor: pointer; }
+td[data-act="toggle-counted"]:hover { background: var(--row-hover); }
+.tag.row-tag { display: inline-flex; align-items: center; gap: 4px; margin-right: 4px; cursor: default; }
+.tag.row-tag .chip-x {
+  border: none; background: none; cursor: pointer; font-size: 12px; line-height: 1;
+  color: inherit; opacity: .7; padding: 0;
+}
+.tag.row-tag .chip-x:hover { opacity: 1; }
+.tag-add {
+  border: 1px dashed var(--border); background: none; border-radius: 999px; cursor: pointer;
+  padding: 1px 7px; font-size: 12px; color: var(--text-2);
+}
+.tag-add:hover { color: var(--brand); border-color: var(--brand); }
+.tag-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+#batch-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  background: #F5F3FF; border: 1px solid #D9D0FF; border-radius: 8px; padding: 6px 10px; font-size: 13px;
+}
+#batch-bar[hidden] { display: none; }
+#batch-bar .bar-count { font-weight: 600; white-space: nowrap; }
+#batch-bar .bar-note { color: var(--text-2); white-space: nowrap; }
+#batch-bar .bar-link { border: none; background: none; color: var(--brand); cursor: pointer; text-decoration: underline; padding: 0; font-size: 13px; }
+#batch-bar .bar-spacer { margin-left: auto; }
+#batch-bar .btn { padding: 4px 12px; font-size: 13px; }
+
+/* ---------- 标签管理 / 打标签弹窗 ---------- */
+#tags-modal-mask, #tagpick-modal-mask {
+  position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 120;
+  display: flex; align-items: center; justify-content: center;
+}
+#tags-modal-mask[hidden], #tagpick-modal-mask[hidden] { display: none; }
+#tags-modal, #tagpick-modal {
+  background: #fff; border-radius: 12px; width: min(560px, 94vw); max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#tags-modal-header, #tagpick-modal-header {
+  display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
+  font-size: 16px; font-weight: 600;
+}
+#tags-modal-header .close, #tagpick-modal-header .close {
+  margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2);
+}
+#tags-modal-body, #tagpick-modal-body { padding: 20px; }
+.tm-create, .tp-create { display: flex; gap: 8px; margin-bottom: 14px; }
+.tm-create input, .tp-create input {
+  flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+}
+.tm-create input:focus, .tp-create input:focus { outline: none; border-color: var(--brand); }
+.tm-list, .tp-list { display: flex; flex-direction: column; gap: 8px; }
+.tm-item { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+.tm-item .tm-name { flex: 1; min-width: 0; border: 1px solid transparent; border-radius: 6px; padding: 4px 8px; font-size: 13px; }
+.tm-item .tm-name:hover, .tm-item .tm-name:focus { border-color: var(--border); outline: none; }
+.tm-item .tm-count { font-size: 12px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tm-item .btn { padding: 3px 10px; font-size: 12px; }
+.tm-item .btn.danger:hover { color: var(--danger); border-color: var(--danger); }
+.tp-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+  cursor: pointer; font-size: 13px;
+}
+.tp-item:hover { background: var(--row-hover); }
+.tp-item input { accent-color: var(--brand); }
+.tm-empty { color: #C4C7CC; text-align: center; padding: 16px 0; font-size: 13px; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
 /* ---------- 导入弹窗 ---------- */
 #modal-mask {
@@ -299,11 +414,9 @@ tr.bf-error td { color: var(--danger); }
 @keyframes slide { from { margin-left: -40%; } to { margin-left: 100%; } }
 </style>
 </head>
-<body data-source="boc">
+<body data-source="total">
 <header id="topbar">
-  <button id="btn-collapse" title="收起/展开筛选栏">☰</button>
   <div class="brand">账单工作台</div>
-  <nav id="tabs"></nav>
   <div class="topbar-actions">
     <button id="btn-import" class="btn btn-primary">导入账单</button>
     <button id="btn-refresh" class="btn">刷新</button>
@@ -311,45 +424,73 @@ tr.bf-error td { color: var(--danger); }
 </header>
 
 <div id="layout">
-  <aside id="sidebar">
-    <div class="sidebar-section">
-      <h3>日期范围</h3>
-      <div class="presets" id="presets">
-        <button class="preset" data-preset="this-month">本月</button>
-        <button class="preset" data-preset="last-month">上月</button>
-        <button class="preset" data-preset="recent-3m">近3月</button>
-        <button class="preset" data-preset="custom">自定义</button>
+  <aside id="sidenav">
+    <nav id="sidenav-items"></nav>
+    <div id="filter-block">
+      <button type="button" id="filter-toggle">
+        <span class="filter-caret" id="filter-caret">▾</span>
+        <span>筛选</span>
+        <span class="filter-badge" id="filter-badge" hidden></span>
+      </button>
+      <div id="filter-panel">
+        <div class="filter-section">
+          <h3>日期范围</h3>
+          <div class="presets" id="presets">
+            <button class="preset" data-preset="this-month">本月</button>
+            <button class="preset" data-preset="last-month">上月</button>
+            <button class="preset" data-preset="recent-3m">近3月</button>
+            <button class="preset" data-preset="custom">自定义</button>
+          </div>
+          <div class="date-inputs">
+            <input type="date" id="date-from" title="开始日期">
+            <input type="date" id="date-to" title="结束日期">
+          </div>
+        </div>
+        <div class="filter-section">
+          <h3>收/支</h3>
+          <div class="checkbox-list" id="direction-list"></div>
+        </div>
+        <div class="filter-section" id="counted-section" hidden>
+          <h3>属性</h3>
+          <div class="checkbox-list" id="counted-list"></div>
+          <div class="filter-note">不计行已整行置灰；仅计入收支的账单参与汇总</div>
+          <div class="filter-note">属性标记仅作用于总账户视图，不改动数据源原始账单</div>
+        </div>
+        <div class="filter-section" id="tags-section" hidden>
+          <h3>标签</h3>
+          <div class="checkbox-list" id="tag-filter-list"></div>
+          <div class="filter-note">命中任一勾选标签即显示；无标签行仅全部未勾选时显示</div>
+        </div>
+        <div class="filter-section">
+          <h3 id="category-title">分类</h3>
+          <div class="checkbox-list" id="category-list"></div>
+        </div>
+        <div class="filter-section">
+          <h3>金额区间</h3>
+          <div class="amount-inputs">
+            <input type="number" id="amount-min" placeholder="最小" step="0.01">
+            <input type="number" id="amount-max" placeholder="最大" step="0.01">
+          </div>
+        </div>
+        <div class="filter-actions">
+          <button id="btn-reset" class="btn">重置筛选</button>
+        </div>
       </div>
-      <div class="date-inputs">
-        <input type="date" id="date-from">
-        <span>—</span>
-        <input type="date" id="date-to">
-      </div>
     </div>
-    <div class="sidebar-section">
-      <h3>收/支</h3>
-      <div class="checkbox-list" id="direction-list"></div>
-    </div>
-    <div class="sidebar-section">
-      <h3 id="category-title">分类</h3>
-      <div class="checkbox-list" id="category-list"></div>
-    </div>
-    <div class="sidebar-section">
-      <h3>金额区间</h3>
-      <div class="amount-inputs">
-        <input type="number" id="amount-min" placeholder="最小" step="0.01">
-        <span>—</span>
-        <input type="number" id="amount-max" placeholder="最大" step="0.01">
-      </div>
-    </div>
-    <button id="btn-reset" class="btn">重置筛选</button>
   </aside>
 
   <main id="main">
+    <div id="view-title">
+      <h2 id="view-title-name"></h2>
+      <span id="view-title-desc"></span>
+    </div>
     <div id="banners"></div>
     <div id="cards"></div>
     <div id="toolbar">
       <input type="search" id="search" placeholder="搜索…">
+      <div id="total-tools" hidden>
+        <button class="btn" id="btn-tags-manage">🏷 标签管理</button>
+      </div>
       <div id="colset">
         <button class="btn" id="btn-colset">列设置 ▾</button>
         <div id="colset-panel"></div>
@@ -361,6 +502,7 @@ tr.bf-error td { color: var(--danger); }
         <option value="200">200 条/页</option>
       </select>
     </div>
+    <div id="batch-bar" hidden></div>
     <div id="table-wrap">
       <div id="table-scroll">
         <table id="table">
@@ -390,6 +532,24 @@ tr.bf-error td { color: var(--danger); }
   </div>
 </div>
 
+<div id="tags-modal-mask" hidden>
+  <div id="tags-modal">
+    <div id="tags-modal-header">标签管理
+      <button class="close" id="btn-tags-modal-close">×</button>
+    </div>
+    <div id="tags-modal-body"></div>
+  </div>
+</div>
+
+<div id="tagpick-modal-mask" hidden>
+  <div id="tagpick-modal">
+    <div id="tagpick-modal-header">打标签<span id="tagpick-count"></span>
+      <button class="close" id="btn-tagpick-close">×</button>
+    </div>
+    <div id="tagpick-modal-body"></div>
+  </div>
+</div>
+
 <script>
 "use strict";
 /* ================= 状态 ================= */
@@ -401,7 +561,7 @@ const FORMAT_DESC = {
   wechat: "微信支付账单 XLSX（兼容 CSV）",
 };
 
-let currentSource = "boc";
+let currentSource = "total";
 let meta = { counts: {} };
 let optionsCache = {};          // source -> options
 let filtersBySource = {};       // source -> 筛选状态
@@ -415,11 +575,22 @@ let modalFile = null;           // 已选文件（单文件流程）
 let modalFiles = null;          // 批量模式的有效文件列表
 let modalWarn = null;           // 类型不符/同名被跳过的文件提示
 let batchImporting = false;     // 批量写入进行中（禁止关闭弹窗）
+let selectedRows = new Set(); // 总账户勾选的行 id（当前页范围）
+let selectAllFiltered = false; // 全量模式：批量操作作用于整个筛选结果
+let tagsCache = [];           // 标签组列表（总账户筛选面板/弹窗共用）
+let filterPanelOpen = true;   // 筛选区块折叠态（会话内记住，不落库）
+
+const TOTAL = "total";
+const TAB_ORDER = [TOTAL, "boc", "alipay", "wechat"];
+const SRC_BADGE_CLS = { boc: "s-boc", alipay: "s-ali", wechat: "s-wx" };
+const TOTAL_LABEL = "总账户";
 
 function freshFilters() {
-  return { q: "", date_from: "", date_to: "", directions: [], categories: [], amount_min: "", amount_max: "" };
+  return { q: "", date_from: "", date_to: "", directions: [], categories: [],
+           amount_min: "", amount_max: "", sources: ["boc", "alipay", "wechat"],
+           counted: ["1", "0"], tags: [] };  // 属性两档默认全选
 }
-for (const s of ["boc", "alipay", "wechat"]) {
+for (const s of TAB_ORDER) {
   filtersBySource[s] = freshFilters();
   sortBySource[s] = { key: "datetime", order: "desc" };
   pageBySource[s] = 1;
@@ -461,6 +632,9 @@ function dirTagHtml(row) {
   const d = dirInfo(row);
   if (d.label === "—") return '<span class="empty-val">—</span>';
   return `<span class="tag ${d.cls}">${esc(d.label)}</span>`;
+}
+function srcBadgeHtml(source) {
+  return `<span class="src-badge ${SRC_BADGE_CLS[source] || ""}">${esc(SOURCE_LABELS[source] || source)}</span>`;
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); }
@@ -504,12 +678,21 @@ function filterQuery() {
   if (f.date_from) p.set("date_from", f.date_from);
   if (f.date_to) p.set("date_to", f.date_to);
   if (f.directions.length) p.set("directions", f.directions.join(","));
-  if (f.categories.length) p.set("categories", f.categories.join(","));
+  if (currentSource === TOTAL) {
+    if (f.sources.length) p.set("sources", f.sources.join(","));
+    // 属性：两档全选不发参数（不过滤）；勾一档发 1/0；全不勾发空值（匹配 0 行）
+    if (f.counted.length === 1) p.set("counted", f.counted[0]);
+    else if (f.counted.length === 0) p.set("counted", "");
+    if (f.tags.length) p.set("tags", f.tags.join(","));
+  } else if (f.categories.length) {
+    p.set("categories", f.categories.join(","));
+  }
   if (f.amount_min !== "") p.set("amount_min", f.amount_min);
   if (f.amount_max !== "") p.set("amount_max", f.amount_max);
   return p;
 }
 async function loadRows() {
+  clearSelection(false);
   const p = filterQuery();
   p.set("page", pageBySource[currentSource]);
   p.set("page_size", pageSizeBySource[currentSource]);
@@ -529,40 +712,97 @@ async function loadSummary() {
 async function refreshAll() {
   try {
     await Promise.all([loadMeta(), loadOptions(currentSource, true)]);
-    renderTabs(); renderSidebar(); renderToolbar();
+    if (currentSource === TOTAL) await loadTags();
+    renderNav(); renderFilterPanel(); renderToolbar();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) { showErrorBanner(e.message); }
 }
 
 /* ================= 渲染 ================= */
-function renderTabs() {
-  const nav = $("#tabs");
-  nav.innerHTML = "";
-  for (const s of ["boc", "alipay", "wechat"]) {
-    const btn = document.createElement("button");
-    btn.className = "tab" + (s === currentSource ? " active" : "");
-    btn.innerHTML = `${esc(SOURCE_LABELS[s] || s)} <span class="badge">${(meta.counts[s] ?? 0).toLocaleString()}</span>`;
-    btn.onclick = () => switchTab(s);
-    nav.appendChild(btn);
-  }
+function renderNav() {
+  // 左侧导航栏：总账户为一级主视图（置顶、默认选中），数据源三源为二级分组（保留笔数徽标）
+  const nav = $("#sidenav-items");
+  const totalCount = (meta.counts.boc ?? 0) + (meta.counts.alipay ?? 0) + (meta.counts.wechat ?? 0);
+  const item = (s, label, count, sub) =>
+    `<button class="nav-item${sub ? " sub" : ""}${s === currentSource ? " active" : ""}" data-source="${s}">
+       <span class="nav-dot"></span><span>${esc(label)}</span>
+       <span class="badge">${count.toLocaleString()}</span></button>`;
+  nav.innerHTML = item(TOTAL, TOTAL_LABEL, totalCount, false)
+    + '<div class="nav-group">数据源</div>'
+    + TAB_ORDER.filter((s) => s !== TOTAL)
+        .map((s) => item(s, SOURCE_LABELS[s] || s, meta.counts[s] ?? 0, true)).join("");
+  nav.querySelectorAll(".nav-item").forEach((b) =>
+    b.addEventListener("click", () => switchTab(b.dataset.source)));
   document.body.dataset.source = currentSource;
+  renderViewTitle();
+  // 顶栏「导入账单」仅数据源视图可见（总账户导入入口由空态引导）
+  $("#btn-import").hidden = currentSource === TOTAL;
 }
-function renderSidebar() {
+function renderViewTitle() {
+  // 主区顶部视图标题行（视图名 + 一句说明）
+  if (currentSource === TOTAL) {
+    $("#view-title-name").textContent = TOTAL_LABEL;
+    $("#view-title-desc").textContent = "三源合并视图，在这里标记收支与标签";
+  } else {
+    $("#view-title-name").textContent = SOURCE_LABELS[currentSource] || currentSource;
+    $("#view-title-desc").textContent = "原始账单，导入与查看；收支与标签管理请到总账户";
+  }
+}
+function renderFilterPanel() {
+  // 筛选面板字段与原侧栏一一对应（逻辑平移，功能零回归）
   const o = optionsCache[currentSource];
   const f = filtersBySource[currentSource];
   $("#category-title").textContent = o.category_label || "分类";
   // 收/支
   $("#direction-list").innerHTML = o.directions.map((d) =>
-    `<label><input type="checkbox" value="${esc(d)}" ${f.directions.includes(d) ? "checked" : ""}> ${esc(d)}</label>`
+    `<label><input type="checkbox" value="${esc(d)}" ${f.directions.includes(d) ? "checked" : ""}> <span class="lbl">${esc(d)}</span></label>`
   ).join("");
   $("#direction-list").querySelectorAll("input").forEach((el) =>
     el.addEventListener("change", () => {
       f.directions = [...$("#direction-list").querySelectorAll("input:checked")].map((i) => i.value);
       onFilterChange();
     }));
-  // 分类
+  // 总账户专属区块：属性 / 标签（其余页签隐藏）
+  $("#counted-section").hidden = currentSource !== TOTAL;
+  $("#tags-section").hidden = currentSource !== TOTAL;
+  if (currentSource === TOTAL) {
+    $("#counted-list").innerHTML = [["1", "计入"], ["0", "不计"]].map(([v, label]) =>
+      `<label><input type="checkbox" value="${v}" ${f.counted.includes(v) ? "checked" : ""}> <span class="lbl">${esc(label)}</span></label>`
+    ).join("");
+    $("#counted-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.counted = [...$("#counted-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+    $("#tag-filter-list").innerHTML = tagsCache.map((t) =>
+      `<label><input type="checkbox" value="${t.id}" ${f.tags.includes(String(t.id)) ? "checked" : ""}> <span class="tag-dot" style="background:${esc(t.color)}"></span> <span class="lbl">${esc(t.name)}</span></label>`
+    ).join("") || '<div style="font-size:12px;color:#C4C7CC">暂无标签，可在工具栏「标签管理」中创建</div>';
+    $("#tag-filter-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.tags = [...$("#tag-filter-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+  }
+  // 分类：总账户页签为「来源」多选（BOC/支付宝/微信）
+  if (currentSource === TOTAL) {
+    $("#category-list").innerHTML = ["boc", "alipay", "wechat"].map((s) =>
+      `<label><input type="checkbox" value="${s}" ${f.sources.includes(s) ? "checked" : ""}> <span class="lbl">${esc(SOURCE_LABELS[s])}</span></label>`
+    ).join("");
+    $("#category-list").querySelectorAll("input").forEach((el) =>
+      el.addEventListener("change", () => {
+        f.sources = [...$("#category-list").querySelectorAll("input:checked")].map((i) => i.value);
+        onFilterChange();
+      }));
+    $("#date-from").value = f.date_from;
+    $("#date-to").value = f.date_to;
+    $("#amount-min").value = f.amount_min;
+    $("#amount-max").value = f.amount_max;
+    updatePresetActive();
+    updateFilterBadge();
+    return;
+  }
   $("#category-list").innerHTML = o.categories.map((c) =>
-    `<label><input type="checkbox" value="${esc(c)}" ${f.categories.includes(c) ? "checked" : ""}> ${esc(c)}</label>`
+    `<label><input type="checkbox" value="${esc(c)}" ${f.categories.includes(c) ? "checked" : ""}> <span class="lbl">${esc(c)}</span></label>`
   ).join("") || '<div style="font-size:12px;color:#C4C7CC">暂无分类数据</div>';
   $("#category-list").querySelectorAll("input").forEach((el) =>
     el.addEventListener("change", () => {
@@ -575,13 +815,44 @@ function renderSidebar() {
   $("#amount-min").value = f.amount_min;
   $("#amount-max").value = f.amount_max;
   updatePresetActive();
+  updateFilterBadge();
+}
+function activeFilterCount() {
+  // 激活筛选维度计数：日期 / 收支 / 分类（数据源视图）或来源（总账户）/ 属性 / 标签 / 金额区间各计 1
+  const f = filtersBySource[currentSource];
+  let n = 0;
+  if (f.date_from || f.date_to) n++;
+  if (f.directions.length) n++;
+  if (currentSource === TOTAL) {
+    if (f.sources.length && f.sources.length < 3) n++;
+    if (f.counted.length !== 2) n++;
+    if (f.tags.length) n++;
+  } else if (f.categories.length) {
+    n++;
+  }
+  if (f.amount_min !== "" || f.amount_max !== "") n++;
+  return n;
+}
+function updateFilterBadge() {
+  // 区块折叠且存在激活筛选时，侧栏「筛选」标题行显示激活筛选数徽标
+  const badge = $("#filter-badge");
+  const n = activeFilterCount();
+  badge.hidden = filterPanelOpen || n === 0;
+  badge.textContent = n;
+}
+function applyFilterPanelOpen() {
+  // 折叠态同步到面板显隐与标题行箭头，并刷新徽标
+  $("#filter-panel").hidden = !filterPanelOpen;
+  $("#filter-caret").textContent = filterPanelOpen ? "▾" : "▸";
+  updateFilterBadge();
 }
 function renderToolbar() {
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   $("#search").placeholder = o.search_placeholder || "搜索…";
   $("#search").value = filtersBySource[currentSource].q;
-  $("#colset-panel").innerHTML = o.columns.map((c) =>
+  $("#total-tools").hidden = currentSource !== TOTAL;
+  $("#colset-panel").innerHTML = o.columns.filter((c) => !c.fixed).map((c) =>
     `<label><input type="checkbox" value="${esc(c.key)}" ${vis.has(c.key) ? "checked" : ""}> ${esc(c.label)}</label>`
   ).join("");
   $("#colset-panel").querySelectorAll("input").forEach((el) =>
@@ -598,6 +869,9 @@ function renderTableHead() {
   const s = sortBySource[currentSource];
   const head = $("#table-head");
   head.innerHTML = o.columns.filter((c) => vis.has(c.key)).map((c) => {
+    if (c.kind === "checkbox") {
+      return '<th class="check-head"><input type="checkbox" id="head-check" title="全选当前页"></th>';
+    }
     const sortable = c.sort ? " sortable" : "";
     let icon = "";
     if (c.sort && s.key === c.sort && s.order) icon = `<span class="sort-icon">${s.order === "desc" ? "▼" : "▲"}</span>`;
@@ -605,6 +879,15 @@ function renderTableHead() {
   }).join("");
   head.querySelectorAll("th.sortable").forEach((th) =>
     th.addEventListener("click", () => cycleSort(th.dataset.sort)));
+  const headCheck = head.querySelector("#head-check");
+  if (headCheck) headCheck.addEventListener("click", () => {
+    // 表头 ☑ 全选当前页（勾选页级选择，退出全量模式）
+    selectAllFiltered = false;
+    if (headCheck.checked) (lastRows ? lastRows.rows : []).forEach((r) => selectedRows.add(r.id));
+    else selectedRows.clear();
+    document.querySelectorAll("#table-body .row-check").forEach((cb) => { cb.checked = headCheck.checked; });
+    renderBatchBar(lastRows);
+  });
 }
 function cycleSort(sortKey) {
   const s = sortBySource[currentSource];
@@ -617,6 +900,7 @@ function cycleSort(sortKey) {
   loadRows();
 }
 function renderCards(summary) {
+  if (currentSource === TOTAL) { renderTotalCards(summary); return; }
   const o = optionsCache[currentSource];
   const cards = [];
   cards.push({ cls: "income", title: "收入合计", value: "+" + fmtMoney(summary.income_sum), sub: "" });
@@ -633,9 +917,39 @@ function renderCards(summary) {
     `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
   ).join("");
 }
+function renderTotalCards(s) {
+  // 计入口径（设计 v2 §1）：收入合计 / 支出合计 / 净收支 / 计入笔数（副文本 = 不计入笔数）
+  const net = s.net;
+  const cards = [
+    { cls: "income", title: "收入合计", value: "+" + fmtMoney(s.income.sum), sub: `${s.income.count.toLocaleString()} 笔` },
+    { cls: "expense", title: "支出合计", value: "−" + fmtMoney(s.expense.sum), sub: `${s.expense.count.toLocaleString()} 笔` },
+    { cls: "", title: "净收支", value: (net >= 0 ? "+" : "−") + fmtMoney(Math.abs(net)), sub: "收入 − 支出" },
+    { cls: "", title: "计入笔数", value: s.count.toLocaleString(), sub: `不计入 ${s.not_counted.toLocaleString()} 笔` },
+  ];
+  $("#cards").innerHTML = cards.map((c) =>
+    `<div class="card ${c.cls}"><div class="card-title">${esc(c.title)}</div><div class="card-value">${c.value}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ""}</div>`
+  ).join("");
+}
+function countedHtml(row) {
+  // 属性列：不计行显示灰标「不计」，计入行显示「—」；点击切换计入↔不计
+  if (row.counted) return '<span class="empty-val">—</span>';
+  return '<span class="tag neutral">不计</span>';
+}
+function tagsHtml(row) {
+  // 标签列：已打标签 chips（带组颜色，chip 上 × 可移除）+ 末尾「+」打标签
+  const chips = (row.tags || []).map((t) =>
+    `<span class="tag row-tag" data-tag="${t.id}" title="移除「${esc(t.name)}」"
+       style="background:${esc(t.color)}1F;color:${esc(t.color)};border:1px solid ${esc(t.color)}66">
+       ${esc(t.name)}<button class="chip-x" data-act="tag-remove" data-tag="${t.id}" data-name="${esc(t.name)}">×</button></span>`
+  ).join("");
+  return `${chips}<button class="tag-add" data-act="tag-add">＋</button>`;
+}
 function cellHtml(row, col) {
   const o = optionsCache[currentSource];
   const v = row[col.key];
+  if (col.kind === "checkbox") {
+    return `<input type="checkbox" class="row-check" data-id="${esc(row.id)}">`;
+  }
   if (col.kind === "datetime") {
     let text = v || "";
     if (col.key === "datetime" && o.time_col) {
@@ -646,6 +960,9 @@ function cellHtml(row, col) {
   }
   if (col.kind === "direction") return dirTagHtml(row);
   if (col.kind === "amount") return moneyHtml(row);
+  if (col.kind === "source") return srcBadgeHtml(row.source);
+  if (col.kind === "counted") return countedHtml(row);
+  if (col.kind === "tags") return tagsHtml(row);
   if (col.kind === "balance") return v ? `<span class="num">${fmtMoney(v)}</span>` : '<span class="empty-val">—</span>';
   if (col.kind === "status") return statusHtml(v);
   if (col.kind === "copy") {
@@ -664,6 +981,7 @@ function renderTableBodyKeep() {
 let lastRows = null;
 function renderTable(res) {
   lastRows = res;
+  $("#table-scroll").style.display = "";
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const cols = o.columns.filter((c) => vis.has(c.key));
@@ -674,26 +992,147 @@ function renderTable(res) {
     body.innerHTML = "";
     renderEmptyState(res);
     renderPagination(res);
+    renderBatchBar(res);
     return;
   }
   $("#empty-state").hidden = true;
   body.innerHTML = res.rows.map((row) => {
     const tds = cols.map((col) => {
       const cls = (col.kind === "amount" || col.kind === "balance") ? ' class="num"' : (col.kind === "text" ? ' class="ellipsis"' : "");
-      return `<td${cls}>${cellHtml(row, col)}</td>`;
+      const act = col.kind === "counted" ? ' data-act="toggle-counted"' : "";
+      return `<td${cls}${act}>${cellHtml(row, col)}</td>`;
     }).join("");
-    return `<tr class="data-row" data-id="${row.id}">${tds}</tr>
+    const uncounted = currentSource === TOTAL && !row.counted ? " uncounted" : "";
+    return `<tr class="data-row${uncounted}" data-id="${row.id}">${tds}</tr>
             <tr class="detail-row" data-for="${row.id}" hidden><td colspan="${cols.length}"></td></tr>`;
   }).join("");
   body.querySelectorAll("tr.data-row").forEach((tr) => {
     tr.addEventListener("click", (ev) => {
-      if (ev.target.classList.contains("copy-btn")) return;
+      if (ev.target.closest("input, button, [data-act]")) return;
       toggleDetail(tr.dataset.id);
     });
   });
   body.querySelectorAll(".copy-btn").forEach((btn) =>
     btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+  if (currentSource === TOTAL) bindTotalRowEvents();
+  const headCheck = $("#head-check");
+  if (headCheck) headCheck.checked = false;
   renderPagination(res);
+  renderBatchBar(res);
+}
+
+/* ---- 总账户：勾选批量操作 / 属性切换 / 标签 ---- */
+function clearSelection(renderBar) {
+  selectedRows.clear();
+  selectAllFiltered = false;
+  // 同步取消行勾选框与表头全选的视觉勾选（TCY-28 复验 D2）
+  document.querySelectorAll("#table-body .row-check").forEach((cb) => { cb.checked = false; });
+  const headCheck = $("#head-check");
+  if (headCheck) headCheck.checked = false;
+  if (renderBar !== false && lastRows) renderBatchBar(lastRows);
+}
+function scopeFilters() {
+  // 与 /api/rows 一致的筛选参数（filter scope 作用于整个筛选结果）
+  const f = filtersBySource[TOTAL];
+  return {
+    q: f.q || undefined,
+    date_from: f.date_from || undefined,
+    date_to: f.date_to || undefined,
+    directions: f.directions.length ? f.directions : undefined,
+    sources: f.sources.length ? f.sources : undefined,
+    amount_min: f.amount_min || undefined,
+    amount_max: f.amount_max || undefined,
+    counted: f.counted.length === 2 ? undefined : f.counted,
+    tags: f.tags.length ? f.tags.map(Number) : undefined,
+  };
+}
+function currentScope() {
+  if (selectAllFiltered) return { scope: "filter", filters: scopeFilters() };
+  return { scope: "ids", ids: [...selectedRows] };
+}
+function renderBatchBar(res) {
+  // 勾选 ≥1 行出现；筛选结果多于当前页时提供「选择全部筛选结果」全量模式
+  const bar = $("#batch-bar");
+  if (currentSource !== TOTAL || (!selectedRows.size && !selectAllFiltered)) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  bar.hidden = false;
+  const total = res ? res.total : 0;
+  const pageCount = res && res.rows ? res.rows.length : 0;
+  const selText = selectAllFiltered
+    ? `已选全部筛选结果（${total.toLocaleString()} 条）`
+    : `已选 ${selectedRows.size.toLocaleString()} 条`;
+  const allLink = (!selectAllFiltered && total > pageCount)
+    ? '<button class="bar-link" id="bar-select-all">选择全部筛选结果</button>' : "";
+  bar.innerHTML = `
+    <span class="bar-count">${selText}</span>
+    <span class="bar-note">${selectAllFiltered ? "" : `（当前页 ${pageCount} / 筛选共 ${total.toLocaleString()} 条）`}</span>
+    ${allLink}
+    <span class="bar-spacer"></span>
+    <button class="btn" id="bar-counted-in">设为计入</button>
+    <button class="btn" id="bar-counted-out">设为不计</button>
+    <button class="btn" id="bar-tag">打标签…</button>
+    <button class="btn" id="bar-clear">清除</button>`;
+  bar.querySelector("#bar-counted-in").addEventListener("click", () => setCounted(currentScope(), 1));
+  bar.querySelector("#bar-counted-out").addEventListener("click", () => setCounted(currentScope(), 0));
+  bar.querySelector("#bar-tag").addEventListener("click", () => openTagPick(currentScope()));
+  bar.querySelector("#bar-clear").addEventListener("click", clearSelection);
+  const all = bar.querySelector("#bar-select-all");
+  if (all) all.addEventListener("click", () => { selectAllFiltered = true; renderBatchBar(res); });
+}
+async function setCounted(scope, counted, silent) {
+  const res = await api("/api/total/overrides", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...scope, counted }),
+  });
+  if (!res.ok) { showErrorBanner(res.error || "操作失败"); return false; }
+  if (!silent) addBanner("success", `已将 ${res.updated.toLocaleString()} 条设为${counted ? "计入" : "不计"}`, null);
+  await refreshRowsAndSummary();
+  return true;
+}
+async function refreshRowsAndSummary() {
+  try { await Promise.all([loadRows(), loadSummary()]); }
+  catch (e) { showErrorBanner(e.message); }
+}
+function bindTotalRowEvents() {
+  // 勾选列：行内 checkbox 切换（表头为当前页全选，见 renderTableHead）
+  document.querySelectorAll("#table-body .row-check").forEach((cb) =>
+    cb.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (cb.checked) selectedRows.add(cb.dataset.id); else selectedRows.delete(cb.dataset.id);
+      renderBatchBar(lastRows);
+    }));
+  // 属性列点击切换计入↔不计（单行快速修改，即时保存）
+  document.querySelectorAll('#table-body td[data-act="toggle-counted"]').forEach((td) =>
+    td.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const tr = td.closest("tr");
+      const row = (lastRows ? lastRows.rows : []).find((r) => String(r.id) === String(tr.dataset.id));
+      if (!row) return;
+      await setCounted({ scope: "ids", ids: [row.id] }, row.counted ? 0 : 1, true);
+    }));
+  // 标签列：「+」打标签（同一弹层，单行 scope）
+  document.querySelectorAll('[data-act="tag-add"]').forEach((btn) =>
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openTagPick({ scope: "ids", ids: [btn.closest("tr").dataset.id] });
+    }));
+  // chip × 移除单行标签
+  document.querySelectorAll('[data-act="tag-remove"]').forEach((btn) =>
+    btn.addEventListener("click", async (ev) => {
+      ev.stopPropagation();
+      const id = btn.closest("tr").dataset.id;
+      const res = await api("/api/tags/apply", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: "ids", action: "remove", group_ids: [Number(btn.dataset.tag)], ids: [id] }),
+      });
+      if (!res.ok) { showErrorBanner(res.error || "移除标签失败"); return; }
+      await refreshRowsAndSummary();
+    }));
 }
 function toggleDetail(id) {
   const detailRow = document.querySelector(`tr.detail-row[data-for="${id}"]`);
@@ -703,8 +1142,15 @@ function toggleDetail(id) {
   document.querySelectorAll("tr.detail-row:not([hidden])").forEach((r) => { r.hidden = true; });
   expandedRow = null;
   if (!willOpen) return;
-  const row = lastRows.rows.find((r) => String(r.id) === String(id));
+  let row = null;
+  if (lastRows && lastRows.rows) row = lastRows.rows.find((r) => String(r.id) === String(id)) || null;
   if (!row) return;
+  if (currentSource === TOTAL) {
+    renderTotalDetail(detailRow.querySelector("td"), row);
+    detailRow.hidden = false;
+    expandedRow = id;
+    return;
+  }
   const o = optionsCache[currentSource];
   const vis = visibleColsBySource[currentSource];
   const detailCols = o.columns.filter((c) => !vis.has(c.key));
@@ -725,20 +1171,47 @@ function toggleDetail(id) {
   detailRow.hidden = false;
   expandedRow = id;
 }
+function renderTotalDetail(td, row) {
+  // 总账户行详情：展开该源原始全部列（与单源页签一致）
+  const srcOptions = optionsCache[row.source];
+  const items = srcOptions.columns.map((c) => {
+    let v = row.raw ? row.raw[c.key] : "";
+    if (c.kind === "datetime" && c.key === "datetime" && srcOptions.time_col) {
+      v = [row.raw[srcOptions.date_col], row.raw[srcOptions.time_col]].filter(Boolean).join(" ");
+    }
+    if (c.key === "支付方式" && v === "/") v = "—";
+    const copy = (c.kind === "copy" && v) ? `<button class="copy-btn" data-copy="${esc(v)}">复制</button>` : "";
+    return `<div class="detail-item"><div class="k">${esc(c.label)}</div><div class="v">${v ? esc(v) : "—"}${copy}</div></div>`;
+  });
+  items.push(`<div class="detail-item"><div class="k">来源文件</div><div class="v">${esc(row.source_file)}</div></div>`);
+  items.push(`<div class="detail-item"><div class="k">导入时间</div><div class="v">${esc(row.imported_at)}</div></div>`);
+  td.innerHTML = `<div class="detail-grid">${items.join("")}</div>`;
+  td.querySelectorAll(".copy-btn").forEach((btn) =>
+    btn.addEventListener("click", () => copyText(btn.dataset.copy)));
+}
 function renderEmptyState(res) {
   const el = $("#empty-state");
   const hasFilter = JSON.stringify(filtersBySource[currentSource]) !== JSON.stringify(freshFilters());
-  const o = optionsCache[currentSource];
+  const btn = el.querySelector("#btn-import-empty");
   if (hasFilter) {
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "无匹配结果";
     el.querySelector(".empty-desc").textContent = "当前筛选条件下没有账单记录，试试调整或重置筛选条件";
-    el.querySelector("#btn-import-empty").style.display = "none";
+    btn.style.display = "none";
+  } else if (currentSource === TOTAL) {
+    // 总账户空态（三源皆空）：引导去数据源导入，替换原「导入账单」按钮
+    el.hidden = false;
+    el.querySelector(".empty-title").textContent = "暂无账单数据";
+    el.querySelector(".empty-desc").textContent = "总账户汇总三个数据源的账单，请先到数据源视图导入原始账单";
+    btn.style.display = "";
+    btn.textContent = "去数据源导入";
   } else {
+    const o = optionsCache[currentSource];
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "暂无账单数据";
     el.querySelector(".empty-desc").textContent = `点击下方按钮导入第一笔账单。${o.label} 支持格式：${FORMAT_DESC[currentSource]}`;
-    el.querySelector("#btn-import-empty").style.display = "";
+    btn.style.display = "";
+    btn.textContent = "导入账单";
   }
 }
 function renderPagination(res) {
@@ -760,6 +1233,7 @@ function showSkeleton() {
   body.innerHTML = Array.from({ length: n }).map(() =>
     `<tr class="skeleton-row"><td colspan="12"><div class="skeleton-block"></div></td></tr>`).join("");
   $("#pagination").innerHTML = "";
+  $("#batch-bar").hidden = true;
 }
 function showErrorBanner(message) {
   addBanner("error", message, false);
@@ -789,16 +1263,22 @@ async function switchTab(source) {
   if (source === currentSource) return;
   currentSource = source;
   document.body.dataset.source = source;
-  renderTabs();
+  renderNav();
   try {
     await loadOptions(source, false);
-    renderSidebar(); renderToolbar();
+    if (source === TOTAL) {
+      // 总账户行详情展开依赖各源列信息；筛选面板标签区块依赖标签列表
+      await Promise.all(["boc", "alipay", "wechat"].map((s) => loadOptions(s, false)));
+      await loadTags();
+    }
+    renderFilterPanel(); renderToolbar();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) { showErrorBanner(e.message); }
 }
 const onFilterChange = debounce(() => {
   pageBySource[currentSource] = 1;
   updatePresetActive();
+  updateFilterBadge();
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }, 300);
 function updatePresetActive() {
@@ -849,13 +1329,168 @@ function applyPreset(preset) {
 }
 function resetFilters() {
   filtersBySource[currentSource] = freshFilters();
-  renderSidebar();
+  renderFilterPanel();
   pageBySource[currentSource] = 1;
   loadRows().then(loadSummary).catch((e) => showErrorBanner(e.message));
 }
 
+/* ================= 标签：管理弹窗 / 打标签弹层 ================= */
+async function loadTags() {
+  const res = await api("/api/tags");
+  if (!res.ok) throw new Error(res.error || "获取标签失败");
+  tagsCache = res.tags || [];
+  return tagsCache;
+}
+function pruneTagFilter() {
+  // 标签被删除后从筛选状态中移除
+  const f = filtersBySource[TOTAL];
+  f.tags = f.tags.filter((id) => tagsCache.some((t) => String(t.id) === id));
+}
+
+/* ---- 标签管理弹窗 ---- */
+function openTagsModal() {
+  $("#tags-modal-mask").hidden = false;
+  loadTagsManage().catch((e) => showErrorBanner(e.message));
+}
+function closeTagsModal() {
+  $("#tags-modal-mask").hidden = true;
+}
+async function loadTagsManage() {
+  await loadTags();
+  renderTagsManage();
+}
+function renderTagsManage() {
+  $("#tags-modal-body").innerHTML = `
+    <div class="tm-create">
+      <input id="tm-new-name" placeholder="新标签名">
+      <button class="btn btn-primary" id="tm-create">创建</button>
+    </div>
+    <div class="tm-list">${tagsCache.map(renderTagManageItem).join("") || '<div class="tm-empty">还没有标签，在上方输入名称创建</div>'}</div>`;
+  $("#tm-create").addEventListener("click", createTagFromManage);
+  $("#tm-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createTagFromManage(); });
+  document.querySelectorAll("#tags-modal-body .tm-item").forEach((item) => {
+    const id = Number(item.dataset.id);
+    const tag = tagsCache.find((t) => t.id === id);
+    item.querySelector('[data-act="rename"]').addEventListener("click", async () => {
+      const name = item.querySelector(".tm-name").value.trim();
+      if (!name) { alert("标签名不能为空"); return; }
+      const res = await api(`/api/tags/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) { alert(res.error || "改名失败"); return; }
+      await afterTagMutation();
+    });
+    item.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+      if (!confirm(`删除标签「${tag.name}」？仅解除标签，不影响账单。`)) return;
+      const res = await api(`/api/tags/${id}`, { method: "DELETE" });
+      if (!res.ok) { alert(res.error || "删除失败"); return; }
+      await afterTagMutation();
+    });
+  });
+}
+function renderTagManageItem(t) {
+  return `<div class="tm-item" data-id="${t.id}">
+    <span class="tag-dot" style="background:${esc(t.color)}"></span>
+    <input class="tm-name" value="${esc(t.name)}">
+    <span class="tm-count">${t.row_count.toLocaleString()} 条</span>
+    <button class="btn" data-act="rename">改名</button>
+    <button class="btn danger" data-act="delete">删除</button>
+  </div>`;
+}
+async function createTagFromManage() {
+  const input = $("#tm-new-name");
+  const name = input.value.trim();
+  if (!name) { alert("标签名不能为空"); return; }
+  const res = await api("/api/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) { alert(res.error || "创建失败"); return; }
+  input.value = "";
+  await afterTagMutation();
+}
+async function afterTagMutation() {
+  // 标签变更后：弹窗列表 / 筛选面板标签区块 / 当前视图（标签列与筛选）同步刷新
+  await loadTags();
+  pruneTagFilter();
+  renderTagsManage();
+  renderFilterPanel();
+  if (currentSource === TOTAL) await refreshRowsAndSummary();
+}
+
+/* ---- 打标签弹层（批量栏「打标签…」与行内「+」共用） ---- */
+let tagPickScope = null;      // 当前打标签作用范围（ids / filter scope）
+let tagPickChecked = new Set();
+async function openTagPick(scope) {
+  tagPickScope = scope;
+  tagPickChecked = new Set();
+  try { await loadTags(); } catch (e) { showErrorBanner(e.message); return; }
+  renderTagPick();
+  $("#tagpick-modal-mask").hidden = false;
+  $("#tagpick-count").textContent = scope.scope === "filter" ? "（整个筛选结果）" : `（${scope.ids.length} 条）`;
+}
+function closeTagPick() {
+  $("#tagpick-modal-mask").hidden = true;
+  tagPickScope = null;
+}
+function renderTagPick() {
+  $("#tagpick-modal-body").innerHTML = `
+    <div class="tp-list">${tagsCache.map((t) =>
+      `<label class="tp-item"><input type="checkbox" value="${t.id}" ${tagPickChecked.has(t.id) ? "checked" : ""}>
+       <span class="tag-dot" style="background:${esc(t.color)}"></span> ${esc(t.name)}</label>`).join("")
+      || '<div class="tm-empty">还没有标签，在下方新建后自动勾选</div>'}</div>
+    <div class="tp-create">
+      <input id="tp-new-name" placeholder="新标签名（创建后自动勾选）">
+      <button class="btn" id="tp-create">＋ 新建</button>
+    </div>
+    <div class="form-actions">
+      <button class="btn" id="tp-cancel">取消</button>
+      <button class="btn btn-primary" id="tp-apply" ${tagPickChecked.size ? "" : "disabled"}>应用（增量追加）</button>
+    </div>`;
+  document.querySelectorAll("#tagpick-modal-body .tp-item input").forEach((cb) =>
+    cb.addEventListener("change", () => {
+      cb.checked ? tagPickChecked.add(Number(cb.value)) : tagPickChecked.delete(Number(cb.value));
+      renderTagPick();
+    }));
+  $("#tp-cancel").addEventListener("click", closeTagPick);
+  $("#tp-apply").addEventListener("click", submitTagPick);
+  $("#tp-create").addEventListener("click", createTagFromPick);
+  $("#tp-new-name").addEventListener("keydown", (e) => { if (e.key === "Enter") createTagFromPick(); });
+}
+async function createTagFromPick() {
+  const input = $("#tp-new-name");
+  const name = input.value.trim();
+  if (!name) { alert("标签名不能为空"); return; }
+  const res = await api("/api/tags", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) { alert(res.error || "创建失败"); return; }
+  await loadTags();
+  tagPickChecked.add(res.tag.id);
+  renderTagPick();
+  renderFilterPanel();  // 筛选面板标签区块同步
+}
+async function submitTagPick() {
+  const res = await api("/api/tags/apply", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...tagPickScope, action: "add", group_ids: [...tagPickChecked] }),
+  });
+  if (!res.ok) { showErrorBanner(res.error || "打标签失败"); return; }
+  addBanner("success", `已为 ${res.updated.toLocaleString()} 条打标签`, null);
+  closeTagPick();
+  await loadTags();
+  await refreshRowsAndSummary();
+}
+
 /* ================= 导入流程 ================= */
 function openModal() {
+  if (currentSource === TOTAL) return;  // 导入仅限数据源视图（总账户无导入入口，后端亦拒 source=total）
   modalSource = currentSource;
   modalFile = null;
   modalFiles = null;
@@ -1272,11 +1907,22 @@ function renderBatchDone(results) {
 
 /* ================= 事件绑定 ================= */
 $("#btn-import").addEventListener("click", openModal);
-$("#btn-import-empty").addEventListener("click", openModal);
+$("#btn-import-empty").addEventListener("click", () => {
+  if (currentSource === TOTAL) switchTab("boc");  // 总账户空态「去数据源导入」→ 跳转第一个数据源视图
+  else openModal();
+});
+$("#filter-toggle").addEventListener("click", () => {
+  filterPanelOpen = !filterPanelOpen;
+  applyFilterPanelOpen();
+});
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
 $("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
-$("#btn-collapse").addEventListener("click", () => $("#layout").classList.toggle("sidebar-collapsed"));
+$("#btn-tags-manage").addEventListener("click", openTagsModal);
+$("#btn-tags-modal-close").addEventListener("click", closeTagsModal);
+$("#tags-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tags-modal-mask") closeTagsModal(); });
+$("#btn-tagpick-close").addEventListener("click", closeTagPick);
+$("#tagpick-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tagpick-modal-mask") closeTagPick(); });
 $("#btn-reset").addEventListener("click", resetFilters);
 $("#search").addEventListener("input", debounce((e) => {
   filtersBySource[currentSource].q = e.target.value.trim();
@@ -1304,11 +1950,17 @@ document.addEventListener("click", (e) => {
   try {
     await loadMeta();
     await loadOptions(currentSource, false);
-    renderTabs(); renderSidebar(); renderToolbar();
+    if (currentSource === TOTAL) {
+      // 与 switchTab 的总账户分支一致：行详情依赖各源列信息，筛选面板标签区块依赖标签列表
+      await Promise.all(["boc", "alipay", "wechat"].map((s) => loadOptions(s, false)));
+      await loadTags();
+    }
+    renderNav(); renderFilterPanel(); renderToolbar();
+    applyFilterPanelOpen();
     await Promise.all([loadRows(), loadSummary()]);
   } catch (e) {
     showErrorBanner(e.message);
-    renderTabs();
+    renderNav();
   }
 })();
 </script>
