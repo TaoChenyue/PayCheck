@@ -79,13 +79,18 @@ def _get_engine(device: str = "gpu"):
         log.info("加载 PaddleOCR 模型 (device=%s)...", device)
 
         try:
-            _ocrs[device] = PaddleOCR(
-                lang='ch',
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-                device=device,
-            )
+            kwargs = {
+                'lang': 'ch',
+                'use_doc_orientation_classify': False,
+                'use_doc_unwarping': False,
+                'use_textline_orientation': False,
+                'device': device,
+            }
+            if device == 'cpu':
+                # paddle 3.4.0 CPU oneDNN 推理不可用（PIR 属性转换报错，识别 0 条），
+                # 显式禁用 MKLDNN 走通用算子路径（旧版 paddleocr 无此参数时走下方降级）
+                kwargs['enable_mkldnn'] = False
+            _ocrs[device] = PaddleOCR(**kwargs)
         except (TypeError, ValueError):
             _ocrs[device] = PaddleOCR(lang='ch', device=device)
     return _ocrs[device]
