@@ -1,4 +1,4 @@
-"""命令行入口：python -m paycheck_workbench / paycheck-workbench"""
+"""命令行入口：paycheck（别名 paycheck-workbench）/ python -m paycheck_workbench"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from paycheck_workbench import __version__, db
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="paycheck-workbench",
+        prog="paycheck",
         description="账单工作台：BOC / 支付宝 / 微信账单的本地 HTML 展示与 SQLite 导入",
     )
     parser.add_argument("--db", default=None, help=f"SQLite 库文件路径（默认 {db.DEFAULT_DB_PATH}）")
