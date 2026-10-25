@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
@@ -35,19 +36,41 @@ def gpu_available_cached() -> Optional[bool]:
 
 
 def _detect_gpu() -> bool:
-    """探测 paddle 是否具备可用 GPU（仅探测，不加载 OCR 模型）。
+    """探测 paddle 是否具备可用的 GPU 推理环境（仅探测，不加载 OCR 模型）。
 
     torch 必须先于 paddle 导入：Windows 上 paddle 的 DLL 搜索路径会干扰 torch
     加载自身的 shm.dll（WinError 127），与 ocr_engine 的导入顺序保持一致。
+    GPU 可用 = CUDA 编译 + 设备数 > 0 + cudnn DLL 就位（缺 cudnn 时 GPU 推理
+    运行时必失败，auto 模式按不可用处理走 CPU）。
     """
     try:
         import torch  # noqa: F401
         import paddle
-        return bool(
-            paddle.device.is_compiled_with_cuda()
-            and paddle.device.cuda.device_count() > 0
-        )
+        if not (paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0):
+            return False
+        return _cudnn_available(paddle)
     except Exception:
+        return False
+
+
+def _cudnn_available(paddle) -> bool:
+    """cudnn DLL 是否可加载（仅 Windows 检查；其余平台交由 paddle 自行处理）。"""
+    if os.name != "nt":
+        return True
+    import ctypes
+
+    # 与 ocr_engine._add_nvidia_dll_dirs 同源：pip 安装的 nvidia-*-cu12 包
+    site_packages = os.path.dirname(os.path.dirname(os.path.abspath(paddle.__file__)))
+    nvidia_root = os.path.join(site_packages, "nvidia")
+    if os.path.isdir(nvidia_root):
+        for name in os.listdir(nvidia_root):
+            bin_dir = os.path.join(nvidia_root, name, "bin")
+            if os.path.isdir(bin_dir):
+                os.add_dll_directory(bin_dir)
+    try:
+        ctypes.WinDLL("cudnn64_9.dll")
+        return True
+    except OSError:
         return False
 
 
