@@ -1837,8 +1837,10 @@ function batchFileCardHtml(model, f, i) {
   </div>`;
 }
 function renderBatchPreview(model, mode) {
-  // mode: "import"（默认，批量导入流程）/ "convert"（PDF 转换产物一键导入，复用同一预览 UI）
+  // mode: "import"（默认，批量导入流程渲染进 #modal-body）/
+  //       "convert"（PDF 转换产物一键导入，渲染进 #convert-body，遮罩不变）
   mode = mode || "import";
+  const body = $(mode === "convert" ? "#convert-body" : "#modal-body");
   const totals = batchTotals(model);
   const warn = modalWarn ? `<div class="modal-warn">${esc(modalWarn)}</div>` : "";
   const errorFiles = model.items.filter((f) => f.error && !f.removed);
@@ -1850,7 +1852,7 @@ function renderBatchPreview(model, mode) {
   if (totals.date_min) extra.push(`覆盖日期 ${esc(totals.date_min)} ~ ${esc(totals.date_max)}`);
   const distLine = totals.distribution.map((d) => `${esc(d.label)} ${d.count.toLocaleString()} 笔 · ${fmtMoney(d.sum)}`).join(" ｜ ");
   if (distLine) extra.push(distLine);
-  $("#modal-body").innerHTML = `
+  body.innerHTML = `
     ${warn}${errNote}
     <div class="preview-file">已选择 ${totals.active_count} 个文件（${esc(SOURCE_LABELS[model.source] || model.source)}）</div>
     <div class="preview-block">
@@ -1873,7 +1875,7 @@ function renderBatchPreview(model, mode) {
       <button class="btn btn-primary" id="btn-confirm" ${canConfirm ? "" : "disabled"}>确认导入${totals.new_count ? `（${totals.new_count.toLocaleString()} 条）` : ""}</button>
     </div>`;
   // 卡片事件：展开/收起、移除（移除后合并统计即时重算）
-  document.querySelectorAll("#modal-body .file-card").forEach((card) => {
+  body.querySelectorAll(".file-card").forEach((card) => {
     const item = model.items[Number(card.dataset.i)];
     card.querySelector(".file-card-head").addEventListener("click", () => {
       if (model.expanded.has(item.name)) model.expanded.delete(item.name);
@@ -1893,13 +1895,13 @@ function renderBatchPreview(model, mode) {
       renderBatchPreview(model, mode);
     });
   });
-  $("#btn-reselect").addEventListener("click", () => {
+  body.querySelector("#btn-reselect").addEventListener("click", () => {
     modalWarn = null;
     if (mode === "convert") renderConvertResult(convertJob);
     else renderModalSelect();
   });
-  $("#btn-cancel").addEventListener("click", () => { if (mode === "convert") closeConvertModal(); else closeModal(); });
-  $("#btn-confirm").addEventListener("click", () => {
+  body.querySelector("#btn-cancel").addEventListener("click", () => { if (mode === "convert") closeConvertModal(); else closeModal(); });
+  body.querySelector("#btn-confirm").addEventListener("click", () => {
     if (mode === "convert") confirmConvertImport(model);
     else confirmBatchImport(model);
   });
