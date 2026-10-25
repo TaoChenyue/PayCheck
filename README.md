@@ -143,15 +143,27 @@ result = process_folder("./statements/", force=True)
 ## 项目结构
 
 ```
-src/boc_pdf2csv/
-├── cli.py        # 命令行入口 (argparse)
-├── pdf_render.py # PDF → 高清图片
-├── ocr_engine.py # PaddleOCR 识别引擎
-├── layout.py     # OCR 版面解析 → 交易行
-├── pipeline.py   # 管线编排：单 PDF / 批量文件夹
-├── csv_writer.py # 交易 → 13 列 CSV
-├── __main__.py   # python -m 入口
-└── __init__.py   # 公开 API
+src/
+├── boc_pdf2csv/           # PDF → CSV 转换工具
+│   ├── cli.py             # 命令行入口 (argparse)
+│   ├── pdf_render.py      # PDF → 高清图片
+│   ├── ocr_engine.py      # PaddleOCR 识别引擎
+│   ├── layout.py          # OCR 版面解析 → 交易行
+│   ├── pipeline.py        # 管线编排：单 PDF / 批量文件夹
+│   ├── csv_writer.py      # 交易 → 13 列 CSV
+│   ├── __main__.py        # python -m 入口
+│   └── __init__.py        # 公开 API
+└── paycheck_workbench/    # 账单工作台
+    ├── cli.py             # 命令行入口 (argparse)
+    ├── db.py              # SQLite 存储层：明细表 / 导入 / 筛选 / 覆盖 / 标签
+    ├── server.py          # 标准库 HTTP 服务 + JSON API
+    ├── sources.py         # 三源列定义、逻辑列与去重键
+    ├── total.py           # 总账户统一映射 / 有效属性 / 标签 / 分页
+    ├── parsing/           # BOC / 支付宝 / 微信解析器（表头定位）
+    ├── static/            # 单页前端 index.html
+    ├── __main__.py        # python -m 入口
+    └── __init__.py
+tests/                     # pytest：解析层 / 存储层 / HTTP 服务 / 总账户 / 标签
 ```
 
 ## 依赖
@@ -162,6 +174,7 @@ src/boc_pdf2csv/
 | PyMuPDF | PDF 渲染为高清图片 |
 | opencv-python + Pillow + numpy | 图像处理 |
 | tqdm | 进度条 |
+| openpyxl | 微信账单 XLSX 解析（工作台） |
 
 ## 许可证
 
