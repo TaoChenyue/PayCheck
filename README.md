@@ -1,7 +1,7 @@
 <p align="center">
-  <h1 align="center">📄 boc-pdf2csv</h1>
-  <p align="center"><strong>中国银行 PDF 对账单 → CSV 转换工具</strong></p>
-  <p align="center">纯 Python 命令行工具：PDF 渲染 → OCR 识别 → 结构化 CSV，无需任何 Web 框架</p>
+  <h1 align="center">📄 PayCheck</h1>
+  <p align="center"><strong>中国银行 PDF 对账单 → CSV 转换工具 + 本地账单工作台</strong></p>
+  <p align="center">PDF 渲染 → OCR → 结构化 CSV；三源账单 SQLite 导入 → HTML 展示、收支属性与标签管理（Python 标准库 HTTP 服务，无 Web 框架）</p>
 </p>
 
 <p align="center">
@@ -15,9 +15,14 @@
 
 ## 简介
 
-**boc-pdf2csv** 是一个独立的 Python 包，将中国银行（BOC）PDF 对账单批量转换为标准 CSV 文件。
+本项目包含两个工具：
 
-处理管线：
+- **boc-pdf2csv**：中国银行（BOC）PDF 对账单 → 标准 CSV 的命令行转换工具。
+- **paycheck-workbench**：本地账单工作台（标准库 HTTP 服务）：BOC / 支付宝 / 微信三源原始账单导入 SQLite 后 HTML 展示，收支属性与标签统一在「总账户」视图管理（见「账单工作台」）。
+
+整体工作流：**原始账单导入（数据源视图，只读）→ 总账户做收支与标签管理（三源合并视图）**。
+
+boc-pdf2csv 处理管线：
 
 ```
 PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → 交易去重排序 → CSV
@@ -33,7 +38,7 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 ## 安装
 
 ```bash
-# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版）
+# 使用 uv（推荐，自动从 Paddle 官方源安装 CPU 版；含工作台 paycheck-workbench 全部依赖）
 uv sync
 
 # 安装 GPU 加速版（可选，CUDA 12.6）
@@ -53,30 +58,32 @@ uv pip install nvidia-cuda-runtime-cu12 nvidia-cublas-cu12 nvidia-cudnn-cu12
 
 ```bash
 # 基本用法：文件夹内每个 PDF → 同名 CSV（已存在则跳过）
-boc-pdf2csv ./statements/
+uv run boc-pdf2csv ./statements/
 
 # 强制重新导出：同名 CSV 已存在时覆盖而不是跳过
-boc-pdf2csv ./statements/ --force
+uv run boc-pdf2csv ./statements/ --force
 
 # 调整渲染精度（低配机器可用 2.0）
-boc-pdf2csv ./statements/ --scale 2.0
+uv run boc-pdf2csv ./statements/ --scale 2.0
 
 # 延长超时（大批量文件）
-boc-pdf2csv ./statements/ --timeout 120
+uv run boc-pdf2csv ./statements/ --timeout 120
 
 # 无 GPU 机器使用 CPU 推理（默认强制 GPU）
-boc-pdf2csv ./statements/ --device cpu
+uv run boc-pdf2csv ./statements/ --device cpu
 
 # 查看版本 / 帮助
-boc-pdf2csv --version
-boc-pdf2csv --help
+uv run boc-pdf2csv --version
+uv run boc-pdf2csv --help
 
 # 详细日志
-boc-pdf2csv ./statements/ --verbose
+uv run boc-pdf2csv ./statements/ --verbose
 
 # 通过 Python 模块调用
-python -m boc_pdf2csv ./statements/
+uv run python -m boc_pdf2csv ./statements/
 ```
+
+> 以上示例基于推荐的 uv 安装方式；`pip install -e .` 安装后可直接运行 `boc-pdf2csv`（不带 `uv run` 前缀）。
 
 `2025-01.pdf` 转换后得到同目录下的 `2025-01.csv`；若该 CSV 已存在则默认跳过此 PDF，删除对应 CSV 或加 `--force` 可重新转换（`--force` 会覆盖已有 CSV）。
 
@@ -136,15 +143,27 @@ result = process_folder("./statements/", force=True)
 ## 项目结构
 
 ```
-src/boc_pdf2csv/
-├── cli.py        # 命令行入口 (argparse)
-├── pdf_render.py # PDF → 高清图片
-├── ocr_engine.py # PaddleOCR 识别引擎
-├── layout.py     # OCR 版面解析 → 交易行
-├── pipeline.py   # 管线编排：单 PDF / 批量文件夹
-├── csv_writer.py # 交易 → 13 列 CSV
-├── __main__.py   # python -m 入口
-└── __init__.py   # 公开 API
+src/
+├── boc_pdf2csv/           # PDF → CSV 转换工具
+│   ├── cli.py             # 命令行入口 (argparse)
+│   ├── pdf_render.py      # PDF → 高清图片
+│   ├── ocr_engine.py      # PaddleOCR 识别引擎
+│   ├── layout.py          # OCR 版面解析 → 交易行
+│   ├── pipeline.py        # 管线编排：单 PDF / 批量文件夹
+│   ├── csv_writer.py      # 交易 → 13 列 CSV
+│   ├── __main__.py        # python -m 入口
+│   └── __init__.py        # 公开 API
+└── paycheck_workbench/    # 账单工作台
+    ├── cli.py             # 命令行入口 (argparse)
+    ├── db.py              # SQLite 存储层：明细表 / 导入 / 筛选 / 覆盖 / 标签
+    ├── server.py          # 标准库 HTTP 服务 + JSON API
+    ├── sources.py         # 三源列定义、逻辑列与去重键
+    ├── total.py           # 总账户统一映射 / 有效属性 / 标签 / 分页
+    ├── parsing/           # BOC / 支付宝 / 微信解析器（表头定位）
+    ├── static/            # 单页前端 index.html
+    ├── __main__.py        # python -m 入口
+    └── __init__.py
+tests/                     # pytest：解析层 / 存储层 / HTTP 服务 / 总账户 / 标签
 ```
 
 ## 依赖
@@ -155,6 +174,7 @@ src/boc_pdf2csv/
 | PyMuPDF | PDF 渲染为高清图片 |
 | opencv-python + Pillow + numpy | 图像处理 |
 | tqdm | 进度条 |
+| openpyxl | 微信账单 XLSX 解析（工作台） |
 
 ## 许可证
 
@@ -168,13 +188,15 @@ src/boc_pdf2csv/
 本地 Web 工具：BOC / 支付宝 / 微信三源账单的 HTML 展示 + SQLite 导入（Python 标准库 HTTP 服务，无 Web 框架）。
 
 ```bash
-# 启动（默认库文件 paycheck.db，相对启动目录；端口 8765）
-paycheck-workbench
-# 自定义库文件与端口，并自动打开浏览器
-paycheck-workbench --db ./my.db --port 8765 --open
+# 启动并自动打开浏览器（默认库文件 paycheck.db，相对启动目录；端口 8765，仅绑定本机）
+uv run paycheck-workbench --open
+# 自定义库文件与端口
+uv run paycheck-workbench --db ./my.db --port 8765
 # 或通过模块运行
-python -m paycheck_workbench
+uv run python -m paycheck_workbench
 ```
+
+> 同上：pip 安装后可直接运行 `paycheck-workbench`（不带 `uv run` 前缀）。
 
 功能：
 
@@ -183,7 +205,7 @@ python -m paycheck_workbench
 - 解析预览（列样例、日期范围、收/支分布）+ 去重比对（新增/重复跳过）→ 确认后写入 SQLite，重复导入幂等
 - 导入入口支持一次选择多个文件（多选/拖拽，按当前视图限定类型）：逐文件统计 + 合并去重比对，确认后逐文件写入并显示进度与结果，类型不符的文件明确提示且不写入
 - 明细表格：排序、分页、行展开详情、列显隐；汇总卡片随筛选联动（收入/支出/不计收支/期末余额或笔数）
-- 筛选区块（左侧导航栏「数据源」分组下方，标题行可折叠）：日期快捷档位、收/支多选、分类多选（总账户视图为来源多选）、属性与标签（仅总账户）、金额区间、重置筛选；筛选状态按视图记忆，关键词搜索（300ms 防抖）
+- 筛选区块（左侧导航栏「数据源」分组下方，标题行可折叠）：日期快捷档位、收/支多选、分类多选（总账户视图为来源多选）、属性与标签（仅总账户）、金额区间、重置筛选；筛选状态按视图记忆；关键词搜索在主区工具栏（300ms 防抖）
 - 三张表 `boc_transactions` / `alipay_transactions` / `wechat_transactions`：源明细列全量入库 + `source_file` / `imported_at` / `dedup_key`（UNIQUE）
 - 「总账户」主视图（品牌色 #7C4DFF）：三源映射为统一字段的一张全部账单表（收支混排、时间倒序、标准分页，与数据源视图同一套组件），无任何自动识别/自动标注；顶部汇总卡片为计入口径：收入合计 / 支出合计 / 净收支 / 计入笔数（副文本显示「不计入 N 笔」）
 - 收支属性（手动管理）：方向约束铁律——方向=收入的行只能是收入或不计，方向=支出的行只能是支出或不计，永不反向；不计收支/中性行默认不计、可改为计入（计入方向按金额符号定：正=收入、负=支出）。有效属性 = 覆盖 > 原始方向；「不计」行整行置灰，属性列点击即切换计入↔不计。属性标记仅作用于总账户视图（写入旁表），不改动数据源原始账单，数据源视图始终展示原始收/支
@@ -196,5 +218,5 @@ python -m paycheck_workbench
 
 ```bash
 uv sync          # 安装全部依赖
-uv run pytest    # 运行测试（解析层/存储层/HTTP 服务）
+uv run pytest    # 运行测试（解析层/存储层/HTTP 服务/总账户/标签）
 ```
