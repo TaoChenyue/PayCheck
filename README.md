@@ -191,13 +191,9 @@ tests/                     # pytest：解析层 / 存储层 / HTTP 服务 / 总�
 # 启动并自动打开浏览器（默认库文件 paycheck.db，相对启动目录；端口 8765，仅绑定本机）
 uv run paycheck --open
 # 自定义库文件与端口
-<<<<<<< HEAD
 uv run paycheck --db ./my.db --port 8765
-=======
-uv run paycheck-workbench --db ./my.db --port 8765
 # 自定义 BOC PDF 转换目录（默认 <库文件目录>/boc_csv）
-uv run paycheck-workbench --convert-dir ./boc_csv
->>>>>>> 77407e3 (docs: README 补充 BOC 页 PDF 转换功能与 --convert-dir 启动参数)
+uv run paycheck --convert-dir ./boc_csv
 # 或通过模块运行
 uv run python -m paycheck_workbench
 ```
