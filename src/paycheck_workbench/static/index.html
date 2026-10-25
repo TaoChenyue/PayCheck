@@ -648,6 +648,7 @@ let convertPollTimer = null;  // 进度轮询定时器
 let convertSelected = [];     // 阶段一已选 PDF 文件列表
 let convertWarn = null;       // 选择阶段的警告文本（非 PDF / 同名忽略）
 let convertInterrupted = false; // 服务重启导致任务丢失（打开弹窗时提示一次）
+let convertResultSeen = false;  // 结果视图已展示过；未看过的结束态任务在关闭弹窗后保留，重开直达结果视图
 let convertParams = { scale: "3.0", device: "auto", timeout: 60, force: false }; // 高级选项输入
 
 const TOTAL = "total";
@@ -2033,9 +2034,14 @@ function openConvertModal() {
   if (batchImporting) return;           // 导入批量写入进行中，不切换弹窗
   closeModal();                          // 与导入弹窗互斥打开
   $("#convert-mask").hidden = false;
-  if (convertJobId && runningConvertJob()) {
-    // 进行中再点「转换 PDF」：直接打开进度视图，不新建任务
+  if (convertJobId && (!convertJob || convertJob.status === "running")) {
+    // 进行中（或刚启动未取到首个快照）再点「转换 PDF」：直接打开进度视图，不新建任务
     pollConvert();
+    return;
+  }
+  if (convertJobId && convertJob) {
+    // 结束态任务结果未查看过（banner 场景）：重开弹窗直达结果视图
+    renderConvertResult(convertJob);
     return;
   }
   renderConvertSelect();
@@ -2046,13 +2052,13 @@ function openConvertModal() {
 }
 function closeConvertModal() {
   $("#convert-mask").hidden = true;
-  // 无进行中任务时清空任务状态，下次打开回到全新选择态
-  if (!runningConvertJob()) {
-    convertJobId = null;
-    convertJob = null;
-    convertSelected = [];
-    convertWarn = null;
-  }
+  if (runningConvertJob()) return;  // 进行中任务保留（后台继续）
+  if (convertJobId && convertJob && !convertResultSeen) return;  // 结束态但结果未看过：保留，重开直达结果视图
+  convertJobId = null;
+  convertJob = null;
+  convertSelected = [];
+  convertWarn = null;
+  convertResultSeen = false;
 }
 function renderConvertLoading(text) {
   $("#convert-body").innerHTML = `
@@ -2229,6 +2235,8 @@ async function startConvert() {
       return;
     }
     convertJobId = res.job_id;
+    convertJob = null;
+    convertResultSeen = false;
     sessionStorage.setItem("convertJobId", convertJobId);
     loadMeta().catch(() => {});  // 刷新 gpu_available 与已有 CSV 列表（首次任务触发探测）
     pollConvert();
@@ -2331,6 +2339,7 @@ function allFailedReason(job) {
 }
 function renderConvertResult(job) {
   $("#btn-convert-close").textContent = "×";
+  convertResultSeen = true;
   const t = job.totals || {};
   const doneFiles = job.files.filter((f) => f.state === "done");
   const allFailed = job.status === "failed";
@@ -2465,6 +2474,7 @@ async function resumeConvertSession() {
       pollConvert();
     } else {
       sessionStorage.removeItem("convertJobId");
+      convertJob = res;  // 保留结束态快照：重开弹窗直达结果视图
       showConvertResultBanner(res);
     }
   } catch (e) {
