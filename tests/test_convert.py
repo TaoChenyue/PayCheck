@@ -266,6 +266,39 @@ def test_convert_status_interrupted_for_unknown_job(base_url):
     assert res["files"] == []
 
 
+def test_convert_silent_files_settled_done(base_url, monkeypatch):
+    """管线正常返回但不发事件（渲染 0 图提前返回路径）且已写出 CSV：
+    服务端按 CLI 语义补记为 done（0 条），不误标失败。"""
+    base, _ = base_url
+
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+             force=False, progress_cb=None, pdf_names=None):
+        for name in pdf_names or []:
+            (Path(folder_path) / (Path(name).stem + ".csv")).write_bytes(_boc_csv([]))
+
+    monkeypatch.setattr(pipeline_module, "process_folder", fake)
+    res = _post(base + "/api/boc/convert", _convert_multipart([("a.pdf", b"%PDF-1.4")]), _headers())
+    job = _wait_job(base, res["job_id"])
+    assert job["status"] == "done"
+    assert job["files"][0]["state"] == "done"
+    assert job["files"][0]["transactions"] == 0
+
+
+def test_convert_silent_files_settled_failed(base_url, monkeypatch):
+    """管线正常返回但不发事件且无 CSV 产物：补记为失败。"""
+    base, _ = base_url
+
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+             force=False, progress_cb=None, pdf_names=None):
+        pass  # 不发事件、不写产物
+
+    monkeypatch.setattr(pipeline_module, "process_folder", fake)
+    res = _post(base + "/api/boc/convert", _convert_multipart([("a.pdf", b"%PDF-1.4")]), _headers())
+    job = _wait_job(base, res["job_id"])
+    assert job["status"] == "failed"
+    assert job["files"][0]["state"] == "failed"
+
+
 def test_convert_upload_validation(base_url, monkeypatch):
     base, _ = base_url
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 0)}))

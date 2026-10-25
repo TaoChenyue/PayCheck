@@ -13,6 +13,7 @@ import os
 import threading
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, List, Optional
 
 GPU_UNAVAILABLE_HINT = "未检测到可用 GPU，且推理设备为 GPU。请改用「自动」或「CPU」后重试"
@@ -174,6 +175,24 @@ class ConvertJob:
                     f.state = "failed"
                     f.error = message
 
+    def settle_silent_files(self, convert_dir) -> None:
+        """管线正常返回后补齐无事件文件的终态（服务端层，管线零改动）。
+
+        渲染 0 图等提前返回路径不发进度事件，但 CLI 语义已写出表头 CSV 并计为
+        已处理——按同名 CSV 是否存在补记 done（0 条）/ failed。
+        """
+        with self._lock:
+            for f in self.files:
+                if f.state not in ("waiting", "running"):
+                    continue
+                csv_path = Path(convert_dir) / (Path(f.name).stem + ".csv")
+                if csv_path.exists():
+                    f.state = "done"
+                    f.transactions = 0
+                else:
+                    f.state = "failed"
+                    f.error = f.error or "转换未完成（服务异常）"
+
     def finish(self) -> None:
         """任务收尾：补齐遗漏终态并汇总状态。"""
         with self._lock:
@@ -278,5 +297,9 @@ def run_convert_job(job: ConvertJob, convert_dir, scale: float, device: str,
             )
         except Exception as exc:
             job.fail_remaining(str(exc))
+        else:
+            # 管线正常返回但个别文件未收到事件（如渲染 0 图提前返回）：
+            # 按同名 CSV 是否存在补记终态，与 CLI 结果口径一致
+            job.settle_silent_files(convert_dir)
     finally:
         job.finish()
