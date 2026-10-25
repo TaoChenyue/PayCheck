@@ -228,7 +228,8 @@ def group_items_to_rows(
 def rows_to_transactions(rows: List[Row]) -> List[dict]:
     """将 BOC 行数据转为标准交易记录
 
-    不做字符级清洗，完全依赖 OCR 原始值。
+    除金额内空格外不做字符级清洗（OCR 常把负号与数字分离识别为 "- 8 8 . 00"，
+    剔除空格后按数值解析；其余字段依赖 OCR 原始值）。
     amount 正数为收入，负数为支出。
 
     Returns:
@@ -241,7 +242,7 @@ def rows_to_transactions(rows: List[Row]) -> List[dict]:
             continue
 
         try:
-            raw_amount = float(r.amount.replace(",", ""))
+            raw_amount = float(r.amount.replace(",", "").replace(" ", ""))
         except (ValueError, TypeError):
             continue
 
