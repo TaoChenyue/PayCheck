@@ -412,12 +412,63 @@ tr.bf-error td { color: var(--danger); }
 .progress-bar { height: 8px; border-radius: 4px; background: var(--page-bg); overflow: hidden; margin-top: 14px; }
 .progress-bar .fill { height: 100%; width: 40%; background: var(--brand); border-radius: 4px; animation: slide 1s infinite linear; }
 @keyframes slide { from { margin-left: -40%; } to { margin-left: 100%; } }
+
+/* ---------- PDF 转换弹窗（与导入弹窗互斥打开） ---------- */
+#convert-mask {
+  position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+}
+#convert-mask[hidden] { display: none; }
+#convert-modal {
+  background: #fff; border-radius: 12px; width: min(760px, 92vw); max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#convert-header {
+  display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
+  font-size: 16px; font-weight: 600;
+}
+#convert-header .close { margin-left: auto; border: none; background: none; font-size: 16px; cursor: pointer; color: var(--text-2); }
+#convert-body { padding: 20px; }
+#convert-dropzone {
+  border: 2px dashed var(--border); border-radius: 10px; padding: 32px 20px; text-align: center;
+  cursor: pointer; color: var(--text-2); transition: border-color .15s;
+}
+#convert-dropzone:hover, #convert-dropzone.dragover { border-color: var(--brand); color: var(--brand); }
+#convert-dropzone .dz-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+#convert-dropzone .dz-desc { font-size: 12px; margin-top: 4px; }
+#convert-dropzone .btn { margin: 8px 4px 0; }
+#convert-error {
+  background: #FEF0EF; border: 1px solid #F6C5C2; color: var(--danger); border-radius: 8px;
+  padding: 10px 14px; font-size: 13px; margin-bottom: 14px; display: none;
+}
+/* 顶栏「转换中」胶囊指示（仅 BOC 页签） */
+#convert-pill {
+  display: inline-flex; align-items: center; gap: 6px; background: var(--brand); color: #fff;
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+#convert-pill[hidden] { display: none; }
+/* 转换弹窗：已选文件 / 高级选项 */
+.conv-conflict { color: var(--neutral); }
+.conv-link { color: var(--brand); text-decoration: underline; cursor: pointer; }
+.conv-advanced { margin: 14px 0; border-top: 1px solid var(--border); padding-top: 10px; }
+.conv-advanced-toggle { border: none; background: none; color: var(--text-2); cursor: pointer; padding: 4px 0; font-size: 13px; }
+.conv-advanced-toggle:hover { color: var(--brand); }
+.conv-param { margin: 10px 0; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; }
+.conv-param > .conv-param-label { color: var(--text-2); min-width: 70px; }
+.conv-param label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.conv-param input[type="radio"], .conv-param input[type="checkbox"] { accent-color: var(--brand); }
+.conv-param input[type="number"] { width: 70px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px; }
+#convert-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+#convert-actions .conv-spacer { margin-right: auto; }
 </style>
 </head>
 <body data-source="total">
 <header id="topbar">
   <div class="brand">账单工作台</div>
   <div class="topbar-actions">
+    <span id="convert-pill" hidden></span>
+    <button id="btn-convert" class="btn" hidden>转换 PDF</button>
     <button id="btn-import" class="btn btn-primary">导入账单</button>
     <button id="btn-refresh" class="btn">刷新</button>
   </div>
@@ -516,7 +567,10 @@ tr.bf-error td { color: var(--danger); }
         </svg>
         <div class="empty-title">暂无账单数据</div>
         <div class="empty-desc" id="empty-desc"></div>
-        <button class="btn btn-primary" id="btn-import-empty">导入账单</button>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+          <button class="btn btn-primary" id="btn-import-empty">导入账单</button>
+          <button class="btn" id="btn-convert-empty" hidden>转换 PDF</button>
+        </div>
       </div>
     </div>
     <div id="pagination"></div>
@@ -529,6 +583,15 @@ tr.bf-error td { color: var(--danger); }
       <button class="close" id="btn-modal-close">×</button>
     </div>
     <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="convert-mask" hidden>
+  <div id="convert-modal">
+    <div id="convert-header">转换 BOC PDF
+      <button class="close" id="btn-convert-close">×</button>
+    </div>
+    <div id="convert-body"></div>
   </div>
 </div>
 
@@ -579,6 +642,14 @@ let selectedRows = new Set(); // 总账户勾选的行 id（当前页范围）
 let selectAllFiltered = false; // 全量模式：批量操作作用于整个筛选结果
 let tagsCache = [];           // 标签组列表（总账户筛选面板/弹窗共用）
 let filterPanelOpen = true;   // 筛选区块折叠态（会话内记住，不落库）
+let convertJobId = null;      // 当前/最近一次 PDF 转换任务 id（供预览/确认接口使用）
+let convertJob = null;        // 最近一次任务快照（进度/结果视图数据源）
+let convertPollTimer = null;  // 进度轮询定时器
+let convertSelected = [];     // 阶段一已选 PDF 文件列表
+let convertWarn = null;       // 选择阶段的警告文本（非 PDF / 同名忽略）
+let convertInterrupted = false; // 服务重启导致任务丢失（打开弹窗时提示一次）
+let convertResultSeen = false;  // 结果视图已展示过；未看过的结束态任务在关闭弹窗后保留，重开直达结果视图
+let convertParams = { scale: "3.0", device: "auto", timeout: 60, force: false }; // 高级选项输入
 
 const TOTAL = "total";
 const TAB_ORDER = [TOTAL, "boc", "alipay", "wechat"];
@@ -735,8 +806,10 @@ function renderNav() {
     b.addEventListener("click", () => switchTab(b.dataset.source)));
   document.body.dataset.source = currentSource;
   renderViewTitle();
-  // 顶栏「导入账单」仅数据源视图可见（总账户导入入口由空态引导）
+  // 顶栏「导入账单」仅数据源视图可见（总账户导入入口由空态引导）；「转换 PDF」与转换胶囊仅 BOC 页签
   $("#btn-import").hidden = currentSource === TOTAL;
+  $("#btn-convert").hidden = currentSource !== "boc";
+  updateConvertPill(convertJob);
 }
 function renderViewTitle() {
   // 主区顶部视图标题行（视图名 + 一句说明）
@@ -1193,11 +1266,13 @@ function renderEmptyState(res) {
   const el = $("#empty-state");
   const hasFilter = JSON.stringify(filtersBySource[currentSource]) !== JSON.stringify(freshFilters());
   const btn = el.querySelector("#btn-import-empty");
+  const convertBtn = el.querySelector("#btn-convert-empty");
   if (hasFilter) {
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "无匹配结果";
     el.querySelector(".empty-desc").textContent = "当前筛选条件下没有账单记录，试试调整或重置筛选条件";
     btn.style.display = "none";
+    convertBtn.hidden = true;
   } else if (currentSource === TOTAL) {
     // 总账户空态（三源皆空）：引导去数据源导入，替换原「导入账单」按钮
     el.hidden = false;
@@ -1205,13 +1280,18 @@ function renderEmptyState(res) {
     el.querySelector(".empty-desc").textContent = "总账户汇总三个数据源的账单，请先到数据源视图导入原始账单";
     btn.style.display = "";
     btn.textContent = "去数据源导入";
+    convertBtn.hidden = true;
   } else {
     const o = optionsCache[currentSource];
+    const isBoc = currentSource === "boc";
     el.hidden = false;
     el.querySelector(".empty-title").textContent = "暂无账单数据";
-    el.querySelector(".empty-desc").textContent = `点击下方按钮导入第一笔账单。${o.label} 支持格式：${FORMAT_DESC[currentSource]}`;
+    el.querySelector(".empty-desc").innerHTML =
+      `点击下方按钮导入第一笔账单。${o.label} 支持格式：${FORMAT_DESC[currentSource]}`
+      + (isBoc ? "<br>对账单是 PDF？可先转换为 CSV 再导入" : "");
     btn.style.display = "";
     btn.textContent = "导入账单";
+    convertBtn.hidden = !isBoc;
   }
 }
 function renderPagination(res) {
@@ -1491,6 +1571,7 @@ async function submitTagPick() {
 /* ================= 导入流程 ================= */
 function openModal() {
   if (currentSource === TOTAL) return;  // 导入仅限数据源视图（总账户无导入入口，后端亦拒 source=total）
+  closeConvertModal();  // 与转换弹窗互斥打开
   modalSource = currentSource;
   modalFile = null;
   modalFiles = null;
@@ -1509,11 +1590,15 @@ function closeModal() {
 }
 function renderModalSelect() {
   const body = $("#modal-body");
+  // BOC 导入弹窗顺带引流：对账单是 PDF？去转换（设计 §5.1）
+  const pdfHint = modalSource === "boc"
+    ? `<div class="dz-desc"><a class="conv-link" id="dz-go-convert" href="javascript:void(0)">对账单是 PDF？去转换</a></div>` : "";
   body.innerHTML = `
     <div id="dropzone">
       <div class="dz-title">点击选择或拖拽文件到此处（可多选）</div>
       <div>支持格式：${esc(FORMAT_DESC[modalSource])}</div>
       <div class="dz-desc">导入前会先解析预览并做去重比对，确认后才写入数据库</div>
+      ${pdfHint}
     </div>
     <input type="file" id="file-input" accept="${ACCEPT[modalSource]}" multiple hidden>`;
   const dz = $("#dropzone");
@@ -1526,6 +1611,8 @@ function renderModalSelect() {
     const files = e.dataTransfer.files && [...e.dataTransfer.files];
     if (files && files.length) handleFiles(files);
   });
+  const goConvert = body.querySelector("#dz-go-convert");
+  if (goConvert) goConvert.addEventListener("click", () => { closeModal(); openConvertModal(); });
 }
 function handleFiles(files) {
   // 同一次选择中同名文件忽略并提示（设计 §3.3 建议项）；按当前 Tab 限定类型，不匹配的明确提示且不写入
@@ -1750,7 +1837,11 @@ function batchFileCardHtml(model, f, i) {
     </div>
   </div>`;
 }
-function renderBatchPreview(model) {
+function renderBatchPreview(model, mode) {
+  // mode: "import"（默认，批量导入流程渲染进 #modal-body）/
+  //       "convert"（PDF 转换产物一键导入，渲染进 #convert-body，遮罩不变）
+  mode = mode || "import";
+  const body = $(mode === "convert" ? "#convert-body" : "#modal-body");
   const totals = batchTotals(model);
   const warn = modalWarn ? `<div class="modal-warn">${esc(modalWarn)}</div>` : "";
   const errorFiles = model.items.filter((f) => f.error && !f.removed);
@@ -1762,9 +1853,9 @@ function renderBatchPreview(model) {
   if (totals.date_min) extra.push(`覆盖日期 ${esc(totals.date_min)} ~ ${esc(totals.date_max)}`);
   const distLine = totals.distribution.map((d) => `${esc(d.label)} ${d.count.toLocaleString()} 笔 · ${fmtMoney(d.sum)}`).join(" ｜ ");
   if (distLine) extra.push(distLine);
-  $("#modal-body").innerHTML = `
+  body.innerHTML = `
     ${warn}${errNote}
-    <div class="preview-file">已选择 ${totals.active_count} 个文件（${esc(SOURCE_LABELS[modalSource])}）</div>
+    <div class="preview-file">已选择 ${totals.active_count} 个文件（${esc(SOURCE_LABELS[model.source] || model.source)}）</div>
     <div class="preview-block">
       <h4>逐文件明细（点击展开收支分布与首 5 行样例，可移除）</h4>
       ${cards}
@@ -1785,12 +1876,12 @@ function renderBatchPreview(model) {
       <button class="btn btn-primary" id="btn-confirm" ${canConfirm ? "" : "disabled"}>确认导入${totals.new_count ? `（${totals.new_count.toLocaleString()} 条）` : ""}</button>
     </div>`;
   // 卡片事件：展开/收起、移除（移除后合并统计即时重算）
-  document.querySelectorAll("#modal-body .file-card").forEach((card) => {
+  body.querySelectorAll(".file-card").forEach((card) => {
     const item = model.items[Number(card.dataset.i)];
     card.querySelector(".file-card-head").addEventListener("click", () => {
       if (model.expanded.has(item.name)) model.expanded.delete(item.name);
       else model.expanded.add(item.name);
-      renderBatchPreview(model);
+      renderBatchPreview(model, mode);
     });
     card.querySelector(".fc-remove").addEventListener("click", (event) => {
       event.stopPropagation();  // 防冒泡到卡片头部展开处理器，覆盖「回到选择态」的渲染
@@ -1798,15 +1889,23 @@ function renderBatchPreview(model) {
       model.expanded.delete(item.name);
       if (!model.items.some((f) => !f.removed)) {
         modalWarn = null;
-        renderModalSelect();
+        if (mode === "convert") renderConvertResult(convertJob);
+        else renderModalSelect();
         return;
       }
-      renderBatchPreview(model);
+      renderBatchPreview(model, mode);
     });
   });
-  $("#btn-reselect").addEventListener("click", () => { modalWarn = null; renderModalSelect(); });
-  $("#btn-cancel").addEventListener("click", closeModal);
-  $("#btn-confirm").addEventListener("click", () => confirmBatchImport(model));
+  body.querySelector("#btn-reselect").addEventListener("click", () => {
+    modalWarn = null;
+    if (mode === "convert") renderConvertResult(convertJob);
+    else renderModalSelect();
+  });
+  body.querySelector("#btn-cancel").addEventListener("click", () => { if (mode === "convert") closeConvertModal(); else closeModal(); });
+  body.querySelector("#btn-confirm").addEventListener("click", () => {
+    if (mode === "convert") confirmConvertImport(model);
+    else confirmBatchImport(model);
+  });
 }
 async function confirmBatchImport(model) {
   // 逐文件调用单文件 confirm 接口（幂等键不变，批内重复由库内已见键自然拦截）；
@@ -1905,6 +2004,484 @@ function renderBatchDone(results) {
   });
 }
 
+/* ================= PDF 转换（BOC 数据源页） ================= */
+function fmtDuration(sec) {
+  const s = Math.round(Number(sec) || 0);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function convertElapsedSec(job) {
+  if (!job || !job.started_at) return null;
+  const t = new Date(job.started_at.replace(" ", "T"));
+  if (Number.isNaN(t.getTime())) return null;
+  return Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
+}
+function runningConvertJob() {
+  return convertJob && convertJob.status === "running" ? convertJob : null;
+}
+function convertNameConflict(fileName) {
+  // 与转换目录中同名 CSV 冲突 → 转换时将跳过（force 勾选除外）
+  const stem = fileName.replace(/\.pdf$/i, "");
+  return (meta.convert_existing_csvs || []).some((n) => n.toLowerCase() === (stem + ".csv").toLowerCase());
+}
+function convertModalError(msg) {
+  let el = $("#convert-error");
+  if (!el) { el = document.createElement("div"); el.id = "convert-error"; $("#convert-body").prepend(el); }
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function openConvertModal() {
+  if (currentSource !== "boc") return;  // 转换仅 BOC 数据源页
+  if (batchImporting) return;           // 导入批量写入进行中，不切换弹窗
+  closeModal();                          // 与导入弹窗互斥打开
+  $("#convert-mask").hidden = false;
+  if (convertJobId && (!convertJob || convertJob.status === "running")) {
+    // 进行中（或刚启动未取到首个快照）再点「转换 PDF」：直接打开进度视图，不新建任务
+    pollConvert();
+    return;
+  }
+  if (convertJobId && convertJob) {
+    // 结束态任务结果未查看过（banner 场景）：重开弹窗直达结果视图
+    renderConvertResult(convertJob);
+    return;
+  }
+  renderConvertSelect();
+  if (convertInterrupted) {
+    convertInterrupted = false;
+    convertModalError("上次转换任务已中断，请重新开始转换");
+  }
+}
+function closeConvertModal() {
+  $("#convert-mask").hidden = true;
+  if (runningConvertJob()) return;  // 进行中任务保留（后台继续）
+  if (convertJobId && convertJob && !convertResultSeen) return;  // 结束态但结果未看过：保留，重开直达结果视图
+  convertJobId = null;
+  convertJob = null;
+  convertSelected = [];
+  convertWarn = null;
+  convertResultSeen = false;
+}
+function renderConvertLoading(text) {
+  $("#convert-body").innerHTML = `
+    <div style="padding:20px;text-align:center;color:#646A73">${esc(text)}</div>
+    <div class="progress-bar"><div class="fill"></div></div>`;
+}
+function convertSelectedListHtml() {
+  const rows = convertSelected.map((f) => {
+    const conflict = convertNameConflict(f.name);
+    return `<div class="batch-file-item" data-name="${esc(f.name)}">
+      <span class="bf-name" title="${esc(f.name)}">${esc(f.name)}</span>
+      ${conflict ? `<span class="bf-status conv-conflict">已存在同名 CSV，转换时将跳过</span>` : ""}
+      <button class="fc-remove" data-act="remove">移除</button>
+    </div>`;
+  }).join("");
+  return `<div class="preview-block" style="margin-top:14px">
+    <h4>已选文件（${convertSelected.length}）</h4>
+    <div class="batch-file-list">${rows}</div>
+  </div>`;
+}
+function updateConvertDeviceWarn() {
+  // 设备=自动且无 GPU：开始前提示将使用 CPU（设计 §5.2）
+  let el = $("#convert-device-warn");
+  const show = convertParams.device === "auto" && meta.gpu_available === false;
+  if (show) {
+    if (!el) { el = document.createElement("div"); el.id = "convert-device-warn"; el.className = "modal-warn"; $("#convert-body").prepend(el); }
+    el.textContent = "未检测到 GPU，将使用 CPU 推理，速度会明显变慢";
+    el.style.display = "";
+  } else if (el) {
+    el.remove();
+  }
+}
+function renderConvertSelect() {
+  $("#btn-convert-close").textContent = "×";
+  const body = $("#convert-body");
+  const dirNote = meta.convert_dir
+    ? `<div class="dz-desc">转换出的 CSV 与 PDF 同名保存，存入转换目录：<span class="conv-conflict">${esc(meta.convert_dir)}</span></div>` : "";
+  const warn = convertWarn ? `<div class="modal-warn">${esc(convertWarn)}</div>` : "";
+  const selectedHtml = convertSelected.length ? convertSelectedListHtml() : "";
+  body.innerHTML = `
+    ${warn}
+    <div id="convert-dropzone">
+      <div class="dz-title">📄 点击选择或拖拽 BOC PDF 到此处（可多选）</div>
+      <div>
+        <button class="btn" id="conv-pick-files">选择 PDF 文件</button>
+        <button class="btn" id="conv-pick-dir">选择文件夹</button>
+      </div>
+      <div class="dz-desc">支持格式：PDF（BOC 对账单）</div>
+      ${dirNote}
+    </div>
+    <input type="file" id="conv-file-input" accept=".pdf" multiple hidden>
+    <input type="file" id="conv-dir-input" accept=".pdf" webkitdirectory hidden>
+    ${selectedHtml}
+    <div class="conv-advanced">
+      <button class="conv-advanced-toggle" id="conv-advanced-toggle">▸ 高级选项（默认无需修改）</button>
+      <div id="conv-advanced-body" hidden>
+        <div class="conv-param">
+          <span class="conv-param-label">渲染精度</span>
+          <label><input type="radio" name="conv-scale" value="2.0" ${convertParams.scale === "2.0" ? "checked" : ""}> 低 2.0（更快）</label>
+          <label><input type="radio" name="conv-scale" value="3.0" ${convertParams.scale === "3.0" ? "checked" : ""}> 标准 3.0</label>
+          <label><input type="radio" name="conv-scale" value="4.0" ${convertParams.scale === "4.0" ? "checked" : ""}> 高 4.0（更清晰）</label>
+        </div>
+        <div class="conv-param">
+          <span class="conv-param-label">推理设备</span>
+          <label><input type="radio" name="conv-device" value="auto" ${convertParams.device === "auto" ? "checked" : ""}> 自动（推荐）</label>
+          <label><input type="radio" name="conv-device" value="gpu" ${convertParams.device === "gpu" ? "checked" : ""}> GPU</label>
+          <label><input type="radio" name="conv-device" value="cpu" ${convertParams.device === "cpu" ? "checked" : ""}> CPU</label>
+        </div>
+        <div class="conv-param">
+          <span class="conv-param-label">单文件超时</span>
+          <input type="number" id="conv-timeout" value="${esc(String(convertParams.timeout))}" min="1" step="1"> 分钟
+        </div>
+        <div class="conv-param">
+          <label><input type="checkbox" id="conv-force" ${convertParams.force ? "checked" : ""}> 覆盖同名 CSV（默认跳过已转换过的 PDF）</label>
+        </div>
+      </div>
+    </div>
+    <div id="convert-actions">
+      <button class="btn" id="btn-convert-cancel">取消</button>
+      <button class="btn btn-primary" id="btn-convert-start" ${convertSelected.length ? "" : "disabled"}>开始转换</button>
+    </div>`;
+  const dz = $("#convert-dropzone");
+  const fileInput = $("#conv-file-input");
+  const dirInput = $("#conv-dir-input");
+  dz.addEventListener("click", () => fileInput.click());
+  $("#conv-pick-files").addEventListener("click", (e) => { e.stopPropagation(); fileInput.click(); });
+  const pickDirBtn = $("#conv-pick-dir");
+  if (!("webkitdirectory" in document.createElement("input"))) pickDirBtn.style.display = "none";  // 不支持目录选择时隐藏
+  pickDirBtn.addEventListener("click", (e) => { e.stopPropagation(); dirInput.click(); });
+  fileInput.addEventListener("change", () => { if (fileInput.files.length) handleConvertFiles([...fileInput.files]); fileInput.value = ""; });
+  dirInput.addEventListener("change", () => {
+    const pdfs = [...dirInput.files].filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+    if (pdfs.length) handleConvertFiles(pdfs);
+    else handleConvertFiles([...dirInput.files]);
+    dirInput.value = "";
+  });
+  ["dragover", "dragenter"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
+  ["dragleave", "drop"].forEach((ev) => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragover"); }));
+  dz.addEventListener("drop", (e) => {
+    const files = e.dataTransfer.files && [...e.dataTransfer.files];
+    if (files && files.length) handleConvertFiles(files);
+  });
+  body.querySelectorAll("[data-act='remove']").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      convertSelected = convertSelected.filter((f) => f.name !== btn.closest(".batch-file-item").dataset.name);
+      renderConvertSelect();
+    }));
+  document.querySelectorAll('input[name="conv-scale"]').forEach((r) =>
+    r.addEventListener("change", () => { convertParams.scale = r.value; }));
+  document.querySelectorAll('input[name="conv-device"]').forEach((r) =>
+    r.addEventListener("change", () => { convertParams.device = r.value; updateConvertDeviceWarn(); }));
+  $("#conv-timeout").addEventListener("change", (e) => {
+    const n = Number(e.target.value);
+    convertParams.timeout = Number.isFinite(n) && n >= 1 ? Math.round(n) : 60;
+    e.target.value = convertParams.timeout;
+  });
+  $("#conv-force").addEventListener("change", (e) => { convertParams.force = e.target.checked; });
+  $("#conv-advanced-toggle").addEventListener("click", () => {
+    const panel = $("#conv-advanced-body");
+    panel.hidden = !panel.hidden;
+    $("#conv-advanced-toggle").textContent = `${panel.hidden ? "▸" : "▾"} 高级选项（默认无需修改）`;
+  });
+  $("#btn-convert-cancel").addEventListener("click", closeConvertModal);
+  $("#btn-convert-start").addEventListener("click", startConvert);
+  updateConvertDeviceWarn();
+}
+function handleConvertFiles(files) {
+  // 校验同现有 handleFiles 口径：非 PDF 跳过（黄条）、同名忽略（黄条）、超 64MB 拒绝（红条）
+  const notices = [];
+  const seen = new Set(convertSelected.map((f) => f.name.toLowerCase()));
+  const dupNames = [];
+  const invalid = [];
+  const oversized = [];
+  const added = [];
+  for (const f of files) {
+    const key = f.name.toLowerCase();
+    if (seen.has(key)) { dupNames.push(f.name); continue; }
+    if (!key.endsWith(".pdf")) { invalid.push(f.name); continue; }
+    if (f.size > 64 * 1024 * 1024) { oversized.push(f.name); continue; }
+    seen.add(key);
+    added.push(f);
+  }
+  if (invalid.length) notices.push(`以下 ${invalid.length} 个文件不是 PDF，已跳过：${invalid.join("、")}`);
+  if (dupNames.length) notices.push(`同一次选择中的 ${dupNames.length} 个同名文件已忽略：${dupNames.join("、")}`);
+  convertWarn = notices.length ? notices.join("；") : null;
+  convertSelected.push(...added);
+  if (!convertSelected.length) {
+    renderConvertSelect();
+    convertModalError(oversized.length
+      ? `文件超过 64MB 上限：${oversized.join("、")}`
+      : "未选择有效的 PDF 文件（仅支持 .pdf）");
+    return;
+  }
+  renderConvertSelect();
+  if (oversized.length) convertModalError(`文件超过 64MB 上限：${oversized.join("、")}`);
+}
+async function startConvert() {
+  const files = convertSelected;
+  if (!files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  fd.append("scale", convertParams.scale);
+  fd.append("device", convertParams.device);
+  fd.append("timeout_minutes", String(convertParams.timeout || 60));
+  fd.append("force", convertParams.force ? "1" : "0");
+  renderConvertLoading("正在上传 PDF 并启动转换 …");
+  try {
+    const res = await fetch("/api/boc/convert", { method: "POST", body: fd })
+      .then((r) => r.json().catch(() => ({ ok: false, error: "响应解析失败" })));
+    if (!res.ok) {
+      if (res.job_id) { convertJobId = res.job_id; pollConvert(); return; }  // 409：衔接进行中的任务
+      renderConvertSelect();
+      convertModalError(res.error || "启动转换失败");
+      return;
+    }
+    convertJobId = res.job_id;
+    convertJob = null;
+    convertResultSeen = false;
+    sessionStorage.setItem("convertJobId", convertJobId);
+    loadMeta().catch(() => {});  // 刷新 gpu_available 与已有 CSV 列表（首次任务触发探测）
+    pollConvert();
+  } catch (e) {
+    renderConvertSelect();
+    convertModalError("网络错误：" + e.message);
+  }
+}
+function convertFileItemHtml(f) {
+  let cls = "";
+  let status = "";
+  if (f.state === "running") {
+    cls = "active";
+    status = f.pages_total
+      ? `第 ${f.pages_done}/${f.pages_total} 页 · 已识别 ${f.transactions.toLocaleString()} 条`
+      : "正在加载 OCR 模型…";
+  } else if (f.state === "done") {
+    cls = "done";
+    status = `成功 · ${f.transactions.toLocaleString()} 条 · 用时 ${fmtDuration(f.duration_s)}`;
+  } else if (f.state === "skipped") {
+    status = "跳过（同名 CSV 已存在）";
+  } else if (f.state === "failed") {
+    cls = "fail";
+    status = `失败：${f.error || "未知错误"}`;
+  } else {
+    status = "等待中";
+  }
+  const dotCls = f.state === "done" ? "ok" : (f.state === "failed" ? "bad" : "mid");
+  return `<div class="batch-file-item ${cls}">
+    <span class="status-dot ${dotCls}"></span>
+    <span class="bf-name" title="${esc(f.name)}">${esc(f.name)}</span>
+    <span class="bf-status">${esc(status)}</span>
+  </div>`;
+}
+function renderConvertProgress(job) {
+  $("#btn-convert-close").textContent = "收起";  // 收起不取消任务，转换在后台继续
+  if (!job) { renderConvertLoading("正在获取转换进度 …"); return; }
+  const totals = job.totals || {};
+  const finished = totals.done + totals.skipped + totals.failed;
+  const total = job.files.length;
+  const pct = total ? Math.round((finished / total) * 100) : 0;
+  const elapsed = convertElapsedSec(job);
+  const rows = job.files.map(convertFileItemHtml).join("");
+  $("#convert-body").innerHTML = `
+    <div class="preview-file">正在转换（${finished}/${total}）${elapsed !== null ? ` · 已用时 ${fmtDuration(elapsed)}` : ""}</div>
+    <div class="batch-file-list">${rows}</div>
+    <div class="progress-bar"><div class="fill determinate" style="width:${pct}%"></div></div>
+    <div style="font-size:12px;color:#646A73;margin-top:8px">OCR 识别较慢，单个 PDF 可能需要数分钟，请耐心等待；可收起本窗口，转换在后台继续</div>`;
+}
+function pollConvert() {
+  stopConvertPolling();
+  convertPollTimer = setInterval(pollConvertOnce, 1500);
+  pollConvertOnce();
+}
+function stopConvertPolling() {
+  if (convertPollTimer) { clearInterval(convertPollTimer); convertPollTimer = null; }
+}
+async function pollConvertOnce() {
+  if (!convertJobId) return;
+  const res = await api("/api/boc/convert/" + convertJobId);
+  if (!res.ok) { stopConvertPolling(); return; }
+  if (res.status === "interrupted") {
+    // 服务重启导致任务丢失（内存注册表）：提示重新开始
+    stopConvertPolling();
+    sessionStorage.removeItem("convertJobId");
+    convertJobId = null;
+    convertJob = null;
+    updateConvertPill(null);
+    if (!$("#convert-mask").hidden) {
+      renderConvertSelect();
+      convertModalError("上次转换任务已中断，请重新开始转换");
+    }
+    return;
+  }
+  convertJob = res;
+  updateConvertPill(res);
+  if (res.status === "running") {
+    if (!$("#convert-mask").hidden) renderConvertProgress(res);
+    return;
+  }
+  // 任务结束：胶囊消失；弹窗打开则展示结果视图，收起则页面 banner 提示
+  stopConvertPolling();
+  sessionStorage.removeItem("convertJobId");
+  if ($("#convert-mask").hidden) showConvertResultBanner(res);
+  else renderConvertResult(res);
+}
+function updateConvertPill(job) {
+  // 顶栏胶囊指示（仅 BOC 页签、任务进行中）
+  const pill = $("#convert-pill");
+  const t = job ? job.totals : null;
+  const running = job && job.status === "running";
+  if (!running || currentSource !== "boc") { pill.hidden = true; return; }
+  const finished = t.done + t.skipped + t.failed;
+  pill.hidden = false;
+  pill.textContent = `⟳ 转换中 ${finished}/${job.files.length}`;
+}
+function allFailedReason(job) {
+  const f = job.files.find((x) => x.state === "failed");
+  return f && f.error ? f.error : "全部 PDF 转换失败";
+}
+function renderConvertResult(job) {
+  $("#btn-convert-close").textContent = "×";
+  convertResultSeen = true;
+  const t = job.totals || {};
+  const doneFiles = job.files.filter((f) => f.state === "done");
+  const allFailed = job.status === "failed";
+  const partialWarn = (t.failed > 0 && !allFailed)
+    ? `<div class="modal-warn">${t.failed} 个 PDF 转换失败，不影响其余结果，可直接导入成功的 CSV</div>` : "";
+  const rows = job.files.map((f) => {
+    if (f.state === "failed") return `<tr class="bf-error"><td>${esc(f.name)}</td><td>失败：${esc(f.error || "未知错误")}</td></tr>`;
+    if (f.state === "done") return `<tr><td>${esc(f.name)}</td><td><span class="bf-new">成功</span> · ${f.transactions.toLocaleString()} 条 · 用时 ${fmtDuration(f.duration_s)}</td></tr>`;
+    return `<tr><td>${esc(f.name)}</td><td>跳过（同名 CSV 已存在）</td></tr>`;
+  }).join("");
+  const dirNote = meta.convert_dir ? `<div class="dz-desc" style="margin-top:10px">CSV 存放于：${esc(meta.convert_dir)}</div>` : "";
+  const allFailedBlock = allFailed
+    ? `<div class="modal-error" style="display:block">${esc(allFailedReason(job))}</div>` : "";
+  const primary = (allFailed || doneFiles.length === 0)
+    ? `<button class="btn btn-primary" disabled>一键导入</button>
+       <button class="btn" id="btn-convert-retry">调整参数重试</button>`
+    : `<button class="btn btn-primary" id="btn-convert-import">一键导入（${doneFiles.length} 个 CSV · ${t.transactions.toLocaleString()} 条）</button>`;
+  $("#convert-body").innerHTML = `
+    ${partialWarn}
+    <div class="preview-block">
+      <h4>转换结果</h4>
+      <div class="preview-stats">
+        <div class="stat new"><div class="s-label">成功</div><div class="s-value">${t.done.toLocaleString()} 个</div></div>
+        <div class="stat dup"><div class="s-label">跳过</div><div class="s-value">${t.skipped.toLocaleString()} 个</div></div>
+        <div class="stat err"><div class="s-label">失败</div><div class="s-value">${t.failed.toLocaleString()} 个</div></div>
+        <div class="stat"><div class="s-label">共提取交易</div><div class="s-value">${t.transactions.toLocaleString()} 条</div></div>
+      </div>
+      <div class="sample-table-wrap" style="margin-top:12px">
+        <table><thead><tr><th>文件</th><th>结果</th></tr></thead><tbody>${rows}</tbody></table>
+      </div>
+      ${dirNote}
+      ${allFailedBlock}
+    </div>
+    <div id="convert-actions">
+      ${primary}
+      <button class="btn" id="btn-convert-opendir">打开 CSV 所在文件夹</button>
+      <button class="btn" id="btn-convert-done">关闭</button>
+    </div>`;
+  const importBtn = $("#btn-convert-import");
+  if (importBtn) importBtn.addEventListener("click", convertImportPreview);
+  const retryBtn = $("#btn-convert-retry");
+  if (retryBtn) retryBtn.addEventListener("click", renderConvertSelect);  // 保留已选文件，回阶段一调参重试
+  $("#btn-convert-opendir").addEventListener("click", openConvertDir);
+  $("#btn-convert-done").addEventListener("click", closeConvertModal);
+}
+async function openConvertDir() {
+  try {
+    const res = await api("/api/boc/convert/open-dir", { method: "POST" });
+    if (!res.ok) showErrorBanner(res.error || "打开目录失败");
+  } catch (e) { showErrorBanner("打开目录失败：" + e.message); }
+}
+function showConvertResultBanner(job) {
+  const t = job.totals || {};
+  const msg = `PDF 转换完成：成功 ${t.done} 个 · 跳过 ${t.skipped} 个 · 失败 ${t.failed} 个 · 共提取 ${t.transactions.toLocaleString()} 条交易`;
+  addBanner(t.failed > 0 ? "error" : "success", msg, null);
+  refreshAll();  // 刷新 meta（已有 CSV 列表变化）
+}
+function buildConvertModel(res) {
+  // 转换产物预览模型：复用批量导入预览 UI（无 File 对象，确认时走任务 confirm 接口）
+  return {
+    source: res.source,
+    columns: res.columns || [],
+    expanded: new Set(res.files.length === 1 ? [res.files[0].file_name] : []),
+    items: res.files.map((f) => ({
+      file: null,
+      name: f.file_name,
+      error: f.error || null,
+      removed: false,
+      stats: f.error ? null : {
+        row_count: f.row_count,
+        error_count: f.error_count,
+        invalid_count: f.invalid_count,
+        new_count: f.new_count,
+        dup_count: f.dup_count,
+        date_min: f.date_min,
+        date_max: f.date_max,
+        distribution: f.distribution || [],
+        sample: f.sample || [],
+      },
+    })),
+  };
+}
+async function convertImportPreview() {
+  renderConvertLoading("正在解析 CSV 并做去重比对 …");
+  try {
+    const res = await api(`/api/boc/convert/${convertJobId}/preview`, { method: "POST" });
+    if (!res.ok) { renderConvertResult(convertJob); convertModalError(res.error || "预览失败"); return; }
+    renderBatchPreview(buildConvertModel(res), "convert");
+  } catch (e) {
+    renderConvertResult(convertJob);
+    convertModalError("网络错误：" + e.message);
+  }
+}
+async function confirmConvertImport(model) {
+  const kept = model.items.filter((f) => !f.removed).map((f) => f.name);
+  renderConvertLoading("正在写入 SQLite …");
+  try {
+    const res = await api(`/api/boc/convert/${convertJobId}/confirm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files: kept }),
+    });
+    if (!res.ok) { renderConvertResult(convertJob); convertModalError(res.error || "导入失败"); return; }
+    closeConvertModal();
+    const fileRows = res.files || [];
+    const fileErrCount = fileRows.filter((r) => r.error).length;
+    const msg = `已导入 ${(res.inserted || 0).toLocaleString()} 条，跳过 ${(res.skipped || 0).toLocaleString()} 条，失败 ${(res.failed || 0)} 条${fileErrCount ? `（${fileErrCount} 个文件解析失败）` : ""}`;
+    const failures = fileRows.flatMap((r) => (r.failures || []).map((f) => ({ ...f, file: r.file_name })));
+    addBanner((res.failed || 0) > 0 || fileErrCount > 0 ? "error" : "success", msg, failures);
+    await refreshAll();
+  } catch (e) {
+    renderConvertResult(convertJob);
+    convertModalError("网络错误：" + e.message);
+  }
+}
+async function resumeConvertSession() {
+  // 页面刷新后重连：sessionStorage 的任务仍在运行则续轮询；已结束则 banner；服务已重启则提示中断
+  const stored = sessionStorage.getItem("convertJobId");
+  if (!stored) return;
+  convertJobId = stored;
+  try {
+    const res = await api("/api/boc/convert/" + stored);
+    if (!res.ok || res.status === "interrupted") {
+      sessionStorage.removeItem("convertJobId");
+      convertJobId = null;
+      convertInterrupted = true;
+      return;
+    }
+    if (res.status === "running") {
+      convertJob = res;
+      updateConvertPill(res);
+      pollConvert();
+    } else {
+      sessionStorage.removeItem("convertJobId");
+      convertJob = res;  // 保留结束态快照：重开弹窗直达结果视图
+      showConvertResultBanner(res);
+    }
+  } catch (e) {
+    // 网络异常静默：下次打开弹窗时按中断提示处理
+  }
+}
+
 /* ================= 事件绑定 ================= */
 $("#btn-import").addEventListener("click", openModal);
 $("#btn-import-empty").addEventListener("click", () => {
@@ -1918,6 +2495,11 @@ $("#filter-toggle").addEventListener("click", () => {
 $("#btn-refresh").addEventListener("click", refreshAll);
 $("#btn-modal-close").addEventListener("click", closeModal);
 $("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
+$("#btn-convert").addEventListener("click", openConvertModal);
+$("#btn-convert-empty").addEventListener("click", openConvertModal);
+$("#btn-convert-close").addEventListener("click", closeConvertModal);
+$("#convert-mask").addEventListener("click", (e) => { if (e.target.id === "convert-mask") closeConvertModal(); });
+$("#convert-pill").addEventListener("click", openConvertModal);
 $("#btn-tags-manage").addEventListener("click", openTagsModal);
 $("#btn-tags-modal-close").addEventListener("click", closeTagsModal);
 $("#tags-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tags-modal-mask") closeTagsModal(); });
@@ -1958,6 +2540,7 @@ document.addEventListener("click", (e) => {
     renderNav(); renderFilterPanel(); renderToolbar();
     applyFilterPanelOpen();
     await Promise.all([loadRows(), loadSummary()]);
+    await resumeConvertSession();  // 刷新后重连转换任务（续轮询 / 完成 banner / 中断提示）
   } catch (e) {
     showErrorBanner(e.message);
     renderNav();
