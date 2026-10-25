@@ -191,7 +191,13 @@ tests/                     # pytest：解析层 / 存储层 / HTTP 服务 / 总�
 # 启动并自动打开浏览器（默认库文件 paycheck.db，相对启动目录；端口 8765，仅绑定本机）
 uv run paycheck --open
 # 自定义库文件与端口
+<<<<<<< HEAD
 uv run paycheck --db ./my.db --port 8765
+=======
+uv run paycheck-workbench --db ./my.db --port 8765
+# 自定义 BOC PDF 转换目录（默认 <库文件目录>/boc_csv）
+uv run paycheck-workbench --convert-dir ./boc_csv
+>>>>>>> 77407e3 (docs: README 补充 BOC 页 PDF 转换功能与 --convert-dir 启动参数)
 # 或通过模块运行
 uv run python -m paycheck_workbench
 ```
@@ -204,6 +210,7 @@ uv run python -m paycheck_workbench
 - 三数据源视图（BOC CSV / 支付宝 GBK CSV / 微信 XLSX，兼容 CSV 变体）：原始账单只读（职责=导入与查看），自动跳过文件信息头定位表头；「导入账单」入口仅数据源视图可见，总账户空态（三源皆空）引导「去数据源导入」
 - 解析预览（列样例、日期范围、收/支分布）+ 去重比对（新增/重复跳过）→ 确认后写入 SQLite，重复导入幂等
 - 导入入口支持一次选择多个文件（多选/拖拽，按当前视图限定类型）：逐文件统计 + 合并去重比对，确认后逐文件写入并显示进度与结果，类型不符的文件明确提示且不写入
+- BOC 页 PDF 转换（顶栏「转换 PDF」/ BOC 空态次按钮）：选 PDF（多选/文件夹）→ 后台转换（进度轮询、可收起后台继续）→ 结果视图 → 一键导入（复用导入预览与去重比对）；转换出的 CSV 与 PDF 同名存入转换目录，不导入也可直接取用
 - 明细表格：排序、分页、行展开详情、列显隐；汇总卡片随筛选联动（收入/支出/不计收支/期末余额或笔数）
 - 筛选区块（左侧导航栏「数据源」分组下方，标题行可折叠）：日期快捷档位、收/支多选、分类多选（总账户视图为来源多选）、属性与标签（仅总账户）、金额区间、重置筛选；筛选状态按视图记忆；关键词搜索在主区工具栏（300ms 防抖）
 - 三张表 `boc_transactions` / `alipay_transactions` / `wechat_transactions`：源明细列全量入库 + `source_file` / `imported_at` / `dedup_key`（UNIQUE）
