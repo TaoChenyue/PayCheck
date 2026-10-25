@@ -185,6 +185,80 @@ def _preview_stats(cfg, parsed, source: str, existing: set, seen: set) -> dict:
     }
 
 
+def _batch_preview(cfg, source: str, files: list, existing: set) -> dict:
+    """多文件预览（不写入）：逐文件统计 + 合并去重比对，结构与 preview-batch 响应一致。
+
+    files: [(file_name, data, error)]；error 非空时该文件不解析、直接计入错误文件。
+    供批量导入预览与 PDF 转换产物预览共用。
+    """
+    seen: set = set()
+    file_stats: List[dict] = []
+    columns: List[str] = []
+    totals = {"row_count": 0, "new_count": 0, "dup_count": 0, "failed_count": 0, "error_file_count": 0}
+    date_min = date_max = ""
+    merged_dist: dict = {}
+    for file_name, data, error in files:
+        if error:
+            file_stats.append({"file_name": file_name, "error": error})
+            totals["error_file_count"] += 1
+            continue
+        try:
+            parsed = parse_file(source, file_name, data)
+        except ParseError as exc:
+            file_stats.append({"file_name": file_name, "error": str(exc)})
+            totals["error_file_count"] += 1
+            continue
+        stats = _preview_stats(cfg, parsed, source, existing, seen)
+        if not columns:
+            columns = parsed.columns
+        file_stats.append({
+            "file_name": file_name,
+            "row_count": stats["row_count"],
+            "error_count": stats["error_count"],
+            "invalid_count": stats["invalid_count"],
+            "new_count": stats["new_count"],
+            "dup_count": stats["dup_count"],
+            "date_min": stats["date_min"],
+            "date_max": stats["date_max"],
+            "distribution": stats["distribution"],
+            "sample": [r.values for r in parsed.rows[:5]],
+        })
+        totals["row_count"] += stats["row_count"]
+        totals["new_count"] += stats["new_count"]
+        totals["dup_count"] += stats["dup_count"]
+        totals["failed_count"] += stats["error_count"] + stats["invalid_count"]
+        # 合并覆盖日期与收支分布（设计 4.2 合并统计次行）
+        if stats["date_min"]:
+            date_min = stats["date_min"] if not date_min or stats["date_min"] < date_min else date_min
+            date_max = stats["date_max"] if not date_max or stats["date_max"] > date_max else date_max
+        for item in stats["distribution"]:
+            acc = merged_dist.setdefault(item["label"], {"count": 0, "sum": 0.0})
+            acc["count"] += item["count"]
+            acc["sum"] += item["sum"]
+
+    order = ["收入", "支出"] + ([cfg.neutral_direction] if cfg.neutral_direction else [])
+    distribution = [
+        {"label": label, "count": merged_dist[label]["count"], "sum": round(merged_dist[label]["sum"], 2)}
+        for label in order if label in merged_dist
+    ]
+
+    return {
+        "ok": True,
+        "source": source,
+        "file_count": len(files),
+        "columns": columns,
+        "files": file_stats,
+        "total_rows": totals["row_count"],
+        "total_new": totals["new_count"],
+        "total_dup": totals["dup_count"],
+        "total_failed": totals["failed_count"],
+        "date_min": date_min,
+        "date_max": date_max,
+        "distribution": distribution,
+        "error_file_count": totals["error_file_count"],
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"PayCheckWorkbench/{__version__}"
     db_path = None  # 由 serve() 注入
@@ -511,81 +585,17 @@ class Handler(BaseHTTPRequestHandler):
         with self._connect() as conn:
             existing = db.existing_dedup_keys(conn, source)
 
-        seen: set = set()
-        file_stats: List[dict] = []
-        columns: List[str] = []
-        totals = {"row_count": 0, "new_count": 0, "dup_count": 0, "failed_count": 0, "error_file_count": 0}
-        date_min = date_max = ""
-        merged_dist: dict = {}
+        prepared = []
         for file_name, data in files:
             if len(data) > MAX_UPLOAD_BYTES:
                 # 与单文件 _read_upload 口径一致：超限文件不解析、不写入
-                file_stats.append({"file_name": file_name, "error": "文件超过 64MB 上限"})
-                totals["error_file_count"] += 1
-                continue
-            if Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS[source]:
+                prepared.append((file_name, data, "文件超过 64MB 上限"))
+            elif Path(file_name).suffix.lower() not in ALLOWED_EXTENSIONS[source]:
                 ext = Path(file_name).suffix.lower() or "无扩展名"
-                file_stats.append({
-                    "file_name": file_name,
-                    "error": f"{cfg.label} 只支持 {allowed} 文件（收到 {ext}）",
-                })
-                totals["error_file_count"] += 1
-                continue
-            try:
-                parsed = parse_file(source, file_name, data)
-            except ParseError as exc:
-                file_stats.append({"file_name": file_name, "error": str(exc)})
-                totals["error_file_count"] += 1
-                continue
-            stats = _preview_stats(cfg, parsed, source, existing, seen)
-            if not columns:
-                columns = parsed.columns
-            file_stats.append({
-                "file_name": file_name,
-                "row_count": stats["row_count"],
-                "error_count": stats["error_count"],
-                "invalid_count": stats["invalid_count"],
-                "new_count": stats["new_count"],
-                "dup_count": stats["dup_count"],
-                "date_min": stats["date_min"],
-                "date_max": stats["date_max"],
-                "distribution": stats["distribution"],
-                "sample": [r.values for r in parsed.rows[:5]],
-            })
-            totals["row_count"] += stats["row_count"]
-            totals["new_count"] += stats["new_count"]
-            totals["dup_count"] += stats["dup_count"]
-            totals["failed_count"] += stats["error_count"] + stats["invalid_count"]
-            # 合并覆盖日期与收支分布（设计 4.2 合并统计次行）
-            if stats["date_min"]:
-                date_min = stats["date_min"] if not date_min or stats["date_min"] < date_min else date_min
-                date_max = stats["date_max"] if not date_max or stats["date_max"] > date_max else date_max
-            for item in stats["distribution"]:
-                acc = merged_dist.setdefault(item["label"], {"count": 0, "sum": 0.0})
-                acc["count"] += item["count"]
-                acc["sum"] += item["sum"]
-
-        order = ["收入", "支出"] + ([cfg.neutral_direction] if cfg.neutral_direction else [])
-        distribution = [
-            {"label": label, "count": merged_dist[label]["count"], "sum": round(merged_dist[label]["sum"], 2)}
-            for label in order if label in merged_dist
-        ]
-
-        self._send(200, {
-            "ok": True,
-            "source": source,
-            "file_count": len(files),
-            "columns": columns,
-            "files": file_stats,
-            "total_rows": totals["row_count"],
-            "total_new": totals["new_count"],
-            "total_dup": totals["dup_count"],
-            "total_failed": totals["failed_count"],
-            "date_min": date_min,
-            "date_max": date_max,
-            "distribution": distribution,
-            "error_file_count": totals["error_file_count"],
-        })
+                prepared.append((file_name, data, f"{cfg.label} 只支持 {allowed} 文件（收到 {ext}）"))
+            else:
+                prepared.append((file_name, data, None))
+        self._send(200, _batch_preview(cfg, source, prepared, existing))
 
     def _api_import_confirm(self):
         source, file_name, data = self._read_upload()
