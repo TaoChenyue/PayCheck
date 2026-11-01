@@ -22,22 +22,22 @@ def _fake_render(pdf_path, scale=3.0, output_dir=None):
 
 def test_pdf_to_transactions_emits_progress_events(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
-    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
-    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [])
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path: [])
 
     pdf_path = str(tmp_path / "样例.pdf")
     Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
 
     events = []
     transactions = pipeline._pdf_to_transactions(
-        pdf_path, device="cpu", progress_cb=lambda e, info: events.append((e, dict(info)))
+        pdf_path, progress_cb=lambda e, info: events.append((e, dict(info)))
     )
 
     assert transactions == []
     assert [e for e, _ in events] == [
         "engine_loading", "pdf_start", "page_done", "page_done", "pdf_done",
     ]
-    assert events[0][1] == {"device": "cpu"}
+    assert events[0][1] == {"device": "gpu"}
     assert events[1][1] == {"name": "样例.pdf", "pages_total": 2}
     assert events[2][1]["page"] == 1
     assert events[2][1]["pages_total"] == 2
@@ -52,15 +52,15 @@ def test_pdf_to_transactions_emits_progress_events(monkeypatch, tmp_path):
 def test_pdf_to_transactions_no_cb_unchanged(monkeypatch, tmp_path):
     """不传 progress_cb 时行为与命令行一致（不抛错、无事件依赖）。"""
     monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
-    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
-    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [])
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path: [])
 
     pdf_path = str(tmp_path / "样例.pdf")
     Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
-    assert pipeline._pdf_to_transactions(pdf_path, device="cpu") == []
+    assert pipeline._pdf_to_transactions(pdf_path) == []
 
 
-def _fake_transactions(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None, should_cancel=None):
+def _fake_transactions(pdf_path, scale, timeout_minutes, verbose, progress_cb=None, should_cancel=None):
     # 模拟真实 _pdf_to_transactions 的 pdf_done 事件（其余事件由其内部发出，这里从简）
     if progress_cb:
         progress_cb("pdf_done", {
@@ -80,7 +80,7 @@ def test_process_folder_progress_events(monkeypatch, tmp_path):
 
     events = []
     result = pipeline.process_folder(
-        str(tmp_path), device="cpu", progress_cb=lambda e, info: events.append((e, info))
+        str(tmp_path), progress_cb=lambda e, info: events.append((e, info))
     )
 
     assert list(result.processed) == [str(tmp_path / "b.pdf")]
@@ -94,7 +94,7 @@ def test_process_folder_progress_events(monkeypatch, tmp_path):
 
 
 def test_process_folder_failed_emits_pdf_failed(monkeypatch, tmp_path):
-    def _boom(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None, should_cancel=None):
+    def _boom(pdf_path, scale, timeout_minutes, verbose, progress_cb=None, should_cancel=None):
         raise RuntimeError("渲染失败")
 
     monkeypatch.setattr(pipeline, "_pdf_to_transactions", _boom)
@@ -102,7 +102,7 @@ def test_process_folder_failed_emits_pdf_failed(monkeypatch, tmp_path):
 
     events = []
     with pytest.raises(RuntimeError):  # 全部失败时与命令行一致仍抛出
-        pipeline.process_folder(str(tmp_path), device="cpu", progress_cb=lambda e, i: events.append((e, i)))
+        pipeline.process_folder(str(tmp_path), progress_cb=lambda e, i: events.append((e, i)))
 
     assert ("pdf_failed", {"name": "a.pdf", "error": "渲染失败"}) in events
 
@@ -113,7 +113,7 @@ def test_process_folder_pdf_names_filter(monkeypatch, tmp_path):
     (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
 
-    result = pipeline.process_folder(str(tmp_path), device="cpu", pdf_names=["a.pdf"])
+    result = pipeline.process_folder(str(tmp_path), pdf_names=["a.pdf"])
 
     assert list(result.processed) == [str(tmp_path / "a.pdf")]
     assert result.skipped == [] and result.failed == []
@@ -127,7 +127,7 @@ def test_process_folder_without_filter_processes_all(monkeypatch, tmp_path):
     (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
     (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
 
-    result = pipeline.process_folder(str(tmp_path), device="cpu")
+    result = pipeline.process_folder(str(tmp_path))
 
     assert len(result.processed) == 2
     assert (tmp_path / "a.csv").exists() and (tmp_path / "b.csv").exists()
@@ -140,8 +140,8 @@ def test_process_folder_without_filter_processes_all(monkeypatch, tmp_path):
 def test_pdf_to_transactions_cancel_at_page_boundary(monkeypatch, tmp_path):
     """页边界检查取消：首轮检查即取消时，模型加载后中止，不产出交易、不发 pdf_done。"""
     monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
-    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
-    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [{"date": "2026-10-01", "amount": "1.00", "counterparty": "甲"}])
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path: [{"date": "2026-10-01", "amount": "1.00", "counterparty": "甲"}])
 
     pdf_path = str(tmp_path / "样例.pdf")
     Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
@@ -149,7 +149,7 @@ def test_pdf_to_transactions_cancel_at_page_boundary(monkeypatch, tmp_path):
     events = []
     with pytest.raises(pipeline.ConvertCancelled):
         pipeline._pdf_to_transactions(
-            pdf_path, device="cpu",
+            pdf_path,
             progress_cb=lambda e, info: events.append((e, dict(info))),
             should_cancel=lambda: True,
         )
@@ -162,8 +162,8 @@ def test_pdf_to_transactions_cancel_at_page_boundary(monkeypatch, tmp_path):
 def test_pdf_to_transactions_cancel_midway_discards_partial(monkeypatch, tmp_path):
     """处理完第 1 页后取消：第 2 页边界抛出 ConvertCancelled，部分结果不返回。"""
     monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
-    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
-    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [])
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path: [])
 
     pdf_path = str(tmp_path / "样例.pdf")
     Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
@@ -178,7 +178,7 @@ def test_pdf_to_transactions_cancel_midway_discards_partial(monkeypatch, tmp_pat
     events = []
     with pytest.raises(pipeline.ConvertCancelled):
         pipeline._pdf_to_transactions(
-            pdf_path, device="cpu",
+            pdf_path,
             progress_cb=lambda e, info: events.append((e, dict(info))),
             should_cancel=cancel_after_first_page,
         )
@@ -195,7 +195,7 @@ def test_process_folder_cancel_between_files(monkeypatch, tmp_path):
     (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
 
     with pytest.raises(pipeline.ConvertCancelled):
-        pipeline.process_folder(str(tmp_path), device="cpu", should_cancel=lambda: True)
+        pipeline.process_folder(str(tmp_path), should_cancel=lambda: True)
 
     assert not (tmp_path / "a.csv").exists()
     assert not (tmp_path / "b.csv").exists()
@@ -214,7 +214,7 @@ def test_process_folder_cancel_after_first_file_keeps_first_csv(monkeypatch, tmp
         return calls["n"] > 1
 
     with pytest.raises(pipeline.ConvertCancelled):
-        pipeline.process_folder(str(tmp_path), device="cpu", should_cancel=cancel_before_second)
+        pipeline.process_folder(str(tmp_path), should_cancel=cancel_before_second)
 
     assert (tmp_path / "a.csv").exists()  # 已完成文件产物保留
     assert not (tmp_path / "b.csv").exists()

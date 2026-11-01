@@ -10,6 +10,8 @@ import logging
 import os
 import sys
 
+import pytest
+
 import boc_pdf2csv.cli as cli_module
 from boc_pdf2csv.pipeline import FolderResult
 
@@ -19,7 +21,7 @@ _DETAIL_NAME = "示例面馆"
 
 
 def _fake_process_folder(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
-                         device="gpu", force=False, **kwargs):
+                         force=False, **kwargs):
     """假管线：与真实管线同款元数据日志，交易明细只存在于数据中不写入日志。"""
     if not os.path.isdir(folder_path):
         raise NotADirectoryError(f"输入路径不存在或非目录: {folder_path}")
@@ -95,3 +97,47 @@ def test_cli_file_log_missing_dir_returns_1_without_log(tmp_path, monkeypatch):
     rc = _run_cli(tmp_path, monkeypatch, ["boc-pdf2csv", str(missing)])
     assert rc == 1
     assert not (missing / "boc-pdf2csv.log").exists()
+
+
+def test_cli_failed_warning_includes_reason(tmp_path, monkeypatch, capsys):
+    """失败警告行附带失败原因（无 GPU 等场景无需翻文件日志即可看到原因）。"""
+    def fake_fail(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
+                  force=False, **kwargs):
+        return FolderResult(
+            failed=["x.pdf"],
+            failed_errors={"x.pdf": "强制使用 GPU，但未检测到可用 GPU"},
+            total_transactions=0,
+        )
+
+    monkeypatch.setattr(cli_module, "process_folder", fake_fail)
+    monkeypatch.setattr(sys, "argv", ["boc-pdf2csv", str(tmp_path)])
+    try:
+        rc = cli_module.main()
+    finally:
+        _cleanup()
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "警告: 处理失败: x.pdf — 强制使用 GPU，但未检测到可用 GPU" in err
+
+
+def test_cli_rejects_device_option(tmp_path, monkeypatch):
+    """--device 已移除：传入即 argparse 未知参数报错，退出码 2。"""
+    monkeypatch.setattr(sys, "argv", ["boc-pdf2csv", str(tmp_path), "--device", "cpu"])
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            cli_module.main()
+        assert excinfo.value.code == 2
+    finally:
+        _cleanup()
+
+
+def test_cli_help_has_no_device_option(tmp_path, monkeypatch, capsys):
+    """--help 输出不含 --device（GPU-only 改造后选项面收敛）。"""
+    monkeypatch.setattr(sys, "argv", ["boc-pdf2csv", "--help"])
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            cli_module.main()
+        assert excinfo.value.code == 0
+    finally:
+        _cleanup()
+    assert "--device" not in capsys.readouterr().out

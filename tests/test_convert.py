@@ -52,9 +52,14 @@ def base_url(tmp_path, monkeypatch):
     applog.reset()  # 关闭日志句柄，临时目录才能被 pytest 清理
 
 
+def _gpu_on(monkeypatch):
+    """本测试假设 GPU 可用（走管线路径，覆盖套件默认的「无 GPU 环境」）。"""
+    monkeypatch.setattr(convert_module, "_probe_gpu", lambda: (True, ""))
+
+
 def _fake_pipeline(results, blocker=None):
     """返回假 process_folder：results {pdf 名: ("done"|"skip"|"fail", 交易数/错误)}。"""
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
              force=False, progress_cb=None, pdf_names=None, should_cancel=None):
         names = pdf_names if pdf_names is not None else sorted(
             f for f in os.listdir(folder_path) if f.lower().endswith(".pdf")
@@ -72,7 +77,7 @@ def _fake_pipeline(results, blocker=None):
             else:
                 n = action[1]
                 if progress_cb:
-                    progress_cb("engine_loading", {"device": device})
+                    progress_cb("engine_loading", {"device": "gpu"})
                     progress_cb("pdf_start", {"name": name, "pages_total": 1})
                     progress_cb("page_done", {"name": name, "page": 1, "pages_total": 1, "transactions_so_far": n})
                 rows = [_boc_row(f"2026-10-{i + 1:02d}", f"{8.8 + i:.2f}", "示例面馆") for i in range(n)]
@@ -88,7 +93,7 @@ def _fake_stoppable_pipeline(results):
     每个文件在写完 CSV 前有一次页边界检查窗口（睡眠 0.3s），期间收到停止请求则
     抛 ConvertCancelled（进行中文件结果丢弃、未处理文件不再转换）。
     """
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
              force=False, progress_cb=None, pdf_names=None, should_cancel=None):
         for name in (pdf_names or []):
             if should_cancel and should_cancel():
@@ -99,7 +104,7 @@ def _fake_stoppable_pipeline(results):
                     progress_cb("pdf_failed", {"name": name, "error": action[1]})
                 continue
             n = action[1]
-            progress_cb("engine_loading", {"device": device})
+            progress_cb("engine_loading", {"device": "gpu"})
             progress_cb("pdf_start", {"name": name, "pages_total": 2})
             progress_cb("page_done", {"name": name, "page": 1, "pages_total": 2, "transactions_so_far": 0})
             time.sleep(0.3)  # 页边界窗口：供测试在此窗口内发起停止请求
@@ -174,13 +179,14 @@ def test_meta_includes_convert_info(base_url):
 
 def test_convert_end_to_end_done_and_skipped(base_url, monkeypatch):
     base, db_path = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({
         "a.pdf": ("done", 2), "b.pdf": ("skip", 0),
     }))
 
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
     assert res["ok"] and res["job_id"]
 
     job = _wait_job(base, res["job_id"])
@@ -214,18 +220,19 @@ def test_convert_end_to_end_done_and_skipped(base_url, monkeypatch):
 
     meta = _get(base + "/api/meta")
     assert meta["counts"]["boc"] == 2
-    assert meta["gpu_available"] is False  # 首次任务已触发探测
+    assert meta["gpu_available"] is True  # 首次任务已触发探测
     assert "a.csv" in meta["convert_existing_csvs"]
 
 
 def test_convert_confirm_respects_file_filter(base_url, monkeypatch):
     base, _ = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({
         "a.pdf": ("done", 1), "b.pdf": ("done", 1),
     }))
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
     _wait_job(base, res["job_id"])
 
     confirm = _post_json(base + f"/api/boc/convert/{res['job_id']}/confirm", {"files": ["a.csv"]})
@@ -238,12 +245,13 @@ def test_convert_confirm_respects_file_filter(base_url, monkeypatch):
 
 def test_convert_partial_failure(base_url, monkeypatch):
     base, _ = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({
         "ok.pdf": ("done", 1), "bad.pdf": ("fail", "渲染失败"),
     }))
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("ok.pdf", b"%PDF-1.4"), ("bad.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "partial"
     assert job["totals"] == {"done": 1, "skipped": 0, "failed": 1, "stopped": 0, "transactions": 1}
@@ -258,12 +266,13 @@ def test_convert_partial_failure(base_url, monkeypatch):
 
 def test_convert_all_failed_blocks_preview(base_url, monkeypatch):
     base, _ = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({
         "a.pdf": ("fail", "处理出错"), "b.pdf": ("fail", "处理出错"),
     }))
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "failed"
     assert job["totals"]["failed"] == 2
@@ -275,16 +284,17 @@ def test_convert_all_failed_blocks_preview(base_url, monkeypatch):
 
 def test_convert_conflict_409_returns_job_id(base_url, monkeypatch):
     base, _ = base_url
+    _gpu_on(monkeypatch)
     blocker = threading.Event()
     monkeypatch.setattr(pipeline_module, "process_folder",
                         _fake_pipeline({"a.pdf": ("done", 1)}, blocker=blocker))
     res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())
+        [("a.pdf", b"%PDF-1.4")]), _headers())
     assert res["ok"]
 
     with pytest.raises(urllib.error.HTTPError) as excinfo:
         _post(base + "/api/boc/convert", _convert_multipart(
-            [("b.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())
+            [("b.pdf", b"%PDF-1.4")]), _headers())
     assert excinfo.value.code == 409
     body = json.loads(excinfo.value.read().decode("utf-8"))
     assert body["ok"] is False and body["job_id"] == res["job_id"]
@@ -305,15 +315,16 @@ def test_convert_silent_files_settled_done(base_url, monkeypatch):
     """管线正常返回但不发事件（渲染 0 图提前返回路径）且已写出 CSV：
     服务端按 CLI 语义补记为 done（0 条），不误标失败。"""
     base, _ = base_url
+    _gpu_on(monkeypatch)
 
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
              force=False, progress_cb=None, pdf_names=None, should_cancel=None):
         for name in pdf_names or []:
             (Path(folder_path) / (Path(name).stem + ".csv")).write_bytes(_boc_csv([]))
 
     monkeypatch.setattr(pipeline_module, "process_folder", fake)
     res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())
+        [("a.pdf", b"%PDF-1.4")]), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "done"
     assert job["files"][0]["state"] == "done"
@@ -323,14 +334,15 @@ def test_convert_silent_files_settled_done(base_url, monkeypatch):
 def test_convert_silent_files_settled_failed(base_url, monkeypatch):
     """管线正常返回但不发事件且无 CSV 产物：补记为失败。"""
     base, _ = base_url
+    _gpu_on(monkeypatch)
 
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
+    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False,
              force=False, progress_cb=None, pdf_names=None, should_cancel=None):
         pass  # 不发事件、不写产物
 
     monkeypatch.setattr(pipeline_module, "process_folder", fake)
     res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())
+        [("a.pdf", b"%PDF-1.4")]), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "failed"
     assert job["files"][0]["state"] == "failed"
@@ -360,110 +372,56 @@ def test_convert_upload_validation(base_url, monkeypatch):
     assert excinfo.value.code == 400
     assert "50" in json.loads(excinfo.value.read().decode("utf-8"))["error"]
 
-    # 非法 device
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post(base + "/api/boc/convert", _convert_multipart(
-            [("a.pdf", b"%PDF-1.4")], {"device": "xpu"}), _headers())
-    assert excinfo.value.code == 400
 
+def test_convert_no_gpu_fails_job_with_reason(base_url, monkeypatch):
+    """无 GPU：任务不启动管线、直接终态 failed，文件错误附原因，无 awaiting_consent 中间态。"""
+    base, db_path = base_url
 
-def test_convert_gpu_unavailable_error_mapped(base_url, monkeypatch):
-    """device=gpu 且无 GPU：失败原因映射为页面文案，并附具体原因（设计 §5.2）。"""
-    base, _ = base_url
-
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
-             force=False, progress_cb=None, pdf_names=None, should_cancel=None):
-        assert device == "gpu"  # auto 在服务端解析，假管线收到 gpu/cpu 原语义
-        for name in pdf_names or []:
-            if progress_cb:
-                progress_cb("pdf_failed", {
-                    "name": name,
-                    "error": "强制使用 GPU，但未检测到可用 GPU：请确认安装的是 GPU 版 paddlepaddle",
-                })
+    def fake(folder_path, **kwargs):
+        raise AssertionError("无 GPU 时管线不应被启动")
 
     monkeypatch.setattr(pipeline_module, "process_folder", fake)
     res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "gpu"}), _headers())
+        [("a.pdf", b"%PDF-1.4")], {"scale": "2.0"}), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "failed"
-    assert job["files"][0]["error"] == (
-        "未检测到可用 GPU，且推理设备为 GPU。请改用「自动」或「CPU」后重试（测试环境：无 GPU）"
-    )
+    assert job["files"][0]["state"] == "failed"
+    assert job["files"][0]["error"] == "未检测到可用 GPU：测试环境：无 GPU。PDF 转换仅支持 GPU"
+    assert "gpu_unavailable_reason" not in job  # snapshot 已删该字段
+    assert not (db_path.parent / "boc_csv" / "a.csv").exists()  # 未启动管线，无产物
 
 
-def test_convert_auto_without_gpu_waits_for_consent(base_url, monkeypatch):
-    """auto 且无 GPU：不静默降级，进入 awaiting_consent 并附原因；同意后才用 CPU 执行。"""
+def test_convert_ignores_device_field(base_url, monkeypatch):
+    """API 收到 device 字段被忽略（转换恒 GPU，旧客户端/脚本不炸）。"""
     base, _ = base_url
-    seen = {}
-
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
-             force=False, progress_cb=None, pdf_names=None, should_cancel=None):
-        seen["device"] = device
-        for name in pdf_names or []:
-            if progress_cb:
-                progress_cb("pdf_done", {"name": name, "transactions": 0, "duration_s": 0.1})
-                (Path(folder_path) / (Path(name).stem + ".csv")).write_bytes(_boc_csv([]))
-
-    monkeypatch.setattr(pipeline_module, "process_folder", fake)
-    res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "auto"}), _headers())
-
-    # 等待设备确认：任务未开始转换，附 GPU 不可用原因
-    deadline = time.time() + 10
-    job = None
-    while time.time() < deadline:
-        job = _get(base + f"/api/boc/convert/{res['job_id']}")
-        if job["status"] == "awaiting_consent":
-            break
-        time.sleep(0.05)
-    assert job["status"] == "awaiting_consent"
-    assert job["gpu_unavailable_reason"] == "测试环境：无 GPU"
-    assert all(f["state"] == "waiting" for f in job["files"])
-    assert job["totals"]["stopped"] == 0
-
-    # 用户同意用 CPU → 任务继续并完成
-    assert _post_json(base + f"/api/boc/convert/{res['job_id']}/consent",
-                      {"use_cpu": True})["ok"]
-    job = _wait_job(base, res["job_id"])
-    assert job["status"] == "done"
-    assert seen["device"] == "cpu"  # auto + 无 GPU → 服务端解析为 cpu
-
-
-def test_convert_consent_refuse_stops_job(base_url, monkeypatch):
-    """用户拒绝用 CPU：任务终态 stopped，所有文件未处理，无 CSV 产物。"""
-    base, db_path = base_url
-    monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 1)}))
-
-    res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "auto"}), _headers())
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        if _get(base + f"/api/boc/convert/{res['job_id']}")["status"] == "awaiting_consent":
-            break
-        time.sleep(0.05)
-
-    assert _post_json(base + f"/api/boc/convert/{res['job_id']}/consent",
-                      {"use_cpu": False})["ok"]
-    job = _wait_job(base, res["job_id"])
-    assert job["status"] == "stopped"
-    assert job["totals"]["stopped"] == 1
-    assert job["files"][0]["state"] == "stopped"
-    assert not (db_path.parent / "boc_csv" / "a.csv").exists()  # 未处理，无产物
-
-    # 无成功产出 → 预览被拒
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post(base + f"/api/boc/convert/{res['job_id']}/preview")
-    assert excinfo.value.code == 400
-
-
-def test_convert_explicit_cpu_skips_consent(base_url, monkeypatch):
-    """用户显式选择 CPU：无需确认直接执行（用户已自行决定用 CPU）。"""
-    base, _ = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 0)}))
     res = _post(base + "/api/boc/convert", _convert_multipart(
         [("a.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())
     job = _wait_job(base, res["job_id"])
     assert job["status"] == "done"
+
+
+def test_convert_consent_route_removed(base_url, monkeypatch):
+    """consent 流已整体移除：/consent 路径返回 404。"""
+    base, _ = base_url
+    _gpu_on(monkeypatch)
+    monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 0)}))
+    res = _post(base + "/api/boc/convert", _convert_multipart(
+        [("a.pdf", b"%PDF-1.4")]), _headers())
+    _wait_job(base, res["job_id"])
+
+    with pytest.raises(urllib.error.HTTPError) as excinfo:
+        _post_json(base + f"/api/boc/convert/{res['job_id']}/consent", {"use_cpu": True})
+    assert excinfo.value.code == 404
+
+
+def test_gpu_status_endpoint(base_url):
+    """GET /api/gpu-status：返回探测结果与原因（本套件默认无 GPU 环境）。"""
+    base, _ = base_url
+    res = _get(base + "/api/gpu-status")
+    assert res["ok"] and res["available"] is False
+    assert res["reason"] == "测试环境：无 GPU"
 
 
 def test_convert_open_dir(base_url, monkeypatch):
@@ -483,7 +441,7 @@ def test_convert_preview_unknown_job_400(base_url):
 
 
 # ---------------------------------------------------------------------------
-# 中途停止 / 设备确认 / 文件日志
+# 中途停止 / 文件日志
 # ---------------------------------------------------------------------------
 
 def _wait_status(base, job_id, want, timeout=15):
@@ -499,12 +457,13 @@ def _wait_status(base, job_id, want, timeout=15):
 def test_convert_stop_keeps_done_discards_running(base_url, monkeypatch):
     """中途停止：已完成文件 CSV 保留可导入；进行中文件结果丢弃；未处理文件不再转换。"""
     base, db_path = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_stoppable_pipeline({
         "a.pdf": ("done", 1), "b.pdf": ("done", 1), "c.pdf": ("done", 1),
     }))
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("a.pdf", b"%PDF-1.4"), ("b.pdf", b"%PDF-1.4"), ("c.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
 
     # 等第 1 个文件完成（其 CSV 已写出）
     deadline = time.time() + 15
@@ -537,66 +496,6 @@ def test_convert_stop_keeps_done_discards_running(base_url, monkeypatch):
     assert _post(base + f"/api/boc/convert/{res['job_id']}/stop")["ok"]
 
 
-def test_convert_stop_during_consent_stops_job(base_url, monkeypatch):
-    """等待设备确认时停止：任务终态 stopped，不启动管线。"""
-    base, _ = base_url
-    started = []
-
-    def fake(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu",
-             force=False, progress_cb=None, pdf_names=None, should_cancel=None):
-        started.append(True)
-        for name in pdf_names or []:
-            if progress_cb:
-                progress_cb("pdf_done", {"name": name, "transactions": 0, "duration_s": 0.1})
-            (Path(folder_path) / (Path(name).stem + ".csv")).write_bytes(_boc_csv([]))
-    monkeypatch.setattr(pipeline_module, "process_folder", fake)
-
-    res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "auto"}), _headers())
-    _wait_status(base, res["job_id"], "awaiting_consent")
-
-    assert _post(base + f"/api/boc/convert/{res['job_id']}/stop")["ok"]
-    job = _wait_status(base, res["job_id"], "stopped")
-    assert job["totals"]["stopped"] == 1
-    assert started == []  # 管线从未启动
-
-
-def test_convert_second_start_during_consent_409(base_url, monkeypatch):
-    """等待设备确认也占用单任务槽：再次提交返回 409 附 job_id。"""
-    base, _ = base_url
-    monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 0)}))
-    res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "auto"}), _headers())
-    _wait_status(base, res["job_id"], "awaiting_consent")
-
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post(base + "/api/boc/convert", _convert_multipart([("b.pdf", b"%PDF-1.4")]), _headers())
-    assert excinfo.value.code == 409
-    assert json.loads(excinfo.value.read().decode("utf-8"))["job_id"] == res["job_id"]
-
-
-def test_convert_consent_validation(base_url, monkeypatch):
-    """consent 参数校验：非布尔 400；非等待状态 400；未知任务 400。"""
-    base, _ = base_url
-    monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 0)}))
-    res = _post(base + "/api/boc/convert", _convert_multipart(
-        [("a.pdf", b"%PDF-1.4")], {"device": "cpu"}), _headers())  # 显式 CPU 不进入确认
-    _wait_job(base, res["job_id"])
-
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post_json(base + f"/api/boc/convert/{res['job_id']}/consent", {"use_cpu": "yes"})
-    assert excinfo.value.code == 400
-    assert "use_cpu" in json.loads(excinfo.value.read().decode("utf-8"))["error"]
-
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post_json(base + f"/api/boc/convert/{res['job_id']}/consent", {"use_cpu": True})
-    assert excinfo.value.code == 400  # 任务已结束，不在等待确认状态
-
-    with pytest.raises(urllib.error.HTTPError) as excinfo:
-        _post_json(base + "/api/boc/convert/" + "0" * 32 + "/consent", {"use_cpu": True})
-    assert excinfo.value.code == 400
-
-
 def test_convert_stop_unknown_job_400(base_url):
     base, _ = base_url
     with pytest.raises(urllib.error.HTTPError) as excinfo:
@@ -607,11 +506,12 @@ def test_convert_stop_unknown_job_400(base_url):
 def test_convert_log_file_records_lifecycle_without_sensitive_data(base_url, monkeypatch):
     """文件日志：记录任务生命周期与导入写入；不记录账单明细（金额/对方/交易内容）。"""
     base, _ = base_url
+    _gpu_on(monkeypatch)
     monkeypatch.setattr(pipeline_module, "process_folder", _fake_pipeline({"a.pdf": ("done", 2)}))
 
     res = _post(base + "/api/boc/convert", _convert_multipart([
         ("a.pdf", b"%PDF-1.4"),
-    ], {"device": "cpu"}), _headers())
+    ]), _headers())
     _wait_job(base, res["job_id"])
     _post(base + f"/api/boc/convert/{res['job_id']}/confirm")
 

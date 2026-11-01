@@ -7,8 +7,9 @@
   顺序颠倒时 paddle 的 DLL 搜索路径干扰 torch 加载 shm.dll（WinError 127），
   且一旦发生本进程 torch 永远无法加载。子进程内验证。
 - 真实 OCR 管线冒烟：需设置环境变量 PAYCHECK_SAMPLE_DIR 指向真实样本目录
-  （与 test_batch_import.py 同一约定），用真实 PDF 走通 process_folder(CPU)
-  并验证事件序列、CSV 产物与支出行解析。
+  （与 test_batch_import.py 同一约定），用真实 PDF 走通 process_folder(GPU)
+  并验证事件序列、CSV 产物与支出行解析。GPU-only 改造后需可用 GPU，
+  探测失败时 skip（保证无 GPU 机器 CI 不红）。
 """
 
 from __future__ import annotations
@@ -51,14 +52,19 @@ def _real_pdf() -> Path:
 
 @pytest.mark.skipif(not HAS_REAL, reason="需设置 PAYCHECK_SAMPLE_DIR 指向真实样本目录")
 def test_real_pipeline_smoke(tmp_path):
-    """真实 OCR 管线冒烟：CPU 推理整份 PDF，事件序列完整且产出含交易行的 CSV。"""
+    """真实 OCR 管线冒烟：GPU 推理整份 PDF，事件序列完整且产出含交易行的 CSV。"""
+    from paycheck_workbench.convert import _probe_gpu
     from boc_pdf2csv.pipeline import process_folder
+
+    gpu_ok, reason = _probe_gpu()
+    if not gpu_ok:
+        pytest.skip(f"无可用 GPU（{reason}），GPU-only 改造后本用例需 GPU 环境")
 
     pdf = _real_pdf()
     (tmp_path / pdf.name).write_bytes(pdf.read_bytes())
     events = []
     result = process_folder(
-        str(tmp_path), device="cpu", timeout_minutes=30,
+        str(tmp_path), timeout_minutes=30,
         progress_cb=lambda e, info: events.append((e, info)),
     )
 
@@ -66,6 +72,7 @@ def test_real_pipeline_smoke(tmp_path):
     assert not result.skipped
     event_types = [e for e, _ in events]
     assert event_types[0] == "engine_loading"  # 模型加载阶段事件
+    assert events[0][1]["device"] == "gpu"  # GPU-only：设备恒为 gpu
     assert "pdf_start" in event_types and "page_done" in event_types
     assert ("pdf_done", pdf.name) in [(e, i.get("name")) for e, i in events]
 
