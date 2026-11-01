@@ -2,9 +2,9 @@
 
 | 文档 | 内容 |
 |------|------|
-| [installation.md](installation.md) | 安装说明（CPU / GPU、pip 备选、依赖表） |
+| [installation.md](installation.md) | 安装说明（GPU、pip 备选、依赖表） |
 | [boc-pdf2csv.md](boc-pdf2csv.md) | boc-pdf2csv 使用说明（命令、Python API、CSV 格式、退出码） |
-| [pdf-options.md](pdf-options.md) | PDF 转换各选项说明（scale / timeout / device / force / verbose） |
+| [pdf-options.md](pdf-options.md) | PDF 转换各选项说明（scale / timeout / force / verbose） |
 | [workbench.md](workbench.md) | 账单工作台操作说明 |
 | [logging.md](logging.md) | 日志说明（工作台 paycheck.log、CLI 文件日志、隐私红线） |
 

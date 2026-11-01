@@ -13,9 +13,9 @@
 - **路径查询**：`GET /api/meta` 的 `log_file` 字段返回当前日志文件路径；启动时终端也会打印「运行日志：<路径>」。
 - **记录的关键事件**：
   - 启动：version / db 路径 / convert_dir；
-  - 转换任务登记：job id、PDF 数、device / scale / timeout / force；
+  - 转换任务登记：job id、PDF 数、scale / timeout / force；
   - 转换任务开始与结束：status、成功/跳过/失败/停止计数、交易总数；
-  - 无 GPU 时的设备确认：等待确认、用户同意用 CPU / 拒绝或停止；
+  - 无 GPU 时任务失败：未检测到可用 GPU 及原因、任务失败；
   - 停止请求与已按请求停止；
   - 管线异常：完整 traceback（`exception` 级）；
   - 数据库读写失败。

@@ -18,9 +18,6 @@ uv run boc-pdf2csv ./statements/ --scale 2.0
 # 延长超时（大批量文件）
 uv run boc-pdf2csv ./statements/ --timeout 120
 
-# 无 GPU 机器使用 CPU 推理（默认强制 GPU）
-uv run boc-pdf2csv ./statements/ --device cpu
-
 # 查看版本 / 帮助
 uv run boc-pdf2csv --version
 uv run boc-pdf2csv --help
@@ -40,10 +37,10 @@ uv run python -m boc_pdf2csv ./statements/
 - 同名 CSV 已存在时默认**跳过**该 PDF；删除对应 CSV 或加 `--force` 可重新转换（`--force` 会覆盖已有 CSV）
 - 自动剔除重复交易（按 日期 + 金额 + 对方账户名），自动按日期 + 时间排序
 - 输出 UTF-8 BOM 编码的 13 列标准 CSV
-- 默认强制使用 GPU 推理；未检测到 GPU 时直接报错（不会静默回退 CPU），无 GPU 的机器需显式加 `--device cpu`
+- 强制使用 GPU 推理；未检测到 GPU 时直接报错退出（退出码 3，不会静默回退）
 - 每次运行会在输入目录写入运行日志 `boc-pdf2csv.log`（见 [logging.md](logging.md)）
 
-各选项的详细语义（`--scale` / `--timeout` / `--device` / `--force` / `--verbose`）见 [pdf-options.md](pdf-options.md)。
+各选项的详细语义（`--scale` / `--timeout` / `--force` / `--verbose`）见 [pdf-options.md](pdf-options.md)。
 
 ## 作为 Python API 使用
 
@@ -60,14 +57,12 @@ result.total_transactions  # 提取到的交易总数（去重后）
 # 处理单个 PDF
 csv_content = process_pdf("./statements/2025-01.pdf", output_path="2025-01.csv")
 
-# 推理设备默认强制 GPU（device='gpu'），无 GPU 时显式指定 CPU
-csv_content = process_pdf("./statements/2025-01.pdf", device="cpu")
-
-# 文件夹批量处理默认跳过已有同名 CSV，force=True 时覆盖重新导出
+# 文件夹批量处理默认跳过已有同名 CSV，force=True 时覆盖重新导出；
+# 推理强制使用 GPU，无 GPU 时抛 RuntimeError
 result = process_folder("./statements/", force=True)
 ```
 
-> API 参数与命令行一致：`process_folder(folder_path, scale=3.0, timeout_minutes=60, verbose=False, device="gpu", force=False)`。
+> API 参数与命令行一致：`process_folder(folder_path, scale=3.0, timeout_minutes=60, verbose=False, force=False)`。
 
 ## CSV 输出格式
 
@@ -96,5 +91,5 @@ result = process_folder("./statements/", force=True)
 | 0 | 成功 |
 | 1 | 输入路径不存在或非目录 |
 | 2 | 未找到 PDF 文件 |
-| 3 | 处理失败（全部 PDF 处理出错） |
+| 3 | 处理失败（全部 PDF 处理出错，如无可用 GPU） |
 | 4 | 未提取到任何交易记录 |

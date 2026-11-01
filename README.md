@@ -28,7 +28,7 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 - 文件夹内每个 PDF 输出同名 CSV，同名 CSV 已存在则自动跳过
 - 自动剔除重复交易（按 日期 + 金额 + 对方账户名），自动按日期 + 时间排序
 - 输出 UTF-8 BOM 编码的 13 列标准 CSV
-- 默认强制使用 GPU（CUDA）推理，无 GPU 时可显式 `--device cpu`
+- 强制使用 GPU（CUDA）推理
 
 ## 快速开始
 
@@ -46,9 +46,9 @@ uv run paycheck --open           # 启动账单工作台并打开浏览器
 | 文档 | 内容 |
 |------|------|
 | [docs/index.md](docs/index.md) | 文档索引：两工具关系、项目结构、开发与测试 |
-| [docs/installation.md](docs/installation.md) | 安装说明（CPU / GPU、pip 备选、依赖表） |
+| [docs/installation.md](docs/installation.md) | 安装说明（GPU、pip 备选、依赖表） |
 | [docs/boc-pdf2csv.md](docs/boc-pdf2csv.md) | boc-pdf2csv 使用说明（命令、Python API、CSV 格式、退出码） |
-| [docs/pdf-options.md](docs/pdf-options.md) | PDF 转换各选项说明（scale / timeout / device / force / verbose） |
+| [docs/pdf-options.md](docs/pdf-options.md) | PDF 转换各选项说明（scale / timeout / force / verbose） |
 | [docs/workbench.md](docs/workbench.md) | 账单工作台操作说明 |
 | [docs/logging.md](docs/logging.md) | 日志说明（工作台 paycheck.log、CLI 文件日志、隐私红线） |
 
