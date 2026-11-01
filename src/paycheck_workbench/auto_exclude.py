@@ -107,22 +107,27 @@ def scan(conn: sqlite3.Connection) -> dict:
     boc_rows, others = _candidates(conn)
     buckets: Dict[Tuple, List[dict]] = {}
     for row in others:
-        key = (row["_minute"], _parse_amount(row["amount"]), row["direction"])
+        key = (row["_minute"], row["direction"])
         buckets.setdefault(key, []).append(row)
 
     matches: List[dict] = []
     ambiguous: List[dict] = []
     for boc in boc_rows:
-        key = (boc["_minute"], _parse_amount(boc["amount"]), boc["direction"])
-        candidates = buckets.get(key, [])
+        amount = _parse_amount(boc["amount"])
+        # 金额按容差比对（精确到分，防浮点误差）；同距多候选为歧义
+        candidates = [
+            c for c in buckets.get((boc["_minute"], boc["direction"]), [])
+            if abs(_parse_amount(c["amount"]) - amount) <= _AMOUNT_TOLERANCE
+        ]
         if not candidates:
             continue
         if len(candidates) > 1:
-            # 同距多候选：任意配对都可能误标，跳过进预览供人工判断
+            # 任意配对都可能误标，跳过进预览供人工判断
             ambiguous.append({"boc": _row_ref(boc), "candidates": [_row_ref(c) for c in candidates]})
             continue
-        buckets.pop(key)  # 一对一贪心：候选只被消费一次
-        matches.append({"boc": _row_ref(boc), "other": _row_ref(candidates[0])})
+        other = candidates[0]
+        buckets[(boc["_minute"], boc["direction"])].remove(other)  # 一对一贪心：候选只被消费一次
+        matches.append({"boc": _row_ref(boc), "other": _row_ref(other)})
     return {"matches": matches, "ambiguous": ambiguous}
 
 
