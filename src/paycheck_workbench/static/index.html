@@ -650,7 +650,8 @@ let convertWarn = null;       // 选择阶段的警告文本（非 PDF / 同名�
 let convertInterrupted = false; // 服务重启导致任务丢失（打开弹窗时提示一次）
 let convertResultSeen = false;  // 结果视图已展示过；未看过的结束态任务在关闭弹窗后保留，重开直达结果视图
 let convertStopRequested = false; // 已发起停止请求（进度视图按钮置灰显示「正在停止…」）
-let convertParams = { scale: "3.0", device: "auto", timeout: 60, force: false }; // 高级选项输入
+let convertParams = { scale: "3.0", timeout: 60, force: false }; // 高级选项输入
+let convertGpu = { state: "loading", reason: "" }; // 转换弹窗 GPU 探测结果：loading / available / unavailable
 
 const TOTAL = "total";
 const TAB_ORDER = [TOTAL, "boc", "alipay", "wechat"];
@@ -2017,8 +2018,8 @@ function convertElapsedSec(job) {
   return Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
 }
 function runningConvertJob() {
-  // 进行中或等待设备确认（均占用单任务槽，收起后后台保留）
-  return convertJob && (convertJob.status === "running" || convertJob.status === "awaiting_consent") ? convertJob : null;
+  // 进行中（占用单任务槽，收起后后台保留）
+  return convertJob && convertJob.status === "running" ? convertJob : null;
 }
 function convertNameConflict(fileName) {
   // 与转换目录中同名 CSV 冲突 → 转换时将跳过（force 勾选除外）
@@ -2047,6 +2048,7 @@ function openConvertModal() {
     return;
   }
   renderConvertSelect();
+  refreshConvertGpu();
   if (convertInterrupted) {
     convertInterrupted = false;
     convertModalError("上次转换任务已中断，请重新开始转换");
@@ -2081,14 +2083,43 @@ function convertSelectedListHtml() {
     <div class="batch-file-list">${rows}</div>
   </div>`;
 }
-function updateConvertDeviceWarn() {
-  // 设备=自动且无 GPU：开始前提示——开始后将说明原因并询问是否改用 CPU（不静默降级）
-  let el = $("#convert-device-warn");
-  const show = convertParams.device === "auto" && meta.gpu_available === false;
-  if (show) {
-    if (!el) { el = document.createElement("div"); el.id = "convert-device-warn"; el.className = "modal-warn"; $("#convert-body").prepend(el); }
-    el.textContent = "未检测到可用 GPU，开始转换后将说明原因并询问是否改用 CPU 继续";
-    el.style.display = "";
+async function refreshConvertGpu() {
+  // 弹窗打开时探测 GPU（服务端惰性、缓存）：不可用时顶部警示并禁用「开始转换」
+  convertGpu = { state: "loading", reason: "" };
+  renderConvertGpuWarn();
+  try {
+    const res = await api("/api/gpu-status");
+    if (!res.ok) { convertGpu = { state: "available", reason: "" }; return; }  // 探测失败不阻断（任务层仍有 failed 兜底）
+    convertGpu = res.available
+      ? { state: "available", reason: "" }
+      : { state: "unavailable", reason: res.reason || "未知原因" };
+  } catch (e) {
+    convertGpu = { state: "available", reason: "" };  // 网络异常不阻断
+  }
+  renderConvertGpuWarn();
+}
+function convertGpuWarnHtml() {
+  // 弹窗内联警示（renderConvertSelect 每次重绘时随 convertGpu 状态重建）
+  if (convertGpu.state === "loading") return `<div class="modal-warn" id="convert-gpu-warn">正在检测 GPU…</div>`;
+  if (convertGpu.state === "unavailable") return `<div class="modal-warn" id="convert-gpu-warn">未检测到可用 GPU（${esc(convertGpu.reason)}），PDF 转换不可用</div>`;
+  return "";
+}
+function renderConvertGpuWarn() {
+  // GPU 探测完成后的 DOM 补丁（不重绘弹窗）：警示文案 + 开始按钮禁用联动
+  const startBtn = $("#btn-convert-start");
+  if (startBtn) startBtn.disabled = !convertSelected.length || convertGpu.state !== "available";
+  const el = $("#convert-gpu-warn");
+  const text = convertGpu.state === "loading" ? "正在检测 GPU…"
+    : (convertGpu.state === "unavailable" ? `未检测到可用 GPU（${convertGpu.reason}），PDF 转换不可用` : "");
+  if (text) {
+    if (el) el.textContent = text;
+    else {
+      const warn = document.createElement("div");
+      warn.id = "convert-gpu-warn";
+      warn.className = "modal-warn";
+      warn.textContent = text;
+      $("#convert-body").prepend(warn);
+    }
   } else if (el) {
     el.remove();
   }
@@ -2102,6 +2133,7 @@ function renderConvertSelect() {
   const selectedHtml = convertSelected.length ? convertSelectedListHtml() : "";
   body.innerHTML = `
     ${warn}
+    ${convertGpuWarnHtml()}
     <div id="convert-dropzone">
       <div class="dz-title">📄 点击选择或拖拽 BOC PDF 到此处（可多选）</div>
       <div>
@@ -2124,12 +2156,6 @@ function renderConvertSelect() {
           <label><input type="radio" name="conv-scale" value="4.0" ${convertParams.scale === "4.0" ? "checked" : ""}> 高 4.0（更清晰）</label>
         </div>
         <div class="conv-param">
-          <span class="conv-param-label">推理设备</span>
-          <label><input type="radio" name="conv-device" value="auto" ${convertParams.device === "auto" ? "checked" : ""}> 自动（推荐）</label>
-          <label><input type="radio" name="conv-device" value="gpu" ${convertParams.device === "gpu" ? "checked" : ""}> GPU</label>
-          <label><input type="radio" name="conv-device" value="cpu" ${convertParams.device === "cpu" ? "checked" : ""}> CPU</label>
-        </div>
-        <div class="conv-param">
           <span class="conv-param-label">单文件超时</span>
           <input type="number" id="conv-timeout" value="${esc(String(convertParams.timeout))}" min="1" step="1"> 分钟
         </div>
@@ -2140,7 +2166,7 @@ function renderConvertSelect() {
     </div>
     <div id="convert-actions">
       <button class="btn" id="btn-convert-cancel">取消</button>
-      <button class="btn btn-primary" id="btn-convert-start" ${convertSelected.length ? "" : "disabled"}>开始转换</button>
+      <button class="btn btn-primary" id="btn-convert-start" ${convertSelected.length && convertGpu.state === "available" ? "" : "disabled"}>开始转换</button>
     </div>`;
   const dz = $("#convert-dropzone");
   const fileInput = $("#conv-file-input");
@@ -2170,8 +2196,6 @@ function renderConvertSelect() {
     }));
   document.querySelectorAll('input[name="conv-scale"]').forEach((r) =>
     r.addEventListener("change", () => { convertParams.scale = r.value; }));
-  document.querySelectorAll('input[name="conv-device"]').forEach((r) =>
-    r.addEventListener("change", () => { convertParams.device = r.value; updateConvertDeviceWarn(); }));
   $("#conv-timeout").addEventListener("change", (e) => {
     const n = Number(e.target.value);
     convertParams.timeout = Number.isFinite(n) && n >= 1 ? Math.round(n) : 60;
@@ -2185,7 +2209,6 @@ function renderConvertSelect() {
   });
   $("#btn-convert-cancel").addEventListener("click", closeConvertModal);
   $("#btn-convert-start").addEventListener("click", startConvert);
-  updateConvertDeviceWarn();
 }
 function handleConvertFiles(files) {
   // 校验同现有 handleFiles 口径：非 PDF 跳过（黄条）、同名忽略（黄条）、超 64MB 拒绝（红条）
@@ -2223,7 +2246,6 @@ async function startConvert() {
   const fd = new FormData();
   for (const f of files) fd.append("files", f, f.name);
   fd.append("scale", convertParams.scale);
-  fd.append("device", convertParams.device);
   fd.append("timeout_minutes", String(convertParams.timeout || 60));
   fd.append("force", convertParams.force ? "1" : "0");
   renderConvertLoading("正在上传 PDF 并启动转换 …");
@@ -2241,7 +2263,7 @@ async function startConvert() {
     convertResultSeen = false;
     convertStopRequested = false;
     sessionStorage.setItem("convertJobId", convertJobId);
-    loadMeta().catch(() => {});  // 刷新 gpu_available 与已有 CSV 列表（首次任务触发探测）
+    loadMeta().catch(() => {});  // 刷新已有 CSV 列表
     pollConvert();
   } catch (e) {
     renderConvertSelect();
@@ -2327,11 +2349,6 @@ async function pollConvertOnce() {
     if (!$("#convert-mask").hidden) renderConvertProgress(res);
     return;
   }
-  if (res.status === "awaiting_consent") {
-    // GPU 不可用：说明原因、等待用户确认是否改用 CPU（不静默降级）
-    if (!$("#convert-mask").hidden && !$("#convert-consent-view")) renderConvertConsent(res);
-    return;
-  }
   // 任务结束：胶囊消失；弹窗打开则展示结果视图，收起则页面 banner 提示
   stopConvertPolling();
   sessionStorage.removeItem("convertJobId");
@@ -2339,48 +2356,14 @@ async function pollConvertOnce() {
   else renderConvertResult(res);
 }
 function updateConvertPill(job) {
-  // 顶栏胶囊指示（仅 BOC 页签、任务进行中或等待确认）
+  // 顶栏胶囊指示（仅 BOC 页签、任务进行中）
   const pill = $("#convert-pill");
   const t = job ? job.totals : null;
-  const active = job && (job.status === "running" || job.status === "awaiting_consent");
+  const active = job && job.status === "running";
   if (!active || currentSource !== "boc") { pill.hidden = true; return; }
   const finished = t.done + t.skipped + t.failed;
   pill.hidden = false;
-  pill.textContent = job.status === "awaiting_consent"
-    ? "⟳ 转换任务等待设备确认"
-    : `⟳ 转换中 ${finished}/${job.files.length}`;
-}
-function renderConvertConsent(job) {
-  // 设备确认视图：GPU 不可用说明原因，用户同意才用 CPU（可收起，稍后从顶栏胶囊回来）
-  $("#btn-convert-close").textContent = "收起";
-  const reason = job.gpu_unavailable_reason || "未知原因";
-  const rows = job.files.map(convertFileItemHtml).join("");
-  $("#convert-body").innerHTML = `
-    <div id="convert-consent-view">
-      <div class="modal-warn">未检测到可用 GPU（${esc(reason)}）。改用 CPU 推理速度会明显变慢，是否继续？</div>
-      <div class="batch-file-list">${rows}</div>
-      <div style="font-size:12px;color:#646A73;margin-top:8px">任务已暂停等待确认；可收起本窗口，稍后从顶栏指示重新打开</div>
-      <div id="convert-actions">
-        <button class="btn" id="btn-convert-stop">取消转换</button>
-        <button class="btn btn-primary" id="btn-consent-cpu">使用 CPU 继续</button>
-      </div>
-    </div>`;
-  $("#btn-consent-cpu").addEventListener("click", () => convertConsent(true));
-  $("#btn-convert-stop").addEventListener("click", stopConvertJob);
-}
-async function convertConsent(useCpu) {
-  renderConvertLoading(useCpu ? "正在使用 CPU 继续转换 …" : "正在取消转换 …");
-  try {
-    const res = await api(`/api/boc/convert/${convertJobId}/consent`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ use_cpu: useCpu }),
-    });
-    if (!res.ok) { pollConvertOnce(); return; }
-    pollConvertOnce();
-  } catch (e) {
-    pollConvertOnce();
-  }
+  pill.textContent = `⟳ 转换中 ${finished}/${job.files.length}`;
 }
 async function stopConvertJob() {
   convertStopRequested = true;
@@ -2539,7 +2522,7 @@ async function resumeConvertSession() {
       convertInterrupted = true;
       return;
     }
-    if (res.status === "running" || res.status === "awaiting_consent") {
+    if (res.status === "running") {
       convertJob = res;
       updateConvertPill(res);
       pollConvert();
