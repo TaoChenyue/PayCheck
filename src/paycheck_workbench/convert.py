@@ -14,20 +14,23 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+from paycheck_workbench import applog
 
 GPU_UNAVAILABLE_HINT = "未检测到可用 GPU，且推理设备为 GPU。请改用「自动」或「CPU」后重试"
 
 _gpu_cache: Optional[bool] = None
+_gpu_reason_cache: Optional[str] = None
 _gpu_lock = threading.Lock()
 
 
 def gpu_available() -> bool:
     """GPU 可用性（首次调用时惰性探测并缓存，避免拖慢工作台启动）。"""
-    global _gpu_cache
+    global _gpu_cache, _gpu_reason_cache
     with _gpu_lock:
         if _gpu_cache is None:
-            _gpu_cache = _detect_gpu()
+            _gpu_cache, _gpu_reason_cache = _probe_gpu()
         return _gpu_cache
 
 
@@ -36,8 +39,19 @@ def gpu_available_cached() -> Optional[bool]:
     return _gpu_cache
 
 
-def _detect_gpu() -> bool:
-    """探测 paddle 是否具备可用的 GPU 推理环境（仅探测，不加载 OCR 模型）。
+def gpu_unavailable_reason() -> Optional[str]:
+    """GPU 不可用原因（随 gpu_available 一并探测缓存；未探测或可用时返回 None）。
+
+    成员验收反馈 2：GPU 不可用时必须向用户说明原因，经同意后才用 CPU。
+    """
+    with _gpu_lock:
+        if _gpu_cache is None or _gpu_cache:
+            return None
+        return _gpu_reason_cache
+
+
+def _probe_gpu() -> Tuple[bool, str]:
+    """探测 paddle 是否具备可用的 GPU 推理环境，返回 (可用, 不可用原因)。
 
     torch 必须先于 paddle 导入：Windows 上 paddle 的 DLL 搜索路径会干扰 torch
     加载自身的 shm.dll（WinError 127），与 ocr_engine 的导入顺序保持一致。
@@ -47,11 +61,20 @@ def _detect_gpu() -> bool:
     try:
         import torch  # noqa: F401
         import paddle
-        if not (paddle.device.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0):
-            return False
-        return _cudnn_available(paddle)
-    except Exception:
-        return False
+        if not paddle.device.is_compiled_with_cuda():
+            return False, "paddlepaddle 未编译 CUDA 支持（需安装 GPU 版）"
+        if paddle.device.cuda.device_count() == 0:
+            return False, "未检测到可用的 NVIDIA GPU"
+        if not _cudnn_available(paddle):
+            return False, "CUDA 依赖库 cudnn 缺失"
+        return True, ""
+    except Exception as exc:
+        return False, f"GPU 环境探测失败：{exc}"
+
+
+def _detect_gpu() -> bool:
+    """探测 GPU 可用性（仅布尔，兼容外部直接调用；带原因用 _probe_gpu）。"""
+    return _probe_gpu()[0]
 
 
 def _cudnn_available(paddle) -> bool:

@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import boc_pdf2csv.pipeline as pipeline_module
-from paycheck_workbench import convert as convert_module
+from paycheck_workbench import applog, convert as convert_module
 from paycheck_workbench.server import serve
 
 BOUNDARY = "----PayCheckConvertBoundary123"
@@ -35,10 +35,13 @@ def _boc_csv(rows):
 
 @pytest.fixture()
 def base_url(tmp_path, monkeypatch):
-    monkeypatch.setattr(convert_module, "_detect_gpu", lambda: False)  # 无 GPU 环境
+    monkeypatch.setattr(convert_module, "_probe_gpu",
+                        lambda: (False, "测试环境：无 GPU"))  # 无 GPU 环境
     monkeypatch.setattr(convert_module, "_gpu_cache", None)  # 每个测试从「未探测」开始
+    monkeypatch.setattr(convert_module, "_gpu_reason_cache", None)
     monkeypatch.setattr(convert_module, "_jobs", {})  # 任务注册表按测试隔离
     monkeypatch.setattr(convert_module, "_current", None)
+    applog.reset()  # 每个测试把文件日志配到自己的临时目录（避免句柄跨测试残留）
     db_path = tmp_path / "conv.db"
     thread = threading.Thread(
         target=serve, kwargs={"db_path": db_path, "port": 8903}, daemon=True
@@ -46,6 +49,7 @@ def base_url(tmp_path, monkeypatch):
     thread.start()
     time.sleep(0.6)
     yield "http://127.0.0.1:8903", db_path
+    applog.reset()  # 关闭日志句柄，临时目录才能被 pytest 清理
 
 
 def _fake_pipeline(results, blocker=None):
