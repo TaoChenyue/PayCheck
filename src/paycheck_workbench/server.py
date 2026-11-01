@@ -11,7 +11,7 @@ API：
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
   POST /api/boc/convert           multipart 上传 PDF 列表并启动后台转换任务（运行中 409）
   GET  /api/boc/convert/{job_id}  轮询任务进度（不存在时返回 interrupted）
-  POST /api/boc/convert/{job_id}/consent   设备确认（auto 无 GPU 时同意/拒绝用 CPU）
+  GET  /api/gpu-status            GPU 可用性探测（惰性、缓存），转换弹窗打开时前端调用
   POST /api/boc/convert/{job_id}/stop      停止转换任务（协作取消，幂等）
   POST /api/boc/convert/{job_id}/preview   任务产物 CSV 的解析预览 + 去重比对（不写入）
   POST /api/boc/convert/{job_id}/confirm   任务产物 CSV 写入 SQLite（幂等）
@@ -380,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_summary(parsed)
             elif parsed.path == "/api/tags":
                 self._api_tags()
+            elif parsed.path == "/api/gpu-status":
+                self._api_gpu_status()
             else:
                 match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})", parsed.path)
                 if match:
@@ -425,6 +427,12 @@ class Handler(BaseHTTPRequestHandler):
             # 文件日志路径（问题回溯用），未配置时为 null
             "log_file": applog.path(),
         })
+
+    def _api_gpu_status(self):
+        """GPU 可用性探测（惰性、缓存）：转换弹窗打开时前端调用，无 GPU 时禁用开始按钮。"""
+        available = convert_jobs.gpu_available()
+        reason = convert_jobs.gpu_unavailable_reason() or ""
+        self._send(200, {"ok": True, "available": available, "reason": reason})
 
     def _api_options(self, parsed):
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
@@ -569,17 +577,15 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/tags":
                 self._api_tags_create()
             else:
-                match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})/(preview|confirm|stop|consent)", parsed.path)
+                match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})/(preview|confirm|stop)", parsed.path)
                 if match:
                     job_id, action = match.group(1), match.group(2)
                     if action == "preview":
                         self._api_boc_convert_preview(job_id)
                     elif action == "confirm":
                         self._api_boc_convert_confirm(job_id)
-                    elif action == "stop":
-                        self._api_boc_convert_stop(job_id)
                     else:
-                        self._api_boc_convert_consent(job_id)
+                        self._api_boc_convert_stop(job_id)
                 else:
                     self._send_error(404, "Not Found")
         except ConflictError as exc:
@@ -731,9 +737,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(f"一次最多转换 {MAX_BATCH_FILES} 个 PDF")
 
         scale = _parse_float(form.get("scale")) or 3.0
-        device = form.get("device") or "auto"
-        if device not in ("auto", "gpu", "cpu"):
-            raise ApiError("推理设备必须是 auto / gpu / cpu")
+        # device 字段忽略（转换恒为 GPU，旧客户端可能仍传）；其余未知字段自然忽略
         timeout_minutes = _parse_int(form.get("timeout_minutes"), 60, 1)
         force = form.get("force") in ("1", "true", "on", "yes")
 
@@ -766,12 +770,12 @@ class Handler(BaseHTTPRequestHandler):
         except convert_jobs.JobBusy as exc:
             raise ConflictError(str(exc), exc.job_id)
         applog.get().info(
-            "转换任务 %s 已登记：%d 个 PDF（device=%s, scale=%s, timeout=%dmin, force=%s）",
-            job.id, len(clean), device, scale, timeout_minutes, force,
+            "转换任务 %s 已登记：%d 个 PDF（scale=%s, timeout=%dmin, force=%s）",
+            job.id, len(clean), scale, timeout_minutes, force,
         )
         threading.Thread(
             target=convert_jobs.run_convert_job,
-            args=(job, self.convert_dir, scale, device, timeout_minutes, force),
+            args=(job, self.convert_dir, scale, timeout_minutes, force),
             daemon=True,
         ).start()
         self._send(200, {"ok": True, "job_id": job.id})
@@ -783,7 +787,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {
                 "ok": True,
                 "status": "interrupted",
-                "gpu_unavailable_reason": None,
                 "files": [],
                 "totals": {"done": 0, "skipped": 0, "failed": 0, "stopped": 0, "transactions": 0},
                 "started_at": None,
@@ -801,25 +804,11 @@ class Handler(BaseHTTPRequestHandler):
         applog.get().info("转换任务 %s 收到停止请求", job_id)
         self._send(200, {"ok": True})
 
-    def _api_boc_convert_consent(self, job_id: str):
-        """设备确认：auto 且无 GPU 时，用户同意（use_cpu=true）才继续 CPU；否则停止。"""
-        job = convert_jobs.get_job(job_id)
-        if job is None:
-            raise ApiError("转换任务不存在或已中断，请重新开始转换")
-        body = self._optional_json() or {}
-        use_cpu = body.get("use_cpu")
-        if not isinstance(use_cpu, bool):
-            raise ApiError("use_cpu 必须是布尔值")
-        if not job.consent_cpu(use_cpu):
-            raise ApiError("任务不在等待设备确认状态")
-        applog.get().info("转换任务 %s 设备确认：use_cpu=%s", job_id, use_cpu)
-        self._send(200, {"ok": True})
-
     def _require_finished_job(self, job_id: str):
         job = convert_jobs.get_job(job_id)
         if job is None:
             raise ApiError("转换任务不存在或已中断，请重新开始转换")
-        if job.status in ("running", "awaiting_consent"):
+        if job.status == "running":
             raise ApiError("转换尚未完成")
         return job
 

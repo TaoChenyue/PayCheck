@@ -4,10 +4,10 @@
   - 同一时间仅一个转换任务（GPU / PaddleOCR 模型单例的天然约束）；
     任务在线程内执行，进度通过管线 progress_cb 写入任务对象，轮询接口读取快照。
   - 注册表仅存内存：服务重启后任务失联，前端通过「任务不存在 → interrupted」提示重新开始。
-  - device="auto" 的 GPU 探测只在本层做（惰性、缓存），管线与 CLI 保持 gpu/cpu 原语义。
+  - 转换强制 GPU-only：GPU 探测只在本层做（惰性、缓存），无 GPU 时任务不启动
+    管线、直接终态 failed（附原因），管线层保持 gpu 唯一设备语义。
 
 成员验收反馈（本轮）：
-  - GPU 不可用时说明原因，经用户同意（/consent）才用 CPU，不静默降级；
   - 支持协作停止（/stop）：管线页边界检查取消标志，已完成文件 CSV 保留、
     进行中文件结果丢弃，任务终态为 stopped；
   - 任务关键节点写工作台文件日志（applog），不记账单明细。
@@ -24,7 +24,7 @@ from typing import Dict, List, Optional, Tuple
 
 from paycheck_workbench import applog
 
-GPU_UNAVAILABLE_HINT = "未检测到可用 GPU，且推理设备为 GPU。请改用「自动」或「CPU」后重试"
+GPU_UNAVAILABLE_HINT = "未检测到可用 GPU：{reason}。PDF 转换仅支持 GPU"
 
 _gpu_cache: Optional[bool] = None
 _gpu_reason_cache: Optional[str] = None
@@ -48,7 +48,7 @@ def gpu_available_cached() -> Optional[bool]:
 def gpu_unavailable_reason() -> Optional[str]:
     """GPU 不可用原因（随 gpu_available 一并探测缓存；未探测或可用时返回 None）。
 
-    成员验收反馈 2：GPU 不可用时必须向用户说明原因，经同意后才用 CPU。
+    供 /api/gpu-status 与任务失败原因文案使用（转换仅支持 GPU，需向用户说明原因）。
     """
     with _gpu_lock:
         if _gpu_cache is None or _gpu_cache:
@@ -128,28 +128,24 @@ class ConvertFile:
 class ConvertJob:
     """单个转换任务：文件状态 + 汇总，线程安全。
 
-    状态机：running → done / partial / failed / stopped；
-    auto 且无 GPU 时先进入 awaiting_consent，用户同意用 CPU 后回到 running。
+    状态机：running → done / partial / failed / stopped。
     """
 
     def __init__(self, file_names: List[str]):
         self.id = uuid.uuid4().hex
         self.files = [ConvertFile(name) for name in file_names]
-        self.status = "running"  # running / awaiting_consent / done / partial / failed / stopped
+        self.status = "running"  # running / done / partial / failed / stopped
         self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         self.finished_at: Optional[str] = None
         self.gpu_hint: Optional[str] = None
-        self.gpu_unavailable_reason: Optional[str] = None
         self._lock = threading.Lock()
         self._cancel = threading.Event()      # 停止请求（协作取消标志）
-        self._consent = threading.Event()     # 设备确认已给出（同意或拒绝）
-        self._consent_use_cpu = False
         self._stopped = False                 # 已被停止（收尾时据此定 stopped 终态）
 
     def is_active(self) -> bool:
-        """任务占用单任务槽：running 或等待设备确认。"""
+        """任务占用单任务槽：running。"""
         with self._lock:
-            return self.status in ("running", "awaiting_consent")
+            return self.status == "running"
 
     def set_gpu_hint(self, hint: str) -> None:
         with self._lock:
@@ -162,39 +158,10 @@ class ConvertJob:
         return self._cancel.is_set()
 
     def request_stop(self) -> None:
-        """请求停止：置取消标志并唤醒等待设备确认的线程。"""
+        """请求停止：置取消标志。"""
         self._cancel.set()
         with self._lock:
             self._stopped = True
-        self._consent.set()
-
-    # ---- CPU 降级确认 ----
-
-    def begin_consent(self, reason: str) -> None:
-        with self._lock:
-            self.status = "awaiting_consent"
-            self.gpu_unavailable_reason = reason or "未知原因"
-
-    def wait_consent(self) -> bool:
-        """阻塞等待用户确认（同意用 CPU 返回 True；拒绝/停止返回 False）。"""
-        self._consent.wait()
-        with self._lock:
-            if self._consent_use_cpu and not self._stopped:
-                self.status = "running"
-                return True
-            self._stopped = True
-            return False
-
-    def consent_cpu(self, use_cpu: bool) -> bool:
-        """给出设备确认；仅在 awaiting_consent 状态生效（否则返回 False）。"""
-        with self._lock:
-            if self.status != "awaiting_consent":
-                return False
-            self._consent_use_cpu = bool(use_cpu)
-            if not use_cpu:
-                self._stopped = True
-        self._consent.set()
-        return True
 
     def _by_name(self, name) -> Optional[ConvertFile]:
         for f in self.files:
@@ -320,7 +287,6 @@ class ConvertJob:
             transactions = sum(f.transactions for f in self.files if f.state == "done")
             return {
                 "status": self.status,
-                "gpu_unavailable_reason": self.gpu_unavailable_reason,
                 "files": [
                     {
                         "name": f.name,
@@ -355,7 +321,7 @@ _start_lock = threading.Lock()
 
 
 def start_job(file_names: List[str]) -> ConvertJob:
-    """登记新任务；已有任务活动（运行中或等待确认）时抛 JobBusy。"""
+    """登记新任务；已有任务运行中时抛 JobBusy。"""
     global _current
     with _start_lock:
         if _current is not None and _current.is_active():
@@ -371,45 +337,36 @@ def get_job(job_id: str) -> Optional[ConvertJob]:
 
 
 def current_active() -> Optional[ConvertJob]:
-    """当前占用单任务槽的任务（运行中或等待设备确认）。"""
+    """当前占用单任务槽的任务（运行中）。"""
     if _current is not None and _current.is_active():
         return _current
     return None
 
 
-def run_convert_job(job: ConvertJob, convert_dir, scale: float, device: str,
+def run_convert_job(job: ConvertJob, convert_dir, scale: float,
                     timeout_minutes: int, force: bool) -> None:
-    """后台线程执行体：解析 device（auto 且无 GPU 时先征得用户同意再降级 CPU）、
+    """后台线程执行体：先探测 GPU（无 GPU 时不启动管线、任务直接 failed），
     惰性导入管线、运行并维护任务状态；关键节点写文件日志。"""
     try:
-        gpu = gpu_available()
-        reason = gpu_unavailable_reason() or ""
-        resolved = device if device != "auto" else ("gpu" if gpu else "cpu")
-        if resolved == "gpu" and not gpu:
-            hint = GPU_UNAVAILABLE_HINT + (f"（{reason}）" if reason else "")
+        if not gpu_available():
+            reason = gpu_unavailable_reason() or "未知原因"
+            hint = GPU_UNAVAILABLE_HINT.format(reason=reason)
             job.set_gpu_hint(hint)
-
-        if resolved == "cpu" and device == "auto" and not gpu:
-            # 成员反馈 2：GPU 不可用时说明原因，经用户同意才用 CPU，不静默降级
-            job.begin_consent(reason)
-            applog.get().info("转换任务 %s 等待设备确认：%s", job.id, reason)
-            if not job.wait_consent():
-                applog.get().info("转换任务 %s 用户拒绝 CPU 或任务被停止", job.id)
-                return
-            applog.get().info("转换任务 %s 用户同意使用 CPU 继续", job.id)
+            job.fail_remaining(hint)
+            applog.get().info("转换任务 %s 未检测到可用 GPU：%s，任务失败", job.id, reason)
+            return
 
         from boc_pdf2csv.pipeline import ConvertCancelled, process_folder
 
         applog.get().info(
-            "转换任务 %s 开始：%d 个 PDF，device=%s，scale=%s，timeout=%dmin，force=%s",
-            job.id, len(job.files), resolved, scale, timeout_minutes, force,
+            "转换任务 %s 开始：%d 个 PDF，scale=%s，timeout=%dmin，force=%s",
+            job.id, len(job.files), scale, timeout_minutes, force,
         )
         try:
             process_folder(
                 str(convert_dir),
                 scale=scale,
                 timeout_minutes=timeout_minutes,
-                device=resolved,
                 force=force,
                 progress_cb=job.update,
                 pdf_names=[f.name for f in job.files],
