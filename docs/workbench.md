@@ -77,6 +77,15 @@ uv run python -m paycheck_workbench
 - 有效属性 = 覆盖 > 原始方向；「不计」行整行置灰，属性列点击即切换计入 ↔ 不计。
 - 属性标记写入旁表（`total_overrides`），不改动数据源原始账单；数据源视图始终展示原始收/支。
 
+## 重复账单自动不计（BOC ↔ 支付宝/微信）
+
+平台绑定银行卡支付时同一笔支出会在 BOC 与支付宝/微信各记一笔。本功能自动把这类重复的 BOC 账单标记为不计，避免收支重复统计。
+
+- **自动标记**：每次导入确认后（BOC CSV、BOC PDF 转换产物、支付宝/微信导入均可触发），自动扫描全部无覆盖的 BOC 行，与支付宝/微信「时间精确到分钟 + 金额精确到分 + 方向」三者一致的行写入不计覆盖（只写不计、只作用于 BOC 行、不删除数据）；导入完成提示中展示本次自动标记条数。
+- **手动扫描**：总账户工具栏「检测重复」→ 预览成对明细（BOC 行 ↔ 来源徽标），勾选后「确认标记不计」；兜底处理历史数据。
+- **降误判**：同一时间金额存在多个候选的歧义项不自动标记，弹窗中置灰标注「需人工判断」；余额宝转入等中性行、非人民币行不参与匹配；已有手动标记的行永不覆盖。
+- **可逆**：不计行在总账户点击属性单元格即可改回计入，改回后自动扫描不再标记该行。
+
 ## 批量操作
 
 1. 勾选 ≥1 行即出现批量操作栏：设为计入 / 设为不计 / 打标签… / 清除选择。
@@ -96,4 +105,4 @@ uv run python -m paycheck_workbench
   - `tag_groups`：名称唯一 + 8 色循环。
   - `row_tags`：行 ↔ 标签组多对多。
 - 覆盖 / 标签 / 属性互相独立，导入流程零改动。
-- 总账户 API：`PUT /api/total/overrides`（批量设属性，ids / filter 两种 scope）、`GET/POST /api/tags`、`PUT/DELETE /api/tags/{id}`、`PUT /api/tags/apply`（批量打/移除标签）；`/api/rows`、`/api/summary` 的 total 分支为标准 page 分页与计入口径结构。
+- 总账户 API：`PUT /api/total/overrides`（批量设属性，ids / filter 两种 scope）、`POST /api/total/detect-duplicates`（重复扫描 dry-run）、`POST /api/total/apply-auto-exclude`（按 ids 标记不计）、`GET/POST /api/tags`、`PUT/DELETE /api/tags/{id}`、`PUT /api/tags/apply`（批量打/移除标签）；`/api/rows`、`/api/summary` 的 total 分支为标准 page 分页与计入口径结构。
