@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>账单工作台</title>
+<script>
+/* 防闪白：CSS 应用前先按 localStorage（校验取值）或系统偏好设置 data-theme */
+(function () {
+  var t = null;
+  try { var v = localStorage.getItem("paycheck-theme"); if (v === "light" || v === "dark") t = v; } catch (e) {}
+  if (!t) t = window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <style>
 /* 双层主题变量体系（TCY-58 方案 A）：浅色为现状值（视觉零变化），深色色板见下方 dark 块 */
 :root[data-theme="light"] {
@@ -40,8 +49,41 @@
   --batch-bg: #F5F3FF;
   --batch-border: #D9D0FF;
 }
-/* 深色主题色板（TCY-58） */
-:root[data-theme="dark"] { color-scheme: dark; }
+/* 深色主题色板（TCY-58，按设计给定值，验收时可微调） */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --income: #34D399;
+  --expense: #E5E6EB;  /* ⚠️ 深色下反转为浅色 */
+  --neutral: #9A9DA3;
+  --border: #33383F;
+  --page-bg: #17191D;
+  --panel-bg: #1F2329;
+  --thead-bg: #24282E;
+  --row-hover: #262A31;
+  --detail-bg: #17191D;
+  --text: #E8EAED;
+  --text-2: #9A9DA3;
+  --muted: #6B7076;
+  --danger: #F2645A;
+  --mask: rgba(0, 0, 0, .60);
+  --skeleton-a: #24282E;
+  --skeleton-b: #2A2F36;
+  --banner-ok-bg: #12291F;
+  --banner-ok-border: #1F4D38;
+  --banner-ok-text: #34D399;
+  --banner-err-bg: #2E1514;
+  --banner-err-border: #5C2A27;
+  --banner-warn-bg: #2B2413;
+  --banner-warn-border: #5C4E1F;
+  --banner-warn-text: #E0BC55;
+  --tag-income-bg: #12291F;
+  --tag-income-text: #34D399;
+  --tag-expense-bg: #2A2F36;
+  --tag-expense-text: #C6CAD0;
+  --tag-neutral-bg: #2A2F36;
+  --batch-bg: #241D3A;
+  --batch-border: #463B78;
+}
 body[data-source="boc"] { --brand: #C8102E; }
 body[data-source="alipay"] { --brand: #1677FF; }
 body[data-source="wechat"] { --brand: #07C160; }
@@ -497,6 +539,7 @@ tr.bf-error td { color: var(--danger); }
     <button id="btn-convert" class="btn" hidden>转换 PDF</button>
     <button id="btn-import" class="btn btn-primary">导入账单</button>
     <button id="btn-refresh" class="btn">刷新</button>
+    <button id="btn-theme" class="btn" title="切换浅色/深色主题">🌙</button>
   </div>
 </header>
 
@@ -1038,11 +1081,15 @@ function countedHtml(row) {
 }
 function tagsHtml(row) {
   // 标签列：已打标签 chips（带组颜色，chip 上 × 可移除）+ 末尾「+」打标签
-  const chips = (row.tags || []).map((t) =>
-    `<span class="tag row-tag" data-tag="${t.id}" title="移除「${esc(t.name)}」"
-       style="background:${esc(t.color)}1F;color:${esc(t.color)};border:1px solid ${esc(t.color)}66">
-       ${esc(t.name)}<button class="chip-x" data-act="tag-remove" data-tag="${t.id}" data-name="${esc(t.name)}">×</button></span>`
-  ).join("");
+  // 深色下运行时标签色提亮处理（文字掺白 35%、底色透明度 26），浅色保持原值
+  const dark = themeNow() === "dark";
+  const chips = (row.tags || []).map((t) => {
+    const bg = dark ? `${esc(t.color)}26` : `${esc(t.color)}1F`;
+    const fg = dark ? `color-mix(in srgb, ${esc(t.color)} 65%, #fff)` : esc(t.color);
+    return `<span class="tag row-tag" data-tag="${t.id}" title="移除「${esc(t.name)}」"
+       style="background:${bg};color:${fg};border:1px solid ${esc(t.color)}66">
+       ${esc(t.name)}<button class="chip-x" data-act="tag-remove" data-tag="${t.id}" data-name="${esc(t.name)}">×</button></span>`;
+  }).join("");
   return `${chips}<button class="tag-add" data-act="tag-add">＋</button>`;
 }
 function cellHtml(row, col) {
@@ -2561,6 +2608,32 @@ async function resumeConvertSession() {
     // 网络异常静默：下次打开弹窗时按中断提示处理
   }
 }
+
+/* ================= 主题切换（TCY-58：两态切换 + localStorage 持久化） ================= */
+const THEME_KEY = "paycheck-theme";
+function themeNow() {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+function themeFromStorage() {
+  try { const v = localStorage.getItem(THEME_KEY); return v === "light" || v === "dark" ? v : null; } catch (e) { return null; }
+}
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  $("#btn-theme").textContent = t === "dark" ? "☀️" : "🌙";
+  renderTableBodyKeep();  // 标签 chip 运行时色依赖当前主题，切换后重绘当前表格
+}
+$("#btn-theme").addEventListener("click", () => {
+  const next = themeNow() === "dark" ? "light" : "dark";
+  try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* localStorage 不可用时仅本次会话内存生效 */ }
+  applyTheme(next);
+});
+try {
+  // 用户未手动选择过时，实时跟随系统偏好变化
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+    if (!themeFromStorage()) applyTheme(e.matches ? "dark" : "light");
+  });
+} catch (e) { /* 老环境无 addEventListener 支持：忽略 */ }
+applyTheme(themeNow());  // 与防闪白脚本设置的 data-theme 同步按钮图标
 
 /* ================= 事件绑定 ================= */
 $("#btn-import").addEventListener("click", openModal);
