@@ -5,9 +5,10 @@
     boc-pdf2csv ./statements/ --force            # 强制重新导出（覆盖同名 CSV）
     boc-pdf2csv ./statements/ --scale 2.0        # 调整渲染精度
     boc-pdf2csv ./statements/ --timeout 120      # 延长超时
-    boc-pdf2csv ./statements/ --device cpu       # 无 GPU 机器使用 CPU 推理
     boc-pdf2csv --version                        # 查看版本
     boc-pdf2csv --help                           # 帮助信息
+
+强制使用 GPU 推理：无 GPU 时处理失败并报错退出（退出码 3）。
 
 文件日志: 写入 <输入目录>/boc-pdf2csv.log（1MB×3 轮转，--verbose 时升级 DEBUG），
 只记文件名/条数/耗时等元数据，不记交易明细；控制台输出行为不变。
@@ -80,12 +81,6 @@ def main() -> int:
         help="单个 PDF 超时分钟数（默认: 60）",
     )
     parser.add_argument(
-        "--device",
-        choices=["gpu", "cpu"],
-        default="gpu",
-        help="OCR 推理设备（默认: gpu，强制使用 GPU；无 GPU 机器可用 cpu）",
-    )
-    parser.add_argument(
         "--force",
         action="store_true",
         help="强制重新导出：同名 CSV 已存在时覆盖而不是跳过",
@@ -119,7 +114,6 @@ def main() -> int:
             scale=args.scale,
             timeout_minutes=args.timeout,
             verbose=args.verbose,
-            device=args.device,
             force=args.force,
         )
     except NotADirectoryError as e:
@@ -150,7 +144,9 @@ def main() -> int:
 
     if result.failed:
         for pdf_path in result.failed:
-            print(f"警告: 处理失败: {os.path.basename(pdf_path)}", file=sys.stderr)
+            reason = result.failed_errors.get(pdf_path)
+            suffix = f" — {reason}" if reason else ""
+            print(f"警告: 处理失败: {os.path.basename(pdf_path)}{suffix}", file=sys.stderr)
 
     if result.processed and result.total_transactions == 0:
         # 全部 CSV 仅有表头，无交易数据
