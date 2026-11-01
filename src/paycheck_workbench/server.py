@@ -11,6 +11,8 @@ API：
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
   POST /api/boc/convert           multipart 上传 PDF 列表并启动后台转换任务（运行中 409）
   GET  /api/boc/convert/{job_id}  轮询任务进度（不存在时返回 interrupted）
+  POST /api/boc/convert/{job_id}/consent   设备确认（auto 无 GPU 时同意/拒绝用 CPU）
+  POST /api/boc/convert/{job_id}/stop      停止转换任务（协作取消，幂等）
   POST /api/boc/convert/{job_id}/preview   任务产物 CSV 的解析预览 + 去重比对（不写入）
   POST /api/boc/convert/{job_id}/confirm   任务产物 CSV 写入 SQLite（幂等）
   POST /api/boc/convert/open-dir  调起资源管理器打开转换目录
@@ -34,6 +36,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paycheck_workbench import __version__
+from paycheck_workbench import applog
 from paycheck_workbench import convert as convert_jobs
 from paycheck_workbench import db
 from paycheck_workbench import total
@@ -388,6 +391,7 @@ class Handler(BaseHTTPRequestHandler):
         except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
+            applog.get().exception("数据库读取失败（GET %s）", self.path)
             self._send_error(500, f"数据库读取失败：{exc}")
 
     def _serve_index(self):
@@ -418,6 +422,8 @@ class Handler(BaseHTTPRequestHandler):
             # GPU 可用性惰性探测并缓存（首次转换任务时触发），未探测过为 null
             "gpu_available": convert_jobs.gpu_available_cached(),
             "convert_existing_csvs": _existing_csv_names(self.convert_dir),
+            # 文件日志路径（问题回溯用），未配置时为 null
+            "log_file": applog.path(),
         })
 
     def _api_options(self, parsed):
@@ -563,15 +569,19 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/tags":
                 self._api_tags_create()
             else:
-                match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})/preview", parsed.path)
+                match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})/(preview|confirm|stop|consent)", parsed.path)
                 if match:
-                    self._api_boc_convert_preview(match.group(1))
-                else:
-                    match = re.fullmatch(r"/api/boc/convert/([0-9a-f]{32})/confirm", parsed.path)
-                    if match:
-                        self._api_boc_convert_confirm(match.group(1))
+                    job_id, action = match.group(1), match.group(2)
+                    if action == "preview":
+                        self._api_boc_convert_preview(job_id)
+                    elif action == "confirm":
+                        self._api_boc_convert_confirm(job_id)
+                    elif action == "stop":
+                        self._api_boc_convert_stop(job_id)
                     else:
-                        self._send_error(404, "Not Found")
+                        self._api_boc_convert_consent(job_id)
+                else:
+                    self._send_error(404, "Not Found")
         except ConflictError as exc:
             self._send(409, {"ok": False, "error": str(exc), "job_id": exc.job_id})
         except ApiError as exc:
@@ -579,6 +589,7 @@ class Handler(BaseHTTPRequestHandler):
         except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
+            applog.get().exception("数据库写入失败（%s）", self.path)
             self._send_error(500, f"数据库写入失败：{exc}")
 
     # ---- PUT / DELETE ----
@@ -601,6 +612,7 @@ class Handler(BaseHTTPRequestHandler):
         except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
+            applog.get().exception("数据库写入失败（%s）", self.path)
             self._send_error(500, f"数据库写入失败：{exc}")
 
     def do_DELETE(self):
@@ -616,6 +628,7 @@ class Handler(BaseHTTPRequestHandler):
         except db.DataError as exc:
             self._send_error(400, str(exc))
         except sqlite3.OperationalError as exc:
+            applog.get().exception("数据库写入失败（%s）", self.path)
             self._send_error(500, f"数据库写入失败：{exc}")
 
     def _api_import_preview(self):
@@ -690,6 +703,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         with self._connect() as conn:
             result = db.import_parse_result(conn, source, parsed_result, file_name)
+        applog.get().info(
+            "导入写入 %s：%s → 新增 %s / 跳过 %s / 失败 %s",
+            source, file_name, result["inserted"], result["skipped"], result["failed"],
+        )
         self._send(200, {"ok": True, "file_name": file_name, **result})
 
     # ---- BOC PDF 转换 API ----
@@ -738,7 +755,7 @@ class Handler(BaseHTTPRequestHandler):
         if not clean:
             raise ApiError("未收到有效的 PDF 文件")
 
-        running = convert_jobs.current_running()
+        running = convert_jobs.current_active()
         if running is not None:
             raise ConflictError("已有转换任务进行中", running.id)
 
@@ -748,6 +765,10 @@ class Handler(BaseHTTPRequestHandler):
             job = convert_jobs.start_job([name for name, _ in clean])
         except convert_jobs.JobBusy as exc:
             raise ConflictError(str(exc), exc.job_id)
+        applog.get().info(
+            "转换任务 %s 已登记：%d 个 PDF（device=%s, scale=%s, timeout=%dmin, force=%s）",
+            job.id, len(clean), device, scale, timeout_minutes, force,
+        )
         threading.Thread(
             target=convert_jobs.run_convert_job,
             args=(job, self.convert_dir, scale, device, timeout_minutes, force),
@@ -762,19 +783,43 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {
                 "ok": True,
                 "status": "interrupted",
+                "gpu_unavailable_reason": None,
                 "files": [],
-                "totals": {"done": 0, "skipped": 0, "failed": 0, "transactions": 0},
+                "totals": {"done": 0, "skipped": 0, "failed": 0, "stopped": 0, "transactions": 0},
                 "started_at": None,
                 "finished_at": None,
             })
             return
         self._send(200, {"ok": True, **job.snapshot()})
 
+    def _api_boc_convert_stop(self, job_id: str):
+        """停止转换任务（幂等）：已完成文件 CSV 保留，进行中结果丢弃，未处理不再转换。"""
+        job = convert_jobs.get_job(job_id)
+        if job is None:
+            raise ApiError("转换任务不存在或已中断，请重新开始转换")
+        job.request_stop()
+        applog.get().info("转换任务 %s 收到停止请求", job_id)
+        self._send(200, {"ok": True})
+
+    def _api_boc_convert_consent(self, job_id: str):
+        """设备确认：auto 且无 GPU 时，用户同意（use_cpu=true）才继续 CPU；否则停止。"""
+        job = convert_jobs.get_job(job_id)
+        if job is None:
+            raise ApiError("转换任务不存在或已中断，请重新开始转换")
+        body = self._optional_json() or {}
+        use_cpu = body.get("use_cpu")
+        if not isinstance(use_cpu, bool):
+            raise ApiError("use_cpu 必须是布尔值")
+        if not job.consent_cpu(use_cpu):
+            raise ApiError("任务不在等待设备确认状态")
+        applog.get().info("转换任务 %s 设备确认：use_cpu=%s", job_id, use_cpu)
+        self._send(200, {"ok": True})
+
     def _require_finished_job(self, job_id: str):
         job = convert_jobs.get_job(job_id)
         if job is None:
             raise ApiError("转换任务不存在或已中断，请重新开始转换")
-        if job.status == "running":
+        if job.status in ("running", "awaiting_consent"):
             raise ApiError("转换尚未完成")
         return job
 
@@ -836,6 +881,10 @@ class Handler(BaseHTTPRequestHandler):
                 inserted += result["inserted"]
                 skipped += result["skipped"]
                 failed += result["failed"]
+        applog.get().info(
+            "转换产物导入：任务 %s → 新增 %s / 跳过 %s / 失败 %s（%d 个 CSV）",
+            job_id, inserted, skipped, failed, len(csv_files),
+        )
         self._send(200, {
             "ok": True,
             "files": results,
@@ -854,6 +903,7 @@ class Handler(BaseHTTPRequestHandler):
                 subprocess.Popen(["xdg-open", str(self.convert_dir)])
         except OSError as exc:
             raise ApiError(f"打开目录失败：{exc}")
+        applog.get().info("打开转换目录：%s", self.convert_dir)
         self._send(200, {"ok": True})
 
     # ---- 收支属性 / 标签 API ----
@@ -961,6 +1011,9 @@ def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser:
     convert_dir = Path(convert_dir) if convert_dir else db_path.parent / "boc_csv"
     convert_dir.mkdir(parents=True, exist_ok=True)
 
+    log = applog.setup(db_path)
+    log.info("账单工作台启动：version=%s，db=%s，convert_dir=%s", __version__, db_path, convert_dir)
+
     Handler.db_path = db_path
     Handler.convert_dir = convert_dir
     httpd = ThreadingHTTPServer((host, port), Handler)
@@ -968,6 +1021,7 @@ def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser:
     print(f"账单工作台已启动：{url}")
     print(f"SQLite 数据库：{db_path}")
     print(f"PDF 转换目录：{convert_dir}")
+    print(f"运行日志：{applog.path()}")
     if open_browser:
         import webbrowser
 
@@ -978,3 +1032,4 @@ def serve(db_path=None, host: str = "127.0.0.1", port: int = 8765, open_browser:
         print("\n已停止。")
     finally:
         httpd.server_close()
+        log.info("账单工作台已停止")

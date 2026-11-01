@@ -5,6 +5,12 @@
     任务在线程内执行，进度通过管线 progress_cb 写入任务对象，轮询接口读取快照。
   - 注册表仅存内存：服务重启后任务失联，前端通过「任务不存在 → interrupted」提示重新开始。
   - device="auto" 的 GPU 探测只在本层做（惰性、缓存），管线与 CLI 保持 gpu/cpu 原语义。
+
+成员验收反馈（本轮）：
+  - GPU 不可用时说明原因，经用户同意（/consent）才用 CPU，不静默降级；
+  - 支持协作停止（/stop）：管线页边界检查取消标志，已完成文件 CSV 保留、
+    进行中文件结果丢弃，任务终态为 stopped；
+  - 任务关键节点写工作台文件日志（applog），不记账单明细。
 """
 
 from __future__ import annotations
@@ -111,7 +117,7 @@ class ConvertFile:
 
     def __init__(self, name: str):
         self.name = name
-        self.state = "waiting"  # waiting / running / done / skipped / failed
+        self.state = "waiting"  # waiting / running / done / skipped / failed / stopped
         self.pages_done = 0
         self.pages_total = 0
         self.transactions = 0
@@ -120,24 +126,75 @@ class ConvertFile:
 
 
 class ConvertJob:
-    """单个转换任务：文件状态 + 汇总，线程安全。"""
+    """单个转换任务：文件状态 + 汇总，线程安全。
+
+    状态机：running → done / partial / failed / stopped；
+    auto 且无 GPU 时先进入 awaiting_consent，用户同意用 CPU 后回到 running。
+    """
 
     def __init__(self, file_names: List[str]):
         self.id = uuid.uuid4().hex
         self.files = [ConvertFile(name) for name in file_names]
-        self.status = "running"  # running / done / partial / failed
+        self.status = "running"  # running / awaiting_consent / done / partial / failed / stopped
         self.started_at = time.strftime("%Y-%m-%d %H:%M:%S")
         self.finished_at: Optional[str] = None
         self.gpu_hint: Optional[str] = None
+        self.gpu_unavailable_reason: Optional[str] = None
         self._lock = threading.Lock()
+        self._cancel = threading.Event()      # 停止请求（协作取消标志）
+        self._consent = threading.Event()     # 设备确认已给出（同意或拒绝）
+        self._consent_use_cpu = False
+        self._stopped = False                 # 已被停止（收尾时据此定 stopped 终态）
 
-    def is_running(self) -> bool:
+    def is_active(self) -> bool:
+        """任务占用单任务槽：running 或等待设备确认。"""
         with self._lock:
-            return self.status == "running"
+            return self.status in ("running", "awaiting_consent")
 
     def set_gpu_hint(self, hint: str) -> None:
         with self._lock:
             self.gpu_hint = hint
+
+    # ---- 协作停止 ----
+
+    def should_cancel(self) -> bool:
+        """管线取消检查回调：页/文件边界调用（线程安全）。"""
+        return self._cancel.is_set()
+
+    def request_stop(self) -> None:
+        """请求停止：置取消标志并唤醒等待设备确认的线程。"""
+        self._cancel.set()
+        with self._lock:
+            self._stopped = True
+        self._consent.set()
+
+    # ---- CPU 降级确认 ----
+
+    def begin_consent(self, reason: str) -> None:
+        with self._lock:
+            self.status = "awaiting_consent"
+            self.gpu_unavailable_reason = reason or "未知原因"
+
+    def wait_consent(self) -> bool:
+        """阻塞等待用户确认（同意用 CPU 返回 True；拒绝/停止返回 False）。"""
+        self._consent.wait()
+        with self._lock:
+            if self._consent_use_cpu and not self._stopped:
+                self.status = "running"
+                return True
+            self._stopped = True
+            return False
+
+    def consent_cpu(self, use_cpu: bool) -> bool:
+        """给出设备确认；仅在 awaiting_consent 状态生效（否则返回 False）。"""
+        with self._lock:
+            if self.status != "awaiting_consent":
+                return False
+            self._consent_use_cpu = bool(use_cpu)
+            if not use_cpu:
+                self._stopped = True
+        self._consent.set()
+        return True
 
     def _by_name(self, name) -> Optional[ConvertFile]:
         for f in self.files:
@@ -216,17 +273,36 @@ class ConvertJob:
                     f.state = "failed"
                     f.error = f.error or "转换未完成（服务异常）"
 
+    def mark_stopped(self) -> None:
+        """协作取消后把未完成文件标记为 stopped（已完成文件的 done/skipped/failed 保留）。"""
+        with self._lock:
+            self._stopped = True
+            for f in self.files:
+                if f.state in ("waiting", "running"):
+                    f.state = "stopped"
+                    f.error = None
+
     def finish(self) -> None:
-        """任务收尾：补齐遗漏终态并汇总状态。"""
+        """任务收尾：补齐遗漏终态并汇总状态。
+
+        停止语义：只要存在被截停的文件就定终态 stopped（已完成文件产物保留）；
+        停止请求若晚于全部文件完成（无文件被截停），按正常结果汇总。
+        """
         with self._lock:
             for f in self.files:
                 if f.state in ("waiting", "running"):
-                    f.state = "failed"
-                    f.error = f.error or "转换未完成（服务异常）"
+                    if self._stopped:
+                        f.state = "stopped"
+                    else:
+                        f.state = "failed"
+                        f.error = f.error or "转换未完成（服务异常）"
             done = sum(1 for f in self.files if f.state == "done")
             skipped = sum(1 for f in self.files if f.state == "skipped")
             failed = sum(1 for f in self.files if f.state == "failed")
-            if failed == 0:
+            stopped = sum(1 for f in self.files if f.state == "stopped")
+            if self._stopped and stopped > 0:
+                self.status = "stopped"
+            elif failed == 0:
                 self.status = "done"
             elif done == 0 and skipped == 0:
                 self.status = "failed"
@@ -240,9 +316,11 @@ class ConvertJob:
             done = sum(1 for f in self.files if f.state == "done")
             skipped = sum(1 for f in self.files if f.state == "skipped")
             failed = sum(1 for f in self.files if f.state == "failed")
+            stopped = sum(1 for f in self.files if f.state == "stopped")
             transactions = sum(f.transactions for f in self.files if f.state == "done")
             return {
                 "status": self.status,
+                "gpu_unavailable_reason": self.gpu_unavailable_reason,
                 "files": [
                     {
                         "name": f.name,
@@ -259,6 +337,7 @@ class ConvertJob:
                     "done": done,
                     "skipped": skipped,
                     "failed": failed,
+                    "stopped": stopped,
                     "transactions": transactions,
                 },
                 "started_at": self.started_at,
@@ -276,10 +355,10 @@ _start_lock = threading.Lock()
 
 
 def start_job(file_names: List[str]) -> ConvertJob:
-    """登记新任务；已有任务运行中时抛 JobBusy。"""
+    """登记新任务；已有任务活动（运行中或等待确认）时抛 JobBusy。"""
     global _current
     with _start_lock:
-        if _current is not None and _current.is_running():
+        if _current is not None and _current.is_active():
             raise JobBusy(_current.id)
         job = ConvertJob(file_names)
         _jobs[job.id] = job
@@ -291,23 +370,40 @@ def get_job(job_id: str) -> Optional[ConvertJob]:
     return _jobs.get(job_id)
 
 
-def current_running() -> Optional[ConvertJob]:
-    if _current is not None and _current.is_running():
+def current_active() -> Optional[ConvertJob]:
+    """当前占用单任务槽的任务（运行中或等待设备确认）。"""
+    if _current is not None and _current.is_active():
         return _current
     return None
 
 
 def run_convert_job(job: ConvertJob, convert_dir, scale: float, device: str,
                     timeout_minutes: int, force: bool) -> None:
-    """后台线程执行体：解析 device、惰性导入管线、运行并维护任务状态。"""
+    """后台线程执行体：解析 device（auto 且无 GPU 时先征得用户同意再降级 CPU）、
+    惰性导入管线、运行并维护任务状态；关键节点写文件日志。"""
     try:
         gpu = gpu_available()
+        reason = gpu_unavailable_reason() or ""
         resolved = device if device != "auto" else ("gpu" if gpu else "cpu")
         if resolved == "gpu" and not gpu:
-            job.set_gpu_hint(GPU_UNAVAILABLE_HINT)
+            hint = GPU_UNAVAILABLE_HINT + (f"（{reason}）" if reason else "")
+            job.set_gpu_hint(hint)
 
-        from boc_pdf2csv.pipeline import process_folder
+        if resolved == "cpu" and device == "auto" and not gpu:
+            # 成员反馈 2：GPU 不可用时说明原因，经用户同意才用 CPU，不静默降级
+            job.begin_consent(reason)
+            applog.get().info("转换任务 %s 等待设备确认：%s", job.id, reason)
+            if not job.wait_consent():
+                applog.get().info("转换任务 %s 用户拒绝 CPU 或任务被停止", job.id)
+                return
+            applog.get().info("转换任务 %s 用户同意使用 CPU 继续", job.id)
 
+        from boc_pdf2csv.pipeline import ConvertCancelled, process_folder
+
+        applog.get().info(
+            "转换任务 %s 开始：%d 个 PDF，device=%s，scale=%s，timeout=%dmin，force=%s",
+            job.id, len(job.files), resolved, scale, timeout_minutes, force,
+        )
         try:
             process_folder(
                 str(convert_dir),
@@ -317,12 +413,24 @@ def run_convert_job(job: ConvertJob, convert_dir, scale: float, device: str,
                 force=force,
                 progress_cb=job.update,
                 pdf_names=[f.name for f in job.files],
+                should_cancel=job.should_cancel,
             )
+        except ConvertCancelled:
+            # 协作停止：已完成文件 CSV 保留（已写出），进行中文件结果丢弃（未写 CSV）
+            job.mark_stopped()
+            applog.get().info("转换任务 %s 已按请求停止", job.id)
         except Exception as exc:
             job.fail_remaining(str(exc))
+            applog.get().exception("转换任务 %s 管线异常", job.id)
         else:
             # 管线正常返回但个别文件未收到事件（如渲染 0 图提前返回）：
             # 按同名 CSV 是否存在补记终态，与 CLI 结果口径一致
             job.settle_silent_files(convert_dir)
     finally:
         job.finish()
+        snap = job.snapshot()
+        applog.get().info(
+            "转换任务 %s 结束：status=%s，成功 %s / 跳过 %s / 失败 %s / 停止 %s，共 %s 条交易",
+            job.id, snap["status"], snap["totals"]["done"], snap["totals"]["skipped"],
+            snap["totals"]["failed"], snap["totals"]["stopped"], snap["totals"]["transactions"],
+        )
