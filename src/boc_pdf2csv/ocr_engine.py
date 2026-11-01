@@ -3,14 +3,14 @@
 输入: 图片 (numpy BGR 或文件路径)
 输出: list[OCRItem] — 识别到的文字块及其坐标
 
-默认强制使用 GPU（device='gpu'）：未检测到 GPU 时抛错，不静默回退 CPU。
+强制使用 GPU：未检测到 GPU 时抛错，不静默回退 CPU。
 """
 
 import logging
 import os
 import time
 import warnings
-from typing import Any, Dict, List, Union
+from typing import Any, List, Optional, Union
 
 import cv2
 import numpy as np
@@ -22,8 +22,8 @@ warnings.filterwarnings("ignore", message=".*urllib3.*or.*chardet.*doesn't match
 
 log = logging.getLogger("boc_pdf2csv.ocr")
 
-# device → PaddleOCR 引擎实例（惰性初始化，按设备缓存）
-_ocrs: Dict[str, Any] = {}
+# PaddleOCR 引擎实例（惰性初始化，GPU 单例）
+_engine: Optional[Any] = None
 
 
 def _add_nvidia_dll_dirs() -> None:
@@ -51,66 +51,57 @@ def _add_nvidia_dll_dirs() -> None:
             log.debug("已加入 DLL 搜索路径: %s", bin_dir)
 
 
-def _get_engine(device: str = "gpu"):
-    """获取 PaddleOCR 引擎（惰性初始化，按 device 缓存单例）
-
-    Args:
-        device: 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
+def _get_engine():
+    """获取 PaddleOCR 引擎（惰性初始化，GPU 单例）
 
     Raises:
-        RuntimeError: device='gpu' 但未检测到可用 GPU
+        RuntimeError: 未检测到可用 GPU
     """
-    global _ocrs
-    if device not in _ocrs:
+    global _engine
+    if _engine is None:
         # torch 必须先于 paddle 导入：Windows 上 paddle 的 DLL 搜索路径会干扰
         # torch 加载自身的 shm.dll（WinError 127）
         import torch  # noqa: F401
         import paddle
         from paddleocr import PaddleOCR
 
-        if device == "gpu":
-            if not paddle.device.is_compiled_with_cuda() or paddle.device.cuda.device_count() == 0:
-                raise RuntimeError(
-                    "强制使用 GPU，但未检测到可用 GPU：请确认安装的是 GPU 版 paddlepaddle "
-                    "且机器上有可用的 NVIDIA GPU（如确需 CPU 推理，请显式指定 device='cpu'）"
-                )
-            _add_nvidia_dll_dirs()
-
-        log.info("加载 PaddleOCR 模型 (device=%s)...", device)
-
-        try:
-            _ocrs[device] = PaddleOCR(
-                lang='ch',
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                use_textline_orientation=False,
-                device=device,
+        if not paddle.device.is_compiled_with_cuda() or paddle.device.cuda.device_count() == 0:
+            raise RuntimeError(
+                "强制使用 GPU，但未检测到可用 GPU：请确认安装的是 GPU 版 paddlepaddle "
+                "与 nvidia-cuda-runtime-cu12 / nvidia-cublas-cu12 / nvidia-cudnn-cu12 "
+                "运行库，且机器上有可用的 NVIDIA GPU"
             )
-        except (TypeError, ValueError):
-            _ocrs[device] = PaddleOCR(lang='ch', device=device)
-    return _ocrs[device]
+        _add_nvidia_dll_dirs()
+
+        log.info("加载 PaddleOCR 模型 (device=gpu)...")
+        _engine = PaddleOCR(
+            lang='ch',
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            device='gpu',
+        )
+    return _engine
 
 
-def warmup_engine(device: str = "gpu"):
+def warmup_engine():
     """预加载 OCR 模型，避免在进度条出现后才开始加载"""
-    _get_engine(device)
+    _get_engine()
 
 
 def process_image(
     image_input: Union[str, np.ndarray],
     timeout_sec: float = 600,
-    device: str = "gpu",
 ) -> List[OCRItem]:
     """识别图片中的文字
 
     Args:
         image_input: 图片路径 (str) 或 BGR numpy 数组
         timeout_sec: 超时秒数
-        device: 推理设备，"gpu"（默认）或 "cpu"
     Returns:
         OCRItem 列表
     """
-    engine = _get_engine(device)
+    engine = _get_engine()
     start_time = time.time()
 
     if isinstance(image_input, str):

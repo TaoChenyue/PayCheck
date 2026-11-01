@@ -23,6 +23,14 @@ from boc_pdf2csv.csv_writer import write_csv
 log = logging.getLogger("boc_pdf2csv.pipeline")
 
 
+class ConvertCancelled(Exception):
+    """协作取消：should_cancel 返回 True 时抛出，中断当前批次。
+
+    由调用方（如工作台任务线程）通过 should_cancel 回调请求停止；
+    当前文件的结果丢弃（不写 CSV），已完成的文件产物保留。
+    """
+
+
 # =========================================================================
 # 内部：单 PDF → 交易列表
 # =========================================================================
@@ -32,7 +40,8 @@ def _pdf_to_transactions(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
-    device: str = "gpu",
+    progress_cb=None,
+    should_cancel=None,
 ) -> List[Dict[str, Any]]:
     """处理单个 PDF，返回交易字典列表（不写 CSV）
 
@@ -41,14 +50,24 @@ def _pdf_to_transactions(
         scale: 渲染缩放倍率
         timeout_minutes: 超时分钟数
         verbose: 是否输出详细日志
-        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
+        progress_cb: 可选进度回调 callback(event, info)，事件见 process_folder 文档；
+            不传时行为与命令行完全一致
+        should_cancel: 可选取消检查回调，返回 True 时在页边界抛出
+            ConvertCancelled 中止当前 PDF（结果丢弃）；不传时与命令行完全一致
 
     Returns:
         交易字典列表（可能为空）
+
+    Raises:
+        ConvertCancelled: 协作取消（should_cancel 返回 True）
     """
     if not os.path.exists(pdf_path):
         log.error("文件不存在: %s", pdf_path)
         return []
+
+    def _emit(event: str, info: Dict[str, Any]) -> None:
+        if progress_cb:
+            progress_cb(event, info)
 
     start_time = time.time()
     max_timeout = timeout_minutes * 60
@@ -61,8 +80,11 @@ def _pdf_to_transactions(
             log.warning("PDF 渲染无输出: %s", pdf_path)
             return []
 
-        # 阶段二：图片 → OCR → 结构化
-        warmup_engine(device)
+        # 阶段二：图片 → OCR → 结构化（强制 GPU，唯一推理设备）
+        _emit("engine_loading", {"device": "gpu"})
+        warmup_engine()
+        if should_cancel and should_cancel():
+            raise ConvertCancelled(f"转换已取消：{pdf_name}")
 
         def _page_key(p: str) -> int:
             m = re.search(r'p(\d+)\.png$', p)
@@ -74,14 +96,17 @@ def _pdf_to_transactions(
         all_transactions: List[Dict[str, Any]] = []
         stem = os.path.splitext(pdf_name)[0]
 
+        _emit("pdf_start", {"name": pdf_name, "pages_total": total_pages})
         for page_num, img_path in enumerate(sorted_paths):
+            if should_cancel and should_cancel():
+                raise ConvertCancelled(f"转换已取消：{pdf_name}")
             elapsed = time.time() - start_time
             if elapsed >= max_timeout:
                 tqdm.write(f"⏰ 超时 {timeout_minutes} 分钟，已处理 {page_num}/{total_pages} 页")
                 break
 
             try:
-                items = process_image(img_path, device=device)
+                items = process_image(img_path)
                 if items:
                     rows = group_items_to_rows(items, scale)
                     txn_dicts = rows_to_transactions(rows)
@@ -93,6 +118,18 @@ def _pdf_to_transactions(
                 if verbose:
                     tqdm.write(f"  [{stem}] 第 {page_num + 1} 页失败: {e}")
 
+            _emit("page_done", {
+                "name": pdf_name,
+                "page": page_num + 1,
+                "pages_total": total_pages,
+                "transactions_so_far": len(all_transactions),
+            })
+
+        _emit("pdf_done", {
+            "name": pdf_name,
+            "transactions": len(all_transactions),
+            "duration_s": round(time.time() - start_time, 1),
+        })
         return all_transactions
 
 
@@ -106,9 +143,8 @@ def process_pdf(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
-    device: str = "gpu",
 ) -> str:
-    """单个 PDF → CSV 完整流水线
+    """单个 PDF → CSV 完整流水线（强制 GPU 推理）
 
     内部使用临时目录存储中间图片，处理完后自动清理。
 
@@ -118,7 +154,6 @@ def process_pdf(
         scale: 渲染缩放倍率
         timeout_minutes: 单 PDF 超时分钟数
         verbose: 是否输出详细日志
-        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
 
     Returns:
         CSV 内容字符串
@@ -131,7 +166,7 @@ def process_pdf(
         raise FileNotFoundError(f"PDF 文件不存在: {pdf_path}")
 
     start_time = time.time()
-    transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose, device)
+    transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose)
 
     elapsed = time.time() - start_time
     log.info("处理完成: %d 条交易, 耗时 %.1fs", len(transactions), elapsed)
@@ -150,11 +185,13 @@ class FolderResult:
         processed: 成功处理的 PDF 路径 → 同名 CSV 路径
         skipped: 因同名 CSV 已存在而跳过的 PDF 路径
         failed: 处理失败的 PDF 路径
+        failed_errors: 失败 PDF 路径 → 错误原因（与 failed 一一对应）
         total_transactions: 提取到的交易总数（去重后）
     """
     processed: Dict[str, str] = field(default_factory=dict)
     skipped: List[str] = field(default_factory=list)
     failed: List[str] = field(default_factory=list)
+    failed_errors: Dict[str, str] = field(default_factory=dict)
     total_transactions: int = 0
 
 
@@ -163,15 +200,17 @@ def process_folder(
     scale: float = 3.0,
     timeout_minutes: int = 60,
     verbose: bool = False,
-    device: str = "gpu",
     force: bool = False,
+    progress_cb=None,
+    pdf_names: Optional[List[str]] = None,
+    should_cancel=None,
 ) -> FolderResult:
-    """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV
+    """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV（强制 GPU 推理）
 
     处理流程:
       1. 扫描文件夹中所有 .pdf 文件
       2. 同名 CSV 已存在的 PDF 直接跳过（force=True 时覆盖重新导出）
-      3. 逐个 PDF 调用 OCR 管线（默认强制 GPU）
+      3. 逐个 PDF 调用 OCR 管线（强制 GPU）
       4. 每个 PDF 的交易去重（按日期+金额+对方账户名）
       5. 按日期+时间排序
       6. 写出 <同名>.csv 到 PDF 所在文件夹
@@ -181,8 +220,21 @@ def process_folder(
         scale: 渲染缩放倍率
         timeout_minutes: 单个 PDF 超时分钟数
         verbose: 是否输出详细日志
-        device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
         force: 是否强制重新导出（同名 CSV 已存在时覆盖而不是跳过）
+        progress_cb: 可选进度回调 callback(event, info)；不传时行为与命令行一致。
+            事件（info 为 dict）：
+              engine_loading {device}                      模型加载开始（device 恒为 gpu）
+              pdf_start      {name, pages_total}           单 PDF 处理开始
+              page_done      {name, page, pages_total,
+                              transactions_so_far}         单页处理完成
+              pdf_done       {name, transactions, duration_s}
+              pdf_skipped    {name, error}                 同名 CSV 已存在被跳过
+              pdf_failed     {name, error}                 单 PDF 处理失败
+        pdf_names: 可选，仅处理指定文件名列表中的 PDF（大小写不敏感；
+            默认处理文件夹内全部 PDF，与命令行行为一致）
+        should_cancel: 可选取消检查回调，返回 True 时在文件边界 / 页边界抛出
+            ConvertCancelled 中止整个批次（当前文件结果丢弃，已完成文件产物保留）；
+            不传时与命令行完全一致
 
     Returns:
         FolderResult 批量处理汇总
@@ -191,6 +243,7 @@ def process_folder(
         NotADirectoryError: 输入路径非目录
         FileNotFoundError: 未找到 PDF 文件
         RuntimeError: 全部 PDF 处理失败
+        ConvertCancelled: 协作取消（should_cancel 返回 True）
     """
     if not os.path.isdir(folder_path):
         raise NotADirectoryError(f"输入路径不存在或非目录: {folder_path}")
@@ -201,6 +254,9 @@ def process_folder(
         for f in os.listdir(folder_path)
         if f.lower().endswith(".pdf")
     ])
+    if pdf_names:
+        wanted = {n.lower() for n in pdf_names}
+        pdf_files = [p for p in pdf_files if os.path.basename(p).lower() in wanted]
 
     if not pdf_files:
         raise FileNotFoundError(f"未找到 PDF 文件: {folder_path}")
@@ -211,14 +267,19 @@ def process_folder(
 
     result = FolderResult()
 
-    with tqdm(total=len(pdf_files), desc="处理 PDF", unit="个") as pbar:
+    with tqdm(total=len(pdf_files), desc="处理 PDF", unit="个",
+              disable=progress_cb is not None) as pbar:
         for pdf_path in pdf_files:
+            if should_cancel and should_cancel():
+                raise ConvertCancelled("转换已取消")
             pdf_name = os.path.basename(pdf_path)
             csv_path = os.path.splitext(pdf_path)[0] + ".csv"
 
             # 同名 CSV 已存在 → 跳过（force 时覆盖重新导出）
             if not force and os.path.exists(csv_path):
                 result.skipped.append(pdf_path)
+                if progress_cb:
+                    progress_cb("pdf_skipped", {"name": pdf_name, "error": "同名 CSV 已存在"})
                 pbar.set_postfix_str(f"跳过 {pdf_name}")
                 log.info("跳过（同名 CSV 已存在）: %s", pdf_name)
                 if verbose:
@@ -228,10 +289,17 @@ def process_folder(
 
             pbar.set_postfix_str(pdf_name)
             try:
-                transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose, device)
+                transactions = _pdf_to_transactions(
+                    pdf_path, scale, timeout_minutes, verbose, progress_cb, should_cancel
+                )
+            except ConvertCancelled:
+                raise
             except Exception as e:
                 log.error("处理失败: %s — %s", pdf_name, e)
                 result.failed.append(pdf_path)
+                result.failed_errors[pdf_path] = str(e)
+                if progress_cb:
+                    progress_cb("pdf_failed", {"name": pdf_name, "error": str(e)})
                 if verbose:
                     tqdm.write(f"  [{pdf_name}] 失败: {e}")
                 pbar.update(1)
