@@ -649,6 +649,7 @@ let convertSelected = [];     // 阶段一已选 PDF 文件列表
 let convertWarn = null;       // 选择阶段的警告文本（非 PDF / 同名忽略）
 let convertInterrupted = false; // 服务重启导致任务丢失（打开弹窗时提示一次）
 let convertResultSeen = false;  // 结果视图已展示过；未看过的结束态任务在关闭弹窗后保留，重开直达结果视图
+let convertStopRequested = false; // 已发起停止请求（进度视图按钮置灰显示「正在停止…」）
 let convertParams = { scale: "3.0", device: "auto", timeout: 60, force: false }; // 高级选项输入
 
 const TOTAL = "total";
@@ -2016,7 +2017,8 @@ function convertElapsedSec(job) {
   return Math.max(0, Math.floor((Date.now() - t.getTime()) / 1000));
 }
 function runningConvertJob() {
-  return convertJob && convertJob.status === "running" ? convertJob : null;
+  // 进行中或等待设备确认（均占用单任务槽，收起后后台保留）
+  return convertJob && (convertJob.status === "running" || convertJob.status === "awaiting_consent") ? convertJob : null;
 }
 function convertNameConflict(fileName) {
   // 与转换目录中同名 CSV 冲突 → 转换时将跳过（force 勾选除外）
@@ -2034,8 +2036,8 @@ function openConvertModal() {
   if (batchImporting) return;           // 导入批量写入进行中，不切换弹窗
   closeModal();                          // 与导入弹窗互斥打开
   $("#convert-mask").hidden = false;
-  if (convertJobId && (!convertJob || convertJob.status === "running")) {
-    // 进行中（或刚启动未取到首个快照）再点「转换 PDF」：直接打开进度视图，不新建任务
+  if (convertJobId && (!convertJob || runningConvertJob())) {
+    // 进行中（或刚启动未取到首个快照）再点「转换 PDF」：直接打开进度/确认视图，不新建任务
     pollConvert();
     return;
   }
@@ -2080,12 +2082,12 @@ function convertSelectedListHtml() {
   </div>`;
 }
 function updateConvertDeviceWarn() {
-  // 设备=自动且无 GPU：开始前提示将使用 CPU（设计 §5.2）
+  // 设备=自动且无 GPU：开始前提示——开始后将说明原因并询问是否改用 CPU（不静默降级）
   let el = $("#convert-device-warn");
   const show = convertParams.device === "auto" && meta.gpu_available === false;
   if (show) {
     if (!el) { el = document.createElement("div"); el.id = "convert-device-warn"; el.className = "modal-warn"; $("#convert-body").prepend(el); }
-    el.textContent = "未检测到 GPU，将使用 CPU 推理，速度会明显变慢";
+    el.textContent = "未检测到可用 GPU，开始转换后将说明原因并询问是否改用 CPU 继续";
     el.style.display = "";
   } else if (el) {
     el.remove();
@@ -2237,6 +2239,7 @@ async function startConvert() {
     convertJobId = res.job_id;
     convertJob = null;
     convertResultSeen = false;
+    convertStopRequested = false;
     sessionStorage.setItem("convertJobId", convertJobId);
     loadMeta().catch(() => {});  // 刷新 gpu_available 与已有 CSV 列表（首次任务触发探测）
     pollConvert();
@@ -2261,6 +2264,8 @@ function convertFileItemHtml(f) {
   } else if (f.state === "failed") {
     cls = "fail";
     status = `失败：${f.error || "未知错误"}`;
+  } else if (f.state === "stopped") {
+    status = "已停止（未处理）";
   } else {
     status = "等待中";
   }
@@ -2280,11 +2285,16 @@ function renderConvertProgress(job) {
   const pct = total ? Math.round((finished / total) * 100) : 0;
   const elapsed = convertElapsedSec(job);
   const rows = job.files.map(convertFileItemHtml).join("");
+  const stopBtn = `<button class="btn" id="btn-convert-stop" ${convertStopRequested ? "disabled" : ""}>${convertStopRequested ? "正在停止…" : "停止转换"}</button>`;
   $("#convert-body").innerHTML = `
     <div class="preview-file">正在转换（${finished}/${total}）${elapsed !== null ? ` · 已用时 ${fmtDuration(elapsed)}` : ""}</div>
     <div class="batch-file-list">${rows}</div>
     <div class="progress-bar"><div class="fill determinate" style="width:${pct}%"></div></div>
-    <div style="font-size:12px;color:#646A73;margin-top:8px">OCR 识别较慢，单个 PDF 可能需要数分钟，请耐心等待；可收起本窗口，转换在后台继续</div>`;
+    <div style="font-size:12px;color:#646A73;margin-top:8px">停止后已完成文件的 CSV 保留，未处理的文件不再转换；停止在当前页处理完后生效</div>
+    <div style="font-size:12px;color:#646A73;margin-top:4px">OCR 识别较慢，单个 PDF 可能需要数分钟，请耐心等待；可收起本窗口，转换在后台继续</div>
+    <div id="convert-actions">${stopBtn}</div>`;
+  const btn = $("#btn-convert-stop");
+  if (btn && !convertStopRequested) btn.addEventListener("click", stopConvertJob);
 }
 function pollConvert() {
   stopConvertPolling();
@@ -2317,6 +2327,11 @@ async function pollConvertOnce() {
     if (!$("#convert-mask").hidden) renderConvertProgress(res);
     return;
   }
+  if (res.status === "awaiting_consent") {
+    // GPU 不可用：说明原因、等待用户确认是否改用 CPU（不静默降级）
+    if (!$("#convert-mask").hidden && !$("#convert-consent-view")) renderConvertConsent(res);
+    return;
+  }
   // 任务结束：胶囊消失；弹窗打开则展示结果视图，收起则页面 banner 提示
   stopConvertPolling();
   sessionStorage.removeItem("convertJobId");
@@ -2324,14 +2339,59 @@ async function pollConvertOnce() {
   else renderConvertResult(res);
 }
 function updateConvertPill(job) {
-  // 顶栏胶囊指示（仅 BOC 页签、任务进行中）
+  // 顶栏胶囊指示（仅 BOC 页签、任务进行中或等待确认）
   const pill = $("#convert-pill");
   const t = job ? job.totals : null;
-  const running = job && job.status === "running";
-  if (!running || currentSource !== "boc") { pill.hidden = true; return; }
+  const active = job && (job.status === "running" || job.status === "awaiting_consent");
+  if (!active || currentSource !== "boc") { pill.hidden = true; return; }
   const finished = t.done + t.skipped + t.failed;
   pill.hidden = false;
-  pill.textContent = `⟳ 转换中 ${finished}/${job.files.length}`;
+  pill.textContent = job.status === "awaiting_consent"
+    ? "⟳ 转换任务等待设备确认"
+    : `⟳ 转换中 ${finished}/${job.files.length}`;
+}
+function renderConvertConsent(job) {
+  // 设备确认视图：GPU 不可用说明原因，用户同意才用 CPU（可收起，稍后从顶栏胶囊回来）
+  $("#btn-convert-close").textContent = "收起";
+  const reason = job.gpu_unavailable_reason || "未知原因";
+  const rows = job.files.map(convertFileItemHtml).join("");
+  $("#convert-body").innerHTML = `
+    <div id="convert-consent-view">
+      <div class="modal-warn">未检测到可用 GPU（${esc(reason)}）。改用 CPU 推理速度会明显变慢，是否继续？</div>
+      <div class="batch-file-list">${rows}</div>
+      <div style="font-size:12px;color:#646A73;margin-top:8px">任务已暂停等待确认；可收起本窗口，稍后从顶栏指示重新打开</div>
+      <div id="convert-actions">
+        <button class="btn" id="btn-convert-stop">取消转换</button>
+        <button class="btn btn-primary" id="btn-consent-cpu">使用 CPU 继续</button>
+      </div>
+    </div>`;
+  $("#btn-consent-cpu").addEventListener("click", () => convertConsent(true));
+  $("#btn-convert-stop").addEventListener("click", stopConvertJob);
+}
+async function convertConsent(useCpu) {
+  renderConvertLoading(useCpu ? "正在使用 CPU 继续转换 …" : "正在取消转换 …");
+  try {
+    const res = await api(`/api/boc/convert/${convertJobId}/consent`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ use_cpu: useCpu }),
+    });
+    if (!res.ok) { pollConvertOnce(); return; }
+    pollConvertOnce();
+  } catch (e) {
+    pollConvertOnce();
+  }
+}
+async function stopConvertJob() {
+  convertStopRequested = true;
+  renderConvertLoading("正在停止转换 …");
+  try {
+    const res = await api(`/api/boc/convert/${convertJobId}/stop`, { method: "POST" });
+    if (!res.ok) { pollConvertOnce(); return; }
+    pollConvertOnce();
+  } catch (e) {
+    pollConvertOnce();
+  }
 }
 function allFailedReason(job) {
   const f = job.files.find((x) => x.state === "failed");
@@ -2340,31 +2400,40 @@ function allFailedReason(job) {
 function renderConvertResult(job) {
   $("#btn-convert-close").textContent = "×";
   convertResultSeen = true;
+  convertStopRequested = false;
   const t = job.totals || {};
   const doneFiles = job.files.filter((f) => f.state === "done");
   const allFailed = job.status === "failed";
-  const partialWarn = (t.failed > 0 && !allFailed)
+  const stopped = job.status === "stopped";
+  const partialWarn = (t.failed > 0 && !allFailed && !stopped)
     ? `<div class="modal-warn">${t.failed} 个 PDF 转换失败，不影响其余结果，可直接导入成功的 CSV</div>` : "";
+  const stoppedWarn = stopped
+    ? `<div class="modal-warn">转换已停止：已完成文件的 CSV 保留，进行中文件的结果已丢弃，未处理的文件不再转换</div>` : "";
   const rows = job.files.map((f) => {
     if (f.state === "failed") return `<tr class="bf-error"><td>${esc(f.name)}</td><td>失败：${esc(f.error || "未知错误")}</td></tr>`;
     if (f.state === "done") return `<tr><td>${esc(f.name)}</td><td><span class="bf-new">成功</span> · ${f.transactions.toLocaleString()} 条 · 用时 ${fmtDuration(f.duration_s)}</td></tr>`;
+    if (f.state === "stopped") return `<tr><td>${esc(f.name)}</td><td>已停止（未处理）</td></tr>`;
     return `<tr><td>${esc(f.name)}</td><td>跳过（同名 CSV 已存在）</td></tr>`;
   }).join("");
   const dirNote = meta.convert_dir ? `<div class="dz-desc" style="margin-top:10px">CSV 存放于：${esc(meta.convert_dir)}</div>` : "";
   const allFailedBlock = allFailed
     ? `<div class="modal-error" style="display:block">${esc(allFailedReason(job))}</div>` : "";
+  const stoppedCard = (t.stopped || 0) > 0
+    ? `<div class="stat"><div class="s-label">未处理</div><div class="s-value">${t.stopped.toLocaleString()} 个</div></div>` : "";
   const primary = (allFailed || doneFiles.length === 0)
     ? `<button class="btn btn-primary" disabled>一键导入</button>
        <button class="btn" id="btn-convert-retry">调整参数重试</button>`
     : `<button class="btn btn-primary" id="btn-convert-import">一键导入（${doneFiles.length} 个 CSV · ${t.transactions.toLocaleString()} 条）</button>`;
   $("#convert-body").innerHTML = `
     ${partialWarn}
+    ${stoppedWarn}
     <div class="preview-block">
       <h4>转换结果</h4>
       <div class="preview-stats">
         <div class="stat new"><div class="s-label">成功</div><div class="s-value">${t.done.toLocaleString()} 个</div></div>
         <div class="stat dup"><div class="s-label">跳过</div><div class="s-value">${t.skipped.toLocaleString()} 个</div></div>
         <div class="stat err"><div class="s-label">失败</div><div class="s-value">${t.failed.toLocaleString()} 个</div></div>
+        ${stoppedCard}
         <div class="stat"><div class="s-label">共提取交易</div><div class="s-value">${t.transactions.toLocaleString()} 条</div></div>
       </div>
       <div class="sample-table-wrap" style="margin-top:12px">
@@ -2393,7 +2462,9 @@ async function openConvertDir() {
 }
 function showConvertResultBanner(job) {
   const t = job.totals || {};
-  const msg = `PDF 转换完成：成功 ${t.done} 个 · 跳过 ${t.skipped} 个 · 失败 ${t.failed} 个 · 共提取 ${t.transactions.toLocaleString()} 条交易`;
+  const msg = job.status === "stopped"
+    ? `PDF 转换已停止：成功 ${t.done} 个（CSV 已保留）· 未处理 ${t.stopped || 0} 个 · 失败 ${t.failed} 个`
+    : `PDF 转换完成：成功 ${t.done} 个 · 跳过 ${t.skipped} 个 · 失败 ${t.failed} 个 · 共提取 ${t.transactions.toLocaleString()} 条交易`;
   addBanner(t.failed > 0 ? "error" : "success", msg, null);
   refreshAll();  // 刷新 meta（已有 CSV 列表变化）
 }
@@ -2468,7 +2539,7 @@ async function resumeConvertSession() {
       convertInterrupted = true;
       return;
     }
-    if (res.status === "running") {
+    if (res.status === "running" || res.status === "awaiting_consent") {
       convertJob = res;
       updateConvertPill(res);
       pollConvert();
