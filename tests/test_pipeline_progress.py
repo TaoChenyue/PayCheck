@@ -60,7 +60,7 @@ def test_pdf_to_transactions_no_cb_unchanged(monkeypatch, tmp_path):
     assert pipeline._pdf_to_transactions(pdf_path, device="cpu") == []
 
 
-def _fake_transactions(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None):
+def _fake_transactions(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None, should_cancel=None):
     # 模拟真实 _pdf_to_transactions 的 pdf_done 事件（其余事件由其内部发出，这里从简）
     if progress_cb:
         progress_cb("pdf_done", {
@@ -94,7 +94,7 @@ def test_process_folder_progress_events(monkeypatch, tmp_path):
 
 
 def test_process_folder_failed_emits_pdf_failed(monkeypatch, tmp_path):
-    def _boom(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None):
+    def _boom(pdf_path, scale, timeout_minutes, verbose, device, progress_cb=None, should_cancel=None):
         raise RuntimeError("渲染失败")
 
     monkeypatch.setattr(pipeline, "_pdf_to_transactions", _boom)
@@ -131,3 +131,90 @@ def test_process_folder_without_filter_processes_all(monkeypatch, tmp_path):
 
     assert len(result.processed) == 2
     assert (tmp_path / "a.csv").exists() and (tmp_path / "b.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# 协作取消（should_cancel）
+# ---------------------------------------------------------------------------
+
+def test_pdf_to_transactions_cancel_at_page_boundary(monkeypatch, tmp_path):
+    """页边界检查取消：首轮检查即取消时，模型加载后中止，不产出交易、不发 pdf_done。"""
+    monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [{"date": "2026-10-01", "amount": "1.00", "counterparty": "甲"}])
+
+    pdf_path = str(tmp_path / "样例.pdf")
+    Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
+
+    events = []
+    with pytest.raises(pipeline.ConvertCancelled):
+        pipeline._pdf_to_transactions(
+            pdf_path, device="cpu",
+            progress_cb=lambda e, info: events.append((e, dict(info))),
+            should_cancel=lambda: True,
+        )
+
+    # 模型加载事件已发，但没有任何页被处理、也没有完成事件
+    assert [e for e, _ in events] == ["engine_loading"]
+    assert "pdf_done" not in [e for e, _ in events]
+
+
+def test_pdf_to_transactions_cancel_midway_discards_partial(monkeypatch, tmp_path):
+    """处理完第 1 页后取消：第 2 页边界抛出 ConvertCancelled，部分结果不返回。"""
+    monkeypatch.setattr(pipeline, "pdf_to_images", _fake_render)
+    monkeypatch.setattr(pipeline, "warmup_engine", lambda device: None)
+    monkeypatch.setattr(pipeline, "process_image", lambda img_path, device: [])
+
+    pdf_path = str(tmp_path / "样例.pdf")
+    Path(pdf_path).write_bytes(b"%PDF-1.4 fake")
+
+    calls = {"n": 0}
+
+    def cancel_after_first_page():
+        calls["n"] += 1
+        # 检查点：模型加载后(1) → 第 1 页前(2) → 第 2 页前(3，取消)
+        return calls["n"] > 2
+
+    events = []
+    with pytest.raises(pipeline.ConvertCancelled):
+        pipeline._pdf_to_transactions(
+            pdf_path, device="cpu",
+            progress_cb=lambda e, info: events.append((e, dict(info))),
+            should_cancel=cancel_after_first_page,
+        )
+
+    kinds = [e for e, _ in events]
+    assert kinds == ["engine_loading", "pdf_start", "page_done"]
+    assert events[-1][1]["page"] == 1  # 只处理完第 1 页
+
+
+def test_process_folder_cancel_between_files(monkeypatch, tmp_path):
+    """文件边界取消：不处理任何文件，整批抛出 ConvertCancelled，不写 CSV。"""
+    monkeypatch.setattr(pipeline, "_pdf_to_transactions", _fake_transactions)
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
+
+    with pytest.raises(pipeline.ConvertCancelled):
+        pipeline.process_folder(str(tmp_path), device="cpu", should_cancel=lambda: True)
+
+    assert not (tmp_path / "a.csv").exists()
+    assert not (tmp_path / "b.csv").exists()
+
+
+def test_process_folder_cancel_after_first_file_keeps_first_csv(monkeypatch, tmp_path):
+    """第 2 个文件前取消：第 1 个文件的 CSV 保留，第 2 个文件不处理。"""
+    monkeypatch.setattr(pipeline, "_pdf_to_transactions", _fake_transactions)
+    (tmp_path / "a.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "b.pdf").write_bytes(b"%PDF-1.4")
+
+    calls = {"n": 0}
+
+    def cancel_before_second():
+        calls["n"] += 1
+        return calls["n"] > 1
+
+    with pytest.raises(pipeline.ConvertCancelled):
+        pipeline.process_folder(str(tmp_path), device="cpu", should_cancel=cancel_before_second)
+
+    assert (tmp_path / "a.csv").exists()  # 已完成文件产物保留
+    assert not (tmp_path / "b.csv").exists()

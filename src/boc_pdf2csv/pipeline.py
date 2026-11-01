@@ -23,6 +23,14 @@ from boc_pdf2csv.csv_writer import write_csv
 log = logging.getLogger("boc_pdf2csv.pipeline")
 
 
+class ConvertCancelled(Exception):
+    """协作取消：should_cancel 返回 True 时抛出，中断当前批次。
+
+    由调用方（如工作台任务线程）通过 should_cancel 回调请求停止；
+    当前文件的结果丢弃（不写 CSV），已完成的文件产物保留。
+    """
+
+
 # =========================================================================
 # 内部：单 PDF → 交易列表
 # =========================================================================
@@ -34,6 +42,7 @@ def _pdf_to_transactions(
     verbose: bool = False,
     device: str = "gpu",
     progress_cb=None,
+    should_cancel=None,
 ) -> List[Dict[str, Any]]:
     """处理单个 PDF，返回交易字典列表（不写 CSV）
 
@@ -45,9 +54,14 @@ def _pdf_to_transactions(
         device: OCR 推理设备，"gpu"（默认，强制 GPU）或 "cpu"
         progress_cb: 可选进度回调 callback(event, info)，事件见 process_folder 文档；
             不传时行为与命令行完全一致
+        should_cancel: 可选取消检查回调，返回 True 时在页边界抛出
+            ConvertCancelled 中止当前 PDF（结果丢弃）；不传时与命令行完全一致
 
     Returns:
         交易字典列表（可能为空）
+
+    Raises:
+        ConvertCancelled: 协作取消（should_cancel 返回 True）
     """
     if not os.path.exists(pdf_path):
         log.error("文件不存在: %s", pdf_path)
@@ -71,6 +85,8 @@ def _pdf_to_transactions(
         # 阶段二：图片 → OCR → 结构化
         _emit("engine_loading", {"device": device})
         warmup_engine(device)
+        if should_cancel and should_cancel():
+            raise ConvertCancelled(f"转换已取消：{pdf_name}")
 
         def _page_key(p: str) -> int:
             m = re.search(r'p(\d+)\.png$', p)
@@ -84,6 +100,8 @@ def _pdf_to_transactions(
 
         _emit("pdf_start", {"name": pdf_name, "pages_total": total_pages})
         for page_num, img_path in enumerate(sorted_paths):
+            if should_cancel and should_cancel():
+                raise ConvertCancelled(f"转换已取消：{pdf_name}")
             elapsed = time.time() - start_time
             if elapsed >= max_timeout:
                 tqdm.write(f"⏰ 超时 {timeout_minutes} 分钟，已处理 {page_num}/{total_pages} 页")
@@ -188,6 +206,7 @@ def process_folder(
     force: bool = False,
     progress_cb=None,
     pdf_names: Optional[List[str]] = None,
+    should_cancel=None,
 ) -> FolderResult:
     """批量处理文件夹内所有 PDF，每个 PDF 输出同名 CSV
 
@@ -217,6 +236,9 @@ def process_folder(
               pdf_failed     {name, error}                 单 PDF 处理失败
         pdf_names: 可选，仅处理指定文件名列表中的 PDF（大小写不敏感；
             默认处理文件夹内全部 PDF，与命令行行为一致）
+        should_cancel: 可选取消检查回调，返回 True 时在文件边界 / 页边界抛出
+            ConvertCancelled 中止整个批次（当前文件结果丢弃，已完成文件产物保留）；
+            不传时与命令行完全一致
 
     Returns:
         FolderResult 批量处理汇总
@@ -225,6 +247,7 @@ def process_folder(
         NotADirectoryError: 输入路径非目录
         FileNotFoundError: 未找到 PDF 文件
         RuntimeError: 全部 PDF 处理失败
+        ConvertCancelled: 协作取消（should_cancel 返回 True）
     """
     if not os.path.isdir(folder_path):
         raise NotADirectoryError(f"输入路径不存在或非目录: {folder_path}")
@@ -251,6 +274,8 @@ def process_folder(
     with tqdm(total=len(pdf_files), desc="处理 PDF", unit="个",
               disable=progress_cb is not None) as pbar:
         for pdf_path in pdf_files:
+            if should_cancel and should_cancel():
+                raise ConvertCancelled("转换已取消")
             pdf_name = os.path.basename(pdf_path)
             csv_path = os.path.splitext(pdf_path)[0] + ".csv"
 
@@ -268,7 +293,11 @@ def process_folder(
 
             pbar.set_postfix_str(pdf_name)
             try:
-                transactions = _pdf_to_transactions(pdf_path, scale, timeout_minutes, verbose, device, progress_cb)
+                transactions = _pdf_to_transactions(
+                    pdf_path, scale, timeout_minutes, verbose, device, progress_cb, should_cancel
+                )
+            except ConvertCancelled:
+                raise
             except Exception as e:
                 log.error("处理失败: %s — %s", pdf_name, e)
                 result.failed.append(pdf_path)
