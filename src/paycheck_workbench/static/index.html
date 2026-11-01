@@ -284,24 +284,47 @@ td[data-act="toggle-counted"]:hover { background: var(--row-hover); }
 #batch-bar .bar-spacer { margin-left: auto; }
 #batch-bar .btn { padding: 4px 12px; font-size: 13px; }
 
-/* ---------- 标签管理 / 打标签弹窗 ---------- */
-#tags-modal-mask, #tagpick-modal-mask {
+/* ---------- 标签管理 / 打标签 / 检测重复弹窗 ---------- */
+#tags-modal-mask, #tagpick-modal-mask, #detect-modal-mask {
   position: fixed; inset: 0; background: rgba(31, 35, 41, .45); z-index: 120;
   display: flex; align-items: center; justify-content: center;
 }
-#tags-modal-mask[hidden], #tagpick-modal-mask[hidden] { display: none; }
+#tags-modal-mask[hidden], #tagpick-modal-mask[hidden], #detect-modal-mask[hidden] { display: none; }
 #tags-modal, #tagpick-modal {
   background: #fff; border-radius: 12px; width: min(560px, 94vw); max-height: 88vh; overflow-y: auto;
   display: flex; flex-direction: column;
 }
-#tags-modal-header, #tagpick-modal-header {
+#detect-modal {
+  background: #fff; border-radius: 12px; width: min(720px, 94vw); max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#tags-modal-header, #tagpick-modal-header, #detect-modal-header {
   display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
   font-size: 16px; font-weight: 600;
 }
-#tags-modal-header .close, #tagpick-modal-header .close {
+#tags-modal-header .close, #tagpick-modal-header .close, #detect-modal-header .close {
   margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2);
 }
 #tags-modal-body, #tagpick-modal-body { padding: 20px; }
+#detect-modal-body { padding: 20px; }
+.detect-tip { font-size: 13px; color: var(--text-2); margin-bottom: 14px; }
+.detect-list { display: flex; flex-direction: column; gap: 8px; }
+.detect-item {
+  display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 8px; cursor: pointer; font-size: 13px;
+}
+.detect-item:hover { background: var(--row-hover); }
+.detect-item input { accent-color: var(--brand); margin-top: 2px; }
+.detect-item .detect-row { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.detect-item .detect-main { font-weight: 500; }
+.detect-item .detect-other { color: var(--text-2); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.detect-item.disabled { cursor: default; background: #FAFAFB; border-style: dashed; }
+.detect-item.disabled:hover { background: #FAFAFB; }
+.detect-item.disabled .detect-main { color: #9A9DA3; }
+.detect-amb-title { font-size: 12px; color: #D83931; margin: 16px 0 8px; }
+.detect-cands { font-size: 12px; color: #9A9DA3; }
+.detect-empty { color: #C4C7CC; text-align: center; padding: 20px 0; font-size: 13px; }
+#detect-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 .tm-create, .tp-create { display: flex; gap: 8px; margin-bottom: 14px; }
 .tm-create input, .tp-create input {
   flex: 1; border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
@@ -540,6 +563,7 @@ tr.bf-error td { color: var(--danger); }
     <div id="toolbar">
       <input type="search" id="search" placeholder="搜索…">
       <div id="total-tools" hidden>
+        <button class="btn" id="btn-detect-dups">检测重复</button>
         <button class="btn" id="btn-tags-manage">🏷 标签管理</button>
       </div>
       <div id="colset">
@@ -601,6 +625,15 @@ tr.bf-error td { color: var(--danger); }
       <button class="close" id="btn-tags-modal-close">×</button>
     </div>
     <div id="tags-modal-body"></div>
+  </div>
+</div>
+
+<div id="detect-modal-mask" hidden>
+  <div id="detect-modal">
+    <div id="detect-modal-header">检测重复
+      <button class="close" id="btn-detect-close">×</button>
+    </div>
+    <div id="detect-modal-body"></div>
   </div>
 </div>
 
@@ -1503,6 +1536,94 @@ async function afterTagMutation() {
   if (currentSource === TOTAL) await refreshRowsAndSummary();
 }
 
+/* ---- 检测重复弹窗（总账户工具栏，兜底历史数据） ---- */
+async function openDetectModal() {
+  $("#detect-modal-mask").hidden = false;
+  $("#detect-modal-body").innerHTML = '<div style="padding:20px;text-align:center;color:#646A73">正在扫描重复账单…</div>';
+  try {
+    const res = await api("/api/total/detect-duplicates", { method: "POST" });
+    if (!res.ok) {
+      $("#detect-modal-body").innerHTML = `<div style="padding:20px;text-align:center;color:#D83931">${esc(res.error || "扫描失败")}</div>`;
+      return;
+    }
+    renderDetectResult(res);
+  } catch (e) {
+    $("#detect-modal-body").innerHTML = `<div style="padding:20px;text-align:center;color:#D83931">网络错误：${esc(e.message)}</div>`;
+  }
+}
+function closeDetectModal() {
+  $("#detect-modal-mask").hidden = true;
+}
+function detectMainHtml(r) {
+  // 行摘要：时间 · 金额 · 方向 · 对方（对方为空时用摘要兜底）
+  const name = r.counterparty || r.summary || "";
+  return `${esc(r.time)} · ${fmtMoney(r.amount)} · ${esc(r.direction)}${name ? ` · ${esc(name)}` : ""}`;
+}
+function detectPairHtml(m) {
+  const o = m.other;
+  return `<label class="detect-item">
+    <input type="checkbox" data-boc-id="${esc(m.boc.id)}" checked>
+    <span class="detect-row">
+      <span class="detect-main">${detectMainHtml(m.boc)}</span>
+      <span class="detect-other"><span class="src-badge ${SRC_BADGE_CLS[o.source] || ""}">${esc(SOURCE_LABELS[o.source] || o.source)}</span>${detectMainHtml(o)}</span>
+    </span>
+  </label>`;
+}
+function detectAmbiguousHtml(a) {
+  const cands = a.candidates.map((c) =>
+    `${esc(SOURCE_LABELS[c.source] || c.source)} ${esc(c.time)} · ${fmtMoney(c.amount)}`).join("；");
+  return `<div class="detect-item disabled">
+    <input type="checkbox" disabled>
+    <span class="detect-row">
+      <span class="detect-main">${detectMainHtml(a.boc)}</span>
+      <span class="detect-cands">候选：${cands}（需人工判断，未自动标记）</span>
+    </span>
+  </div>`;
+}
+function renderDetectResult(res) {
+  const matches = res.matches || [];
+  const ambiguous = res.ambiguous || [];
+  const list = matches.length
+    ? matches.map(detectPairHtml).join("")
+    : '<div class="detect-empty">未发现与支付宝/微信时间金额方向一致的 BOC 账单</div>';
+  const amb = ambiguous.length
+    ? `<div class="detect-amb-title">需人工判断（${ambiguous.length} 条）：同时间金额存在多个候选</div>${ambiguous.map(detectAmbiguousHtml).join("")}`
+    : "";
+  $("#detect-modal-body").innerHTML = `
+    <div class="detect-tip">与支付宝/微信「时间精确到分钟 + 金额 + 方向」一致的 BOC 账单，确认后将标记为不计（总账户可随时改回计入）。</div>
+    <div class="detect-list">${list}</div>
+    ${amb}
+    <div id="detect-actions">
+      <button class="btn" id="btn-detect-cancel">取消</button>
+      <button class="btn btn-primary" id="btn-detect-apply" ${matches.length ? "" : "disabled"}>确认标记不计</button>
+    </div>`;
+  $("#btn-detect-cancel").addEventListener("click", closeDetectModal);
+  $("#btn-detect-apply").addEventListener("click", applyDetect);
+  document.querySelectorAll("#detect-modal-body .detect-item input:not([disabled])").forEach((cb) =>
+    cb.addEventListener("change", updateDetectApply));
+  updateDetectApply();
+}
+function updateDetectApply() {
+  const n = document.querySelectorAll("#detect-modal-body .detect-item input:checked:not([disabled])").length;
+  const btn = $("#btn-detect-apply");
+  btn.textContent = `确认标记不计（${n}）`;
+  btn.disabled = n === 0;
+}
+async function applyDetect() {
+  const ids = [...document.querySelectorAll("#detect-modal-body .detect-item input:checked:not([disabled])")]
+    .map((cb) => cb.dataset.bocId);
+  if (!ids.length) return;
+  const res = await api("/api/total/apply-auto-exclude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) { showErrorBanner(res.error || "标记失败"); return; }
+  closeDetectModal();
+  addBanner("success", `已将 ${res.updated.toLocaleString()} 条 BOC 账单标记为不计`, null);
+  await refreshRowsAndSummary();
+}
+
 /* ---- 打标签弹层（批量栏「打标签…」与行内「+」共用） ---- */
 let tagPickScope = null;      // 当前打标签作用范围（ids / filter scope）
 let tagPickChecked = new Set();
@@ -1743,7 +1864,9 @@ async function confirmImport() {
     const res = await upload("/api/import/confirm", modalFile);
     if (!res.ok) { renderModalSelect(); modalError(res.error || "导入失败"); return; }
     closeModal();
-    const msg = `已导入 ${res.inserted.toLocaleString()} 条，跳过 ${res.skipped.toLocaleString()} 条，失败 ${res.failed} 条`;
+    const auto = res.auto_excluded
+      ? `，其中 ${res.auto_excluded.toLocaleString()} 条与支付宝/微信重复，已自动标记为不计` : "";
+    const msg = `已导入 ${res.inserted.toLocaleString()} 条，跳过 ${res.skipped.toLocaleString()} 条，失败 ${res.failed} 条${auto}`;
     addBanner(res.failed > 0 ? "error" : "success", msg, res.failures);
     await refreshAll();
   } catch (e) {
@@ -1970,8 +2093,9 @@ function renderBatchDone(results) {
     inserted: a.inserted + (r.inserted || 0),
     skipped: a.skipped + (r.skipped || 0),
     failed: a.failed + (r.failed || 0),
+    autoExcluded: a.autoExcluded + (r.auto_excluded || 0),
     fileErrors: a.fileErrors + (r.error ? 1 : 0),
-  }), { inserted: 0, skipped: 0, failed: 0, fileErrors: 0 });
+  }), { inserted: 0, skipped: 0, failed: 0, autoExcluded: 0, fileErrors: 0 });
   const rows = results.map((r) => {
     if (r.error) return `<tr class="bf-error"><td>${esc(r.file_name)}</td><td>导入失败：${esc(r.error)}</td></tr>`;
     return `<tr><td>${esc(r.file_name)}</td><td class="num">新增 <span class="bf-new">${r.inserted.toLocaleString()}</span> · 跳过 ${r.skipped.toLocaleString()}${r.failed ? ` · <span class="bf-fail">失败 ${r.failed}</span>` : ""}</td></tr>`;
@@ -1999,7 +2123,8 @@ function renderBatchDone(results) {
   $("#btn-done").addEventListener("click", () => {
     closeModal();
     const fileErrNote = agg.fileErrors ? `（${agg.fileErrors} 个文件解析失败）` : "";
-    const msg = `已导入 ${agg.inserted.toLocaleString()} 条，跳过 ${agg.skipped.toLocaleString()} 条，失败 ${agg.failed} 条${fileErrNote}`;
+    const autoNote = agg.autoExcluded ? `，其中 ${agg.autoExcluded.toLocaleString()} 条与支付宝/微信重复，已自动标记为不计` : "";
+    const msg = `已导入 ${agg.inserted.toLocaleString()} 条，跳过 ${agg.skipped.toLocaleString()} 条，失败 ${agg.failed} 条${fileErrNote}${autoNote}`;
     const failures = results.flatMap((r) => (r.failures || []).map((f) => ({ ...f, file: r.file_name })));
     addBanner(agg.failed > 0 || agg.fileErrors > 0 ? "error" : "success", msg, failures);
     refreshAll();
@@ -2500,7 +2625,8 @@ async function confirmConvertImport(model) {
     closeConvertModal();
     const fileRows = res.files || [];
     const fileErrCount = fileRows.filter((r) => r.error).length;
-    const msg = `已导入 ${(res.inserted || 0).toLocaleString()} 条，跳过 ${(res.skipped || 0).toLocaleString()} 条，失败 ${(res.failed || 0)} 条${fileErrCount ? `（${fileErrCount} 个文件解析失败）` : ""}`;
+    const auto = res.auto_excluded ? `，其中 ${res.auto_excluded.toLocaleString()} 条与支付宝/微信重复，已自动标记为不计` : "";
+    const msg = `已导入 ${(res.inserted || 0).toLocaleString()} 条，跳过 ${(res.skipped || 0).toLocaleString()} 条，失败 ${(res.failed || 0)} 条${fileErrCount ? `（${fileErrCount} 个文件解析失败）` : ""}${auto}`;
     const failures = fileRows.flatMap((r) => (r.failures || []).map((f) => ({ ...f, file: r.file_name })));
     addBanner((res.failed || 0) > 0 || fileErrCount > 0 ? "error" : "success", msg, failures);
     await refreshAll();
@@ -2555,6 +2681,9 @@ $("#btn-convert-close").addEventListener("click", closeConvertModal);
 $("#convert-mask").addEventListener("click", (e) => { if (e.target.id === "convert-mask") closeConvertModal(); });
 $("#convert-pill").addEventListener("click", openConvertModal);
 $("#btn-tags-manage").addEventListener("click", openTagsModal);
+$("#btn-detect-dups").addEventListener("click", openDetectModal);
+$("#btn-detect-close").addEventListener("click", closeDetectModal);
+$("#detect-modal-mask").addEventListener("click", (e) => { if (e.target.id === "detect-modal-mask") closeDetectModal(); });
 $("#btn-tags-modal-close").addEventListener("click", closeTagsModal);
 $("#tags-modal-mask").addEventListener("click", (e) => { if (e.target.id === "tags-modal-mask") closeTagsModal(); });
 $("#btn-tagpick-close").addEventListener("click", closeTagPick);
