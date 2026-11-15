@@ -27,7 +27,7 @@ uv run python -m paycheck_workbench
 | `--open` | 关 | 启动后自动打开浏览器 |
 | `--version` | — | 打印版本号 |
 
-> pip 安装后可直接运行 `paycheck`（不带 `uv run` 前缀）；旧入口 `paycheck-workbench` 保留为别名，仍可使用。启动日志与运行日志见 [logging.md](logging.md)。
+> pip 安装后可直接运行 `paycheck`（不带 `uv run` 前缀）。启动日志与运行日志见 [logging.md](logging.md)。
 
 ## 页面结构
 

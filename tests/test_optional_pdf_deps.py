@@ -59,6 +59,15 @@ def test_pdf_heavy_deps_only_in_pdf_extras():
     assert "openpyxl" in base_deps  # 微信 XLSX 解析仍需默认安装
 
 
+def test_scripts_only_paycheck_entry():
+    """命令收敛：只保留 paycheck / boc-pdf2csv，旧 paycheck-workbench 入口已移除。"""
+    text = PYPROJECT.read_text(encoding="utf-8")
+    scripts = _section(text, "[project.scripts]")
+    assert "paycheck-workbench" not in scripts
+    assert re.search(r'^paycheck\s*=\s*"paycheck_workbench\.cli:main"', scripts, re.M)
+    assert re.search(r'^boc-pdf2csv\s*=\s*"boc_pdf2csv\.cli:main"', scripts, re.M)
+
+
 def test_missing_dependency_message_has_install_command():
     message = deps.missing_dependency_message(["torch", "PyMuPDF"])
     assert "PDF 转换需要可选依赖" in message
