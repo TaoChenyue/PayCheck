@@ -19,6 +19,9 @@
 
 整体工作流：**原始账单导入（数据源视图，只读）→ 总账户做收支与标签管理（三源合并视图）**。
 
+> PDF / OCR 相关依赖（PaddleOCR、paddlepaddle、PyMuPDF、opencv、torch 等）是可选 extras（`pdf`）：
+> 默认 `uv sync` 不下载；只用工作台与 CSV / Excel 导入无需安装，需要 PDF 转换时执行 `uv sync --extra pdf`。
+
 boc-pdf2csv 处理管线：
 
 ```
@@ -33,10 +36,13 @@ PDF → 高清图片 (PyMuPDF) → OCR 识别 (PaddleOCR) → 版面解析 → �
 ## 快速开始
 
 ```bash
-uv sync                          # 安装全部依赖（含工作台 paycheck）
+# 只用账单工作台（默认安装，不含 PDF / OCR 依赖）
+uv sync
+uv run paycheck --open           # 启动账单工作台并打开浏览器（顶栏「使用帮助」可查操作说明）
 
+# 需要 PDF → CSV 转换时：安装可选 extras 后再运行
+uv sync --extra pdf
 uv run boc-pdf2csv ./statements/ # BOC PDF 文件夹 → 同名 CSV
-uv run paycheck --open           # 启动账单工作台并打开浏览器
 ```
 
 ## 文档
@@ -46,7 +52,7 @@ uv run paycheck --open           # 启动账单工作台并打开浏览器
 | 文档 | 内容 |
 |------|------|
 | [docs/index.md](docs/index.md) | 文档索引：两工具关系、项目结构、开发与测试 |
-| [docs/installation.md](docs/installation.md) | 安装说明（GPU、pip 备选、依赖表） |
+| [docs/installation.md](docs/installation.md) | 安装说明（默认安装 / pdf extras、GPU、pip 备选、依赖表） |
 | [docs/boc-pdf2csv.md](docs/boc-pdf2csv.md) | boc-pdf2csv 使用说明（命令、Python API、CSV 格式、退出码） |
 | [docs/pdf-options.md](docs/pdf-options.md) | PDF 转换各选项说明（scale / timeout / force / verbose） |
 | [docs/workbench.md](docs/workbench.md) | 账单工作台操作说明 |
