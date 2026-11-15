@@ -84,10 +84,15 @@
   --batch-bg: #241D3A;
   --batch-border: #463B78;
 }
-body[data-source="boc"] { --brand: #C8102E; }
-body[data-source="alipay"] { --brand: #1677FF; }
-body[data-source="wechat"] { --brand: #07C160; }
-body[data-source="total"] { --brand: #7C4DFF; }
+/* 固定配色（TCY-67）：品牌色与各数据源标识色是常量，不随「当前选中的数据源」轮换。
+   切换数据源只改变选中态（背景 / 左侧指示条 / 字重），不重新分配任何颜色变量。 */
+:root {
+  --brand: #7C4DFF;      /* 应用品牌色：按钮、焦点、勾选等全局强调色，固定不变 */
+  --accent-total: #7C4DFF;
+  --accent-boc: #C8102E;
+  --accent-alipay: #1677FF;
+  --accent-wechat: #07C160;
+}
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
@@ -124,17 +129,29 @@ body {
 #sidenav-items { display: flex; flex-direction: column; gap: 2px; }
 .nav-group { font-size: 12px; color: var(--muted); padding: 14px 10px 4px; }
 .nav-item {
+  --item-color: var(--text-2);  /* 每项自身的固定标识色（下方按数据源赋值），与是否选中无关 */
   display: flex; align-items: center; gap: 8px; width: 100%;
   border: none; background: none; border-radius: 8px; padding: 9px 10px; cursor: pointer;
   font-size: 14px; color: var(--text-2); text-align: left;
 }
+.nav-item[data-source="total"] { --item-color: var(--accent-total); }
+.nav-item[data-source="boc"] { --item-color: var(--accent-boc); }
+.nav-item[data-source="alipay"] { --item-color: var(--accent-alipay); }
+.nav-item[data-source="wechat"] { --item-color: var(--accent-wechat); }
 .nav-item:hover { background: var(--row-hover); }
-.nav-item.active { background: color-mix(in srgb, var(--brand) 8%, var(--panel-bg)); color: var(--brand); font-weight: 600; }
+/* 选中态只用背景 + 左侧指示条 + 字重表达；不改写任何配色变量，切换时各卡片颜色不动 */
+.nav-item.active {
+  background: color-mix(in srgb, var(--text) 6%, var(--panel-bg));
+  color: var(--text); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--item-color);
+}
 .nav-item.sub { padding-left: 28px; }
-.nav-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); flex-shrink: 0; }
-.nav-item.active .nav-dot { border-color: var(--brand); background: var(--brand); }
+.nav-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  border: 1.5px solid var(--item-color); background: var(--item-color);
+}
 .nav-item .badge {
-  margin-left: auto; background: color-mix(in srgb, var(--brand) 12%, var(--panel-bg)); color: var(--brand);
+  margin-left: auto; background: color-mix(in srgb, var(--item-color) 12%, var(--panel-bg)); color: var(--item-color);
   border-radius: 999px; padding: 1px 8px; font-size: 12px; font-variant-numeric: tabular-nums;
 }
 
