@@ -16,6 +16,8 @@ API：
   POST /api/boc/convert/{job_id}/preview   任务产物 CSV 的解析预览 + 去重比对（不写入）
   POST /api/boc/convert/{job_id}/confirm   任务产物 CSV 写入 SQLite（幂等）
   POST /api/boc/convert/open-dir  调起资源管理器打开转换目录
+  POST /api/total/detect-duplicates        BOC 重复账单扫描（dry-run，返回成对明细与歧义项）
+  POST /api/total/apply-auto-exclude       按 BOC 行 ids 批量写入不计覆盖（counted=0）
   PUT  /api/total/overrides   批量设收支属性（ids / filter 两种 scope，方向约束铁律）
   GET  /api/tags              标签组列表（附已打行数）
   POST /api/tags              新建标签组 · PUT /api/tags/{id} 改名 · DELETE /api/tags/{id}
@@ -37,6 +39,7 @@ from typing import List, Optional, Tuple
 
 from paycheck_workbench import __version__
 from paycheck_workbench import applog
+from paycheck_workbench import auto_exclude
 from paycheck_workbench import convert as convert_jobs
 from paycheck_workbench import db
 from paycheck_workbench import total
@@ -574,6 +577,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._api_import_preview_batch()
             elif parsed.path == "/api/import/confirm":
                 self._api_import_confirm()
+            elif parsed.path == "/api/total/detect-duplicates":
+                self._api_total_detect_duplicates()
+            elif parsed.path == "/api/total/apply-auto-exclude":
+                self._api_total_apply_auto_exclude()
             elif parsed.path == "/api/tags":
                 self._api_tags_create()
             else:
@@ -709,11 +716,18 @@ class Handler(BaseHTTPRequestHandler):
             return
         with self._connect() as conn:
             result = db.import_parse_result(conn, source, parsed_result, file_name)
+            auto = auto_exclude.run_auto_exclude(conn) if auto_exclude.AUTO_EXCLUDE_ENABLED else None
         applog.get().info(
-            "导入写入 %s：%s → 新增 %s / 跳过 %s / 失败 %s",
+            "导入写入 %s：%s → 新增 %s / 跳过 %s / 失败 %s（自动标记不计 %s）",
             source, file_name, result["inserted"], result["skipped"], result["failed"],
+            auto["auto_excluded"] if auto else "off",
         )
-        self._send(200, {"ok": True, "file_name": file_name, **result})
+        self._send(200, {
+            "ok": True,
+            "file_name": file_name,
+            "auto_excluded": auto["auto_excluded"] if auto else 0,
+            **result,
+        })
 
     # ---- BOC PDF 转换 API ----
 
@@ -870,9 +884,11 @@ class Handler(BaseHTTPRequestHandler):
                 inserted += result["inserted"]
                 skipped += result["skipped"]
                 failed += result["failed"]
+            auto = auto_exclude.run_auto_exclude(conn) if auto_exclude.AUTO_EXCLUDE_ENABLED else None
         applog.get().info(
-            "转换产物导入：任务 %s → 新增 %s / 跳过 %s / 失败 %s（%d 个 CSV）",
+            "转换产物导入：任务 %s → 新增 %s / 跳过 %s / 失败 %s（%d 个 CSV，自动标记不计 %s）",
             job_id, inserted, skipped, failed, len(csv_files),
+            auto["auto_excluded"] if auto else "off",
         )
         self._send(200, {
             "ok": True,
@@ -880,6 +896,7 @@ class Handler(BaseHTTPRequestHandler):
             "inserted": inserted,
             "skipped": skipped,
             "failed": failed,
+            "auto_excluded": auto["auto_excluded"] if auto else 0,
         })
 
     def _api_boc_convert_open_dir(self):
@@ -915,6 +932,22 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(length).decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise ApiError("请求体不是有效 JSON") from exc
+
+    def _api_total_detect_duplicates(self):
+        """BOC 重复账单扫描（dry-run，不写入）：返回成对明细与歧义项供预览确认。"""
+        with self._connect() as conn:
+            result = auto_exclude.scan(conn)
+        self._send(200, {"ok": True, **result})
+
+    def _api_total_apply_auto_exclude(self):
+        """按 BOC 行 ids 批量写入不计覆盖（counted=0）。只接受 boc 源行。"""
+        body = self._read_json()
+        ids = body.get("ids") or []
+        if not ids:
+            raise ApiError("ids 不能为空")
+        with self._connect() as conn:
+            updated = auto_exclude.apply_matches(conn, ids)
+        self._send(200, {"ok": True, "updated": updated})
 
     def _api_total_overrides(self):
         """批量设收支属性。方向约束铁律：只改计入/不计，永不反向。
