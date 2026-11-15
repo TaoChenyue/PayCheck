@@ -1,4 +1,4 @@
-"""命令行入口：paycheck（别名 paycheck-workbench）/ python -m paycheck_workbench"""
+"""命令行入口：paycheck / python -m paycheck_workbench"""
 
 from __future__ import annotations
 

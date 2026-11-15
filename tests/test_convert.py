@@ -37,6 +37,9 @@ def _boc_csv(rows):
 def base_url(tmp_path, monkeypatch):
     monkeypatch.setattr(convert_module, "_probe_gpu",
                         lambda: (False, "测试环境：无 GPU"))  # 无 GPU 环境
+    # 本文件用假管线（不触发真实 OCR）：缺 PDF extras 检查按「已安装」处理，
+    # 使转换任务模型测试在默认安装环境下也可运行
+    monkeypatch.setattr(convert_module.deps, "missing_pdf_dependencies", lambda: [])
     monkeypatch.setattr(convert_module, "_gpu_cache", None)  # 每个测试从「未探测」开始
     monkeypatch.setattr(convert_module, "_gpu_reason_cache", None)
     monkeypatch.setattr(convert_module, "_jobs", {})  # 任务注册表按测试隔离

@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from boc_pdf2csv import deps
 from paycheck_workbench import applog
 
 GPU_UNAVAILABLE_HINT = "未检测到可用 GPU：{reason}。PDF 转换仅支持 GPU"
@@ -56,6 +57,11 @@ def gpu_unavailable_reason() -> Optional[str]:
         return _gpu_reason_cache
 
 
+def pdf_deps_status() -> dict:
+    """PDF 可选依赖（extras: pdf）状态：供 /api/gpu-status 与界面安装提示。"""
+    return deps.extras_status()
+
+
 def _probe_gpu() -> Tuple[bool, str]:
     """探测 paddle 是否具备可用的 GPU 推理环境，返回 (可用, 不可用原因)。
 
@@ -64,6 +70,10 @@ def _probe_gpu() -> Tuple[bool, str]:
     GPU 可用 = CUDA 编译 + 设备数 > 0 + cudnn DLL 就位（缺 cudnn 时 GPU 推理
     运行时必失败，auto 模式按不可用处理走 CPU）。
     """
+    missing = deps.missing_pdf_dependencies()
+    if missing:
+        # 未装 PDF extras 时不尝试导入 torch/paddle，直接返回安装提示
+        return False, deps.missing_dependency_message(missing)
     try:
         import torch  # noqa: F401
         import paddle
@@ -345,9 +355,19 @@ def current_active() -> Optional[ConvertJob]:
 
 def run_convert_job(job: ConvertJob, convert_dir, scale: float,
                     timeout_minutes: int, force: bool) -> None:
-    """后台线程执行体：先探测 GPU（无 GPU 时不启动管线、任务直接 failed），
+    """后台线程执行体：先检查 PDF extras 与 GPU（缺失时不启动管线、任务直接 failed），
     惰性导入管线、运行并维护任务状态；关键节点写文件日志。"""
     try:
+        missing = deps.missing_pdf_dependencies()
+        if missing:
+            hint = deps.missing_dependency_message(missing)
+            job.fail_remaining(hint)
+            applog.get().warning(
+                "转换任务 %s 未安装 PDF 可选依赖（extras: pdf）：%s，任务失败",
+                job.id, "、".join(missing),
+            )
+            return
+
         if not gpu_available():
             reason = gpu_unavailable_reason() or "未知原因"
             hint = GPU_UNAVAILABLE_HINT.format(reason=reason)

@@ -11,7 +11,7 @@ API：
   POST /api/import/preview-batch  解析多个文件（multipart），返回逐文件与合并统计（不写入）
   POST /api/boc/convert           multipart 上传 PDF 列表并启动后台转换任务（运行中 409）
   GET  /api/boc/convert/{job_id}  轮询任务进度（不存在时返回 interrupted）
-  GET  /api/gpu-status            GPU 可用性探测（惰性、缓存），转换弹窗打开时前端调用
+  GET  /api/gpu-status            GPU 可用性与 PDF extras 状态探测（惰性、缓存），转换弹窗打开时前端调用
   POST /api/boc/convert/{job_id}/stop      停止转换任务（协作取消，幂等）
   POST /api/boc/convert/{job_id}/preview   任务产物 CSV 的解析预览 + 去重比对（不写入）
   POST /api/boc/convert/{job_id}/confirm   任务产物 CSV 写入 SQLite（幂等）
@@ -432,10 +432,19 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _api_gpu_status(self):
-        """GPU 可用性探测（惰性、缓存）：转换弹窗打开时前端调用，无 GPU 时禁用开始按钮。"""
+        """GPU 可用性探测（惰性、缓存）：转换弹窗打开时前端调用，无 GPU 时禁用开始按钮。
+
+        pdf_deps 同时返回 PDF 可选依赖（extras: pdf）状态：未安装时前端提示安装命令，
+        不再把「缺依赖」笼统显示成 GPU 不可用。
+        """
         available = convert_jobs.gpu_available()
         reason = convert_jobs.gpu_unavailable_reason() or ""
-        self._send(200, {"ok": True, "available": available, "reason": reason})
+        self._send(200, {
+            "ok": True,
+            "available": available,
+            "reason": reason,
+            "pdf_deps": convert_jobs.pdf_deps_status(),
+        })
 
     def _api_options(self, parsed):
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)

@@ -14,6 +14,9 @@ import pytest
 
 import boc_pdf2csv.pipeline as pipeline
 
+# PDF 可选依赖（extras: pdf）未安装时跳过：用例会加载 layout / ocr / pdf_render
+pytest.importorskip("fitz", reason="PDF 可选依赖（extras: pdf）未安装")
+
 
 def _fake_render(pdf_path, scale=3.0, output_dir=None):
     # 两个假页面（内容无关，process_image 被替换为空实现）

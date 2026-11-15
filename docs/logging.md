@@ -16,6 +16,7 @@
   - 转换任务登记：job id、PDF 数、scale / timeout / force；
   - 转换任务开始与结束：status、成功/跳过/失败/停止计数、交易总数；
   - 无 GPU 时任务失败：未检测到可用 GPU 及原因、任务失败；
+  - 缺 PDF 可选依赖（extras: pdf）时任务失败：缺失依赖清单与任务失败（不含账单明细）；
   - 停止请求与已按请求停止；
   - 管线异常：完整 traceback（`exception` 级）；
   - 数据库读写失败。

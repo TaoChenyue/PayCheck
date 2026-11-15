@@ -21,6 +21,11 @@ from pathlib import Path
 
 import pytest
 
+# PDF 可选依赖（extras: pdf）未安装时跳过：真实推理路径需要完整 OCR 栈
+pytest.importorskip("torch", reason="PDF 可选依赖（extras: pdf）未安装")
+pytest.importorskip("paddle", reason="PDF 可选依赖（extras: pdf）未安装")
+pytest.importorskip("paddleocr", reason="PDF 可选依赖（extras: pdf）未安装")
+
 _IMPORT_ORDER_CODE = (
     "from paycheck_workbench.convert import _detect_gpu;"
     " _detect_gpu(); import torch; import paddle; print('ok')"

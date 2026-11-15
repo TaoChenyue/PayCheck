@@ -552,6 +552,32 @@ tr.bf-error td { color: var(--danger); }
 .conv-param input[type="number"] { width: 70px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 13px; }
 #convert-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 #convert-actions .conv-spacer { margin-right: auto; }
+
+/* ---------- 使用帮助弹窗 ---------- */
+#help-mask {
+  position: fixed; inset: 0; background: var(--mask); z-index: 130;
+  display: flex; align-items: center; justify-content: center;
+}
+#help-mask[hidden] { display: none; }
+#help-modal {
+  background: var(--panel-bg); border-radius: 12px; width: min(720px, 94vw); max-height: 88vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+}
+#help-header {
+  display: flex; align-items: center; padding: 16px 20px; border-bottom: 1px solid var(--border);
+  font-size: 16px; font-weight: 600; position: sticky; top: 0; background: var(--panel-bg);
+}
+#help-header .close { margin-left: auto; border: none; background: none; font-size: 20px; cursor: pointer; color: var(--text-2); }
+#help-body { padding: 20px; font-size: 13px; line-height: 1.8; }
+#help-body h3 { font-size: 14px; margin: 18px 0 8px; font-weight: 600; }
+#help-body h3:first-child { margin-top: 0; }
+#help-body ul { padding-left: 20px; }
+#help-body li { margin: 2px 0; }
+#help-body code {
+  background: var(--page-bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 1px 5px; font-size: 12px; white-space: nowrap;
+}
+#help-body .help-note { color: var(--text-2); }
 </style>
 </head>
 <body data-source="total">
@@ -562,6 +588,7 @@ tr.bf-error td { color: var(--danger); }
     <button id="btn-convert" class="btn" hidden>转换 PDF</button>
     <button id="btn-import" class="btn btn-primary">导入账单</button>
     <button id="btn-refresh" class="btn">刷新</button>
+    <button id="btn-help" class="btn" title="使用帮助">❓ 使用帮助</button>
     <button id="btn-theme" class="btn" title="切换浅色/深色主题">🌙</button>
   </div>
 </header>
@@ -715,6 +742,55 @@ tr.bf-error td { color: var(--danger); }
   </div>
 </div>
 
+<div id="help-mask" hidden>
+  <div id="help-modal">
+    <div id="help-header">使用帮助
+      <button class="close" id="btn-help-close">×</button>
+    </div>
+    <div id="help-body">
+      <h3>启动与访问</h3>
+      <ul>
+        <li>启动并自动打开浏览器：<code>uv run paycheck --open</code>；不加 <code>--open</code> 时手动访问 <code>http://127.0.0.1:8765/</code>。</li>
+        <li>常用参数：<code>--db my.db</code> 指定库文件、<code>--port 8766</code> 换端口、<code>--convert-dir ./boc_csv</code> 指定 PDF 转换目录。</li>
+        <li>本地工具：默认只监听 <code>127.0.0.1</code>，数据与日志（<code>paycheck.log</code>）都在库文件同目录，不上传任何数据。</li>
+      </ul>
+
+      <h3>账单来源与导入步骤</h3>
+      <ul>
+        <li>三个数据源：<b>BOC</b>（CSV，可由「转换 PDF」生成）、<b>支付宝</b>（CSV）、<b>微信</b>（XLSX / CSV）。</li>
+        <li>左侧导航进入数据源视图 → 点「导入账单」→ 选择文件（支持多文件批量）→ 查看解析预览与去重比对 → 确认写入。</li>
+        <li>同一文件重复导入会全部命中去重，幂等不产生重复行；数据源视图始终展示原始账单，只读。</li>
+      </ul>
+
+      <h3>总账户与标签</h3>
+      <ul>
+        <li>「总账户」是三源合并视图：收支属性（计入 / 不计）与标签只在这里管理，不改动数据源原始账单。</li>
+        <li>点击属性单元格切换计入 ↔ 不计；不计行整行置灰，不参与汇总。</li>
+        <li>「🏷 标签管理」创建 / 改名 / 删除标签；行内可打标签，左侧筛选区支持按标签筛选。</li>
+        <li>「检测重复」把 BOC 与支付宝 / 微信重复记录的 BOC 行自动标记为不计（可随时改回）。</li>
+      </ul>
+
+      <h3>PDF 转换（需额外安装可选依赖）</h3>
+      <ul>
+        <li>PDF / OCR 依赖是可选 extras：先执行 <code>uv sync --extra pdf</code>，再启动 <code>paycheck</code>；未安装时「转换 PDF」会提示安装命令。</li>
+        <li>转换强制使用 NVIDIA GPU（CUDA 12.6）推理，无可用 GPU 时转换不可用。</li>
+        <li>进入 BOC 数据源 → 顶栏「转换 PDF」→ 选择 PDF 文件或文件夹 → 开始转换；可收起弹窗后台继续，支持中途停止。</li>
+        <li>转换出的 CSV 与 PDF 同名存入转换目录，结果页可「一键导入」BOC 数据源。</li>
+        <li class="help-note">只使用工作台与 CSV / Excel 导入时，默认 <code>uv sync</code> 不会下载这些 PDF 相关依赖。</li>
+      </ul>
+
+      <h3>常见问题</h3>
+      <ul>
+        <li><b>端口被占用</b>：换一个端口启动，如 <code>uv run paycheck --port 8766</code>。</li>
+        <li><b>PDF 转换提示缺少依赖</b>：在项目目录执行 <code>uv sync --extra pdf</code>，然后重启 <code>paycheck</code>。</li>
+        <li><b>同名 CSV 已存在被跳过</b>：在转换弹窗勾选「覆盖同名 CSV」，或先删除转换目录中的同名 CSV。</li>
+        <li><b>导入后看不到数据</b>：确认当前在对应数据源视图、筛选条件未排除；确认导入时解析预览无报错。</li>
+        <li><b>账单位置与日志</b>：SQLite 库文件、转换目录与 <code>paycheck.log</code> 的完整路径见启动时的命令行输出。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
 <script>
 "use strict";
 /* ================= 状态 ================= */
@@ -753,7 +829,7 @@ let convertInterrupted = false; // 服务重启导致任务丢失（打开弹窗
 let convertResultSeen = false;  // 结果视图已展示过；未看过的结束态任务在关闭弹窗后保留，重开直达结果视图
 let convertStopRequested = false; // 已发起停止请求（进度视图按钮置灰显示「正在停止…」）
 let convertParams = { scale: "3.0", timeout: 60, force: false }; // 高级选项输入
-let convertGpu = { state: "loading", reason: "" }; // 转换弹窗 GPU 探测结果：loading / available / unavailable
+let convertGpu = { state: "loading", reason: "" }; // 转换弹窗探测结果：loading / available / unavailable / missing_deps
 
 const TOTAL = "total";
 const TAB_ORDER = [TOTAL, "boc", "alipay", "wechat"];
@@ -2288,27 +2364,38 @@ async function refreshConvertGpu() {
   try {
     const res = await api("/api/gpu-status");
     if (!res.ok) { convertGpu = { state: "available", reason: "" }; return; }  // 探测失败不阻断（任务层仍有 failed 兜底）
-    convertGpu = res.available
-      ? { state: "available", reason: "" }
-      : { state: "unavailable", reason: res.reason || "未知原因" };
+    if (res.pdf_deps && res.pdf_deps.available === false) {
+      // 未安装 PDF extras：优先提示安装命令，不笼统显示成 GPU 不可用
+      convertGpu = { state: "missing_deps", reason: res.pdf_deps.install || "uv sync --extra pdf" };
+    } else if (res.available) {
+      convertGpu = { state: "available", reason: "" };
+    } else {
+      convertGpu = { state: "unavailable", reason: res.reason || "未知原因" };
+    }
   } catch (e) {
     convertGpu = { state: "available", reason: "" };  // 网络异常不阻断
   }
   renderConvertGpuWarn();
 }
+function convertGpuWarnText() {
+  if (convertGpu.state === "loading") return "正在检测 GPU…";
+  if (convertGpu.state === "missing_deps") {
+    return `PDF 转换需要额外安装可选依赖（extras: pdf）：在项目目录运行 ${convertGpu.reason} 后重启 paycheck，再打开本弹窗`;
+  }
+  if (convertGpu.state === "unavailable") return `未检测到可用 GPU（${convertGpu.reason}），PDF 转换不可用`;
+  return "";
+}
 function convertGpuWarnHtml() {
   // 弹窗内联警示（renderConvertSelect 每次重绘时随 convertGpu 状态重建）
-  if (convertGpu.state === "loading") return `<div class="modal-warn" id="convert-gpu-warn">正在检测 GPU…</div>`;
-  if (convertGpu.state === "unavailable") return `<div class="modal-warn" id="convert-gpu-warn">未检测到可用 GPU（${esc(convertGpu.reason)}），PDF 转换不可用</div>`;
-  return "";
+  const text = convertGpuWarnText();
+  return text ? `<div class="modal-warn" id="convert-gpu-warn">${esc(text)}</div>` : "";
 }
 function renderConvertGpuWarn() {
   // GPU 探测完成后的 DOM 补丁（不重绘弹窗）：警示文案 + 开始按钮禁用联动
   const startBtn = $("#btn-convert-start");
   if (startBtn) startBtn.disabled = !convertSelected.length || convertGpu.state !== "available";
   const el = $("#convert-gpu-warn");
-  const text = convertGpu.state === "loading" ? "正在检测 GPU…"
-    : (convertGpu.state === "unavailable" ? `未检测到可用 GPU（${convertGpu.reason}），PDF 转换不可用` : "");
+  const text = convertGpuWarnText();
   if (text) {
     if (el) el.textContent = text;
     else {
@@ -2761,6 +2848,14 @@ try {
 } catch (e) { /* 老环境无 addEventListener 支持：忽略 */ }
 applyTheme(themeNow());  // 与防闪白脚本设置的 data-theme 同步按钮图标
 
+/* ================= 使用帮助（顶栏入口，纯静态内容、离线可用） ================= */
+function openHelpModal() {
+  $("#help-mask").hidden = false;
+}
+function closeHelpModal() {
+  $("#help-mask").hidden = true;
+}
+
 /* ================= 事件绑定 ================= */
 $("#btn-import").addEventListener("click", openModal);
 $("#btn-import-empty").addEventListener("click", () => {
@@ -2772,6 +2867,9 @@ $("#filter-toggle").addEventListener("click", () => {
   applyFilterPanelOpen();
 });
 $("#btn-refresh").addEventListener("click", refreshAll);
+$("#btn-help").addEventListener("click", openHelpModal);
+$("#btn-help-close").addEventListener("click", closeHelpModal);
+$("#help-mask").addEventListener("click", (e) => { if (e.target.id === "help-mask") closeHelpModal(); });
 $("#btn-modal-close").addEventListener("click", closeModal);
 $("#modal-mask").addEventListener("click", (e) => { if (e.target.id === "modal-mask") closeModal(); });
 $("#btn-convert").addEventListener("click", openConvertModal);

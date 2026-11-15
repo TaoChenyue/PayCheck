@@ -13,12 +13,22 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from tqdm import tqdm
-
-from boc_pdf2csv.layout import group_items_to_rows, rows_to_transactions
-from boc_pdf2csv.ocr_engine import process_image, warmup_engine
-from boc_pdf2csv.pdf_render import pdf_to_images
+from boc_pdf2csv import deps
 from boc_pdf2csv.csv_writer import write_csv
+
+try:  # PDF 可选依赖（extras: pdf）：未安装时本模块仍可导入，调用入口给友好提示
+    from tqdm import tqdm
+
+    from boc_pdf2csv.layout import group_items_to_rows, rows_to_transactions
+    from boc_pdf2csv.ocr_engine import process_image, warmup_engine
+    from boc_pdf2csv.pdf_render import pdf_to_images
+except ImportError:  # pragma: no cover - 缺 extras 的环境
+    tqdm = None
+    group_items_to_rows = None
+    rows_to_transactions = None
+    process_image = None
+    warmup_engine = None
+    pdf_to_images = None
 
 log = logging.getLogger("boc_pdf2csv.pipeline")
 
@@ -60,7 +70,9 @@ def _pdf_to_transactions(
 
     Raises:
         ConvertCancelled: 协作取消（should_cancel 返回 True）
+        MissingPdfDependency: PDF 可选依赖（extras: pdf）未安装
     """
+    deps.ensure_pdf_deps()
     if not os.path.exists(pdf_path):
         log.error("文件不存在: %s", pdf_path)
         return []
@@ -244,7 +256,9 @@ def process_folder(
         FileNotFoundError: 未找到 PDF 文件
         RuntimeError: 全部 PDF 处理失败
         ConvertCancelled: 协作取消（should_cancel 返回 True）
+        MissingPdfDependency: PDF 可选依赖（extras: pdf）未安装
     """
+    deps.ensure_pdf_deps()
     if not os.path.isdir(folder_path):
         raise NotADirectoryError(f"输入路径不存在或非目录: {folder_path}")
 
