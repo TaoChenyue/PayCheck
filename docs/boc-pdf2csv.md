@@ -38,6 +38,7 @@ uv run python -m boc_pdf2csv ./statements/
 - 自动剔除重复交易（按 日期 + 金额 + 对方账户名），自动按日期 + 时间排序
 - 输出 UTF-8 BOM 编码的 13 列标准 CSV
 - 强制使用 GPU 推理；未检测到 GPU 时直接报错退出（退出码 3，不会静默回退）
+- PDF/OCR 依赖为可选 extras（`pdf`）：首次使用先执行 `uv sync --extra pdf`；未安装时命令给出安装提示并以退出码 5 退出（不会裸抛 ImportError）
 - 每次运行会在输入目录写入运行日志 `boc-pdf2csv.log`（见 [logging.md](logging.md)）
 
 各选项的详细语义（`--scale` / `--timeout` / `--force` / `--verbose`）见 [pdf-options.md](pdf-options.md)。
@@ -93,3 +94,4 @@ result = process_folder("./statements/", force=True)
 | 2 | 未找到 PDF 文件 |
 | 3 | 处理失败（全部 PDF 处理出错，如无可用 GPU） |
 | 4 | 未提取到任何交易记录 |
+| 5 | 缺少 PDF 可选依赖（未安装 extras: pdf，按提示 `uv sync --extra pdf` 安装） |

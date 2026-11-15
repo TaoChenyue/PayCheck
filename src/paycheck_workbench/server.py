@@ -432,10 +432,19 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _api_gpu_status(self):
-        """GPU 可用性探测（惰性、缓存）：转换弹窗打开时前端调用，无 GPU 时禁用开始按钮。"""
+        """GPU 可用性探测（惰性、缓存）：转换弹窗打开时前端调用，无 GPU 时禁用开始按钮。
+
+        pdf_deps 同时返回 PDF 可选依赖（extras: pdf）状态：未安装时前端提示安装命令，
+        不再把「缺依赖」笼统显示成 GPU 不可用。
+        """
         available = convert_jobs.gpu_available()
         reason = convert_jobs.gpu_unavailable_reason() or ""
-        self._send(200, {"ok": True, "available": available, "reason": reason})
+        self._send(200, {
+            "ok": True,
+            "available": available,
+            "reason": reason,
+            "pdf_deps": convert_jobs.pdf_deps_status(),
+        })
 
     def _api_options(self, parsed):
         query = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)

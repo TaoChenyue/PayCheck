@@ -9,6 +9,7 @@
     boc-pdf2csv --help                           # 帮助信息
 
 强制使用 GPU 推理：无 GPU 时处理失败并报错退出（退出码 3）。
+PDF/OCR 依赖为可选 extras（pdf）：未安装时提示 `uv sync --extra pdf` 并退出（退出码 5）。
 
 文件日志: 写入 <输入目录>/boc-pdf2csv.log（1MB×3 轮转，--verbose 时升级 DEBUG），
 只记文件名/条数/耗时等元数据，不记交易明细；控制台输出行为不变。
@@ -21,6 +22,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 from boc_pdf2csv import __version__
+from boc_pdf2csv.deps import MissingPdfDependency
 from boc_pdf2csv.pipeline import process_folder
 
 _LOG_MAX_BYTES = 1024 * 1024
@@ -123,6 +125,11 @@ def main() -> int:
     except FileNotFoundError as e:
         print(f"错误: {e}", file=sys.stderr)
         return 2
+
+    except MissingPdfDependency as e:
+        # 可选依赖未安装：给出安装命令，退出码 5（区别于处理失败 3）
+        print(f"错误: {e}", file=sys.stderr)
+        return 5
 
     except RuntimeError as e:
         print(f"错误: {e}", file=sys.stderr)
